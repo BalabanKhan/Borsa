@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.log
+*.json
+.env
+sim_results.csv
+simulation_results.csv
+sim_results_log.txt
+scratch/

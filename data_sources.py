@@ -1,0 +1,789 @@
+"""
+data_sources.py — Veri Katmanı
+Tüm API bağlantıları, veri çekme fonksiyonları ve cache yönetimi.
+"""
+import ccxt
+import pandas as pd
+import pandas_ta as ta
+import yfinance as yf
+import time as _time
+import logging
+import gc
+import math
+import threading
+import warnings
+from datetime import datetime, time as dt_time, timezone
+from zoneinfo import ZoneInfo
+from typing import NamedTuple, Any, Optional
+
+from config import IS_USA_SERVER, CACHE_TTL_SECONDS, OHLCV_LIMIT, OI_CRASH_PCT, API_SLEEP_BIST
+from data_guard import guard_dataframe
+
+warnings.filterwarnings('ignore')
+
+# ════════════════════════════════════════
+# Exchange Instances
+# ════════════════════════════════════════
+exchange = ccxt.binance({'enableRateLimit': True})
+exchange_futures = ccxt.binance({
+    'enableRateLimit': True,
+    'options': {'defaultType': 'future'}
+})
+exchange_fallback = ccxt.kraken({'enableRateLimit': True})
+
+# ════════════════════════════════════════
+# Unified Cache
+# ════════════════════════════════════════
+class _CacheEntry(NamedTuple):
+    timestamp: float
+    value: Any
+
+_cache: dict[str, _CacheEntry] = {}
+_cache_lock = threading.Lock()  # Thread-Safety: _cache erişimini korur
+
+def _get_cached(key: str, ttl: int = CACHE_TTL_SECONDS) -> Optional[Any]:
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (_time.time() - entry.timestamp) < ttl:
+            return entry.value
+        return None
+
+def _set_cached(key: str, value: Any) -> None:
+    with _cache_lock:
+        _cache[key] = _CacheEntry(_time.time(), value)
+
+def purge_expired_cache():
+    """Süresi dolmuş cache entry'lerini siler → E2-micro RAM koruma."""
+    with _cache_lock:
+        now = _time.time()
+        expired = [k for k, v in _cache.items() if now - v.timestamp > CACHE_TTL_SECONDS * 3]
+        for k in expired:
+            del _cache[k]
+        if expired:
+            logging.debug(f"[purge_expired_cache] {len(expired)} eski cache entry silindi.")
+
+
+# ════════════════════════════════════════
+# Cycle Cache (Döngü Başına Tek Çekim)
+# ════════════════════════════════════════
+_ohlcv_cycle_cache: dict[str, tuple] = {}
+_cycle_cache_lock = threading.Lock()  # Thread-Safety: cycle cache erişimini korur
+
+def get_crypto_data_cached(symbol):
+    """OHLCV'yi döngü başına BİR KEZ çeker. Ayı Avcısı duplikasyonunu önler (~96 API çağrısı tasarruf)."""
+    with _cycle_cache_lock:
+        if symbol in _ohlcv_cycle_cache:
+            return _ohlcv_cycle_cache[symbol]
+    result = get_crypto_data(symbol)
+    with _cycle_cache_lock:
+        _ohlcv_cycle_cache[symbol] = result
+    return result
+
+def clear_cycle_cache():
+    """Her tarama döngüsü başında çağrılır. Eski veriyi temizler."""
+    with _cycle_cache_lock:
+        _ohlcv_cycle_cache.clear()
+
+
+# ════════════════════════════════════════
+# Yardımcı Fonksiyonlar
+# ════════════════════════════════════════
+def clean_yf_df(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel(1)
+    df = df.dropna()
+    df.columns = [c.lower() for c in df.columns]
+    return df
+
+def is_weekend_fakeout_time():
+    """Cuma 23:00'dan Pazar 23:00'a kadar Hafta Sonu Fakeout süresi."""
+    now = datetime.now(ZoneInfo("Europe/Istanbul"))
+    if now.weekday() == 4 and now.hour >= 23:
+        return True
+    if now.weekday() == 5:
+        return True
+    if now.weekday() == 6 and now.hour < 23:
+        return True
+    return False
+
+def is_bist_open():
+    now = datetime.now(ZoneInfo("Europe/Istanbul"))
+    if now.weekday() > 4: return False
+    return dt_time(9, 55) <= now.time() <= dt_time(18, 10)
+
+def check_xu100_wind():
+    try:
+        df = yf.download("XU100.IS", period="5d", interval="1d", progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
+        if len(df) >= 2:
+            prev_close = df['Close'].iloc[-2]
+            curr_close = df['Close'].iloc[-1]
+            pct_change = ((curr_close - prev_close) / prev_close) * 100
+            return pct_change < -1.0
+    except Exception as e:
+        logging.warning(f"[check_xu100_wind] {e}")
+    return False
+
+def _is_macro_news_hour():
+    """TSİ 15:00-16:30 arası → True (Emtia taraması durdurulur). Hafta içi."""
+    now = datetime.now(ZoneInfo("Europe/Istanbul"))
+    if now.weekday() >= 5:
+        return False
+    if now.hour == 15 or (now.hour == 16 and now.minute <= 30):
+        return True
+    return False
+
+
+# ════════════════════════════════════════
+# Kripto Yardımcıları
+# ════════════════════════════════════════
+def get_funding_rate(symbol):
+    """Anlık Funding Rate'i çeker (Yüzde olarak döner, örn: 0.01)"""
+    if IS_USA_SERVER:
+        return 0.0
+    try:
+        funding = exchange_futures.fetch_funding_rate(symbol)
+        if funding and 'fundingRate' in funding:
+            return float(funding['fundingRate']) * 100
+    except Exception as e:
+        logging.warning(f"[get_funding_rate] {symbol}: {e}")
+    return 0.0
+
+def fetch_crypto_oi_crash(symbol):
+    """Son 24 saat içinde Open Interest (OI) verisinde %15 veya daha büyük bir çöküş var mı?"""
+    if IS_USA_SERVER:
+        return False
+    try:
+        oi_hist = exchange_futures.fetch_open_interest_history(symbol, timeframe='1h', limit=24)
+        if len(oi_hist) > 0:
+            key = 'openInterestValue' if 'openInterestValue' in oi_hist[-1] else 'openInterestAmount'
+            if key in oi_hist[-1] and oi_hist[-1][key] is not None:
+                current_oi = float(oi_hist[-1][key])
+                max_oi = max([float(x[key]) for x in oi_hist if x[key] is not None])
+                if max_oi > 0:
+                    drop_pct = ((max_oi - current_oi) / max_oi) * 100
+                    if drop_pct >= OI_CRASH_PCT:
+                        return True
+    except Exception as e:
+        logging.warning(f"[fetch_crypto_oi_crash] {symbol}: {e}")
+    return False
+
+def get_btc_dominance_trend():
+    """BTCDOM/USDT grafiğinden BTC Dominans Trendini hesaplar"""
+    if IS_USA_SERVER:
+        return "UNKNOWN"
+    try:
+        ohlcv = exchange_futures.fetch_ohlcv("BTCDOM/USDT", '1d', limit=60)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df.ta.ema(length=20, append=True)
+        df.ta.ema(length=50, append=True)
+        if len(df) >= 50:
+            last_ema20 = df['EMA_20'].iloc[-1]
+            last_ema50 = df['EMA_50'].iloc[-1]
+            if last_ema20 > last_ema50:
+                return "UP"
+            else:
+                return "DOWN"
+    except Exception as e:
+        logging.warning(f"[get_btc_dominance_trend] {e}")
+    return "UNKNOWN"
+
+def check_token_unlocks(symbol):
+    """Token kilit açılım takvimini kontrol eder. STUB: API altyapısı kurulana kadar False döner."""
+    try:
+        base_coin = symbol.split('/')[0].lower()
+        logging.debug(f"[check_token_unlocks] {symbol}: STUB - API bağlantısı yok, False döndürülüyor.")
+        return False
+    except Exception as e:
+        logging.warning(f"[check_token_unlocks] {symbol}: {e}")
+        return False
+
+
+# ════════════════════════════════════════
+# Veri Çekme Fonksiyonları
+# ════════════════════════════════════════
+def get_bist_data(symbol):
+    try:
+        df_1d = yf.download(symbol, period="6mo", interval="1d", progress=False)
+        df_1d = clean_yf_df(df_1d)
+
+        df_1h = yf.download(symbol, period="1mo", interval="1h", progress=False)
+        df_1h = clean_yf_df(df_1h)
+
+        if df_1h.empty or df_1d.empty: return None, None, None
+
+        df_4h = df_1h.resample('4h').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna()
+
+        # DataGuard: DG-01 + DG-02 + DG-04 kontrolleri
+        df_1d = guard_dataframe(df_1d, symbol, "1d")
+        df_4h = guard_dataframe(df_4h, symbol, "4h")
+        if df_1d is None or df_4h is None:
+            return None, None, None
+        df_1h = guard_dataframe(df_1h, symbol, "1h")
+
+        return df_1d, df_4h, df_1h
+    except Exception as e:
+        logging.warning(f"[get_bist_data] {symbol}: {e}")
+        return None, None, None
+
+def get_bist_data_batch(symbols, batch_size=25):
+    """
+    Toplu yfinance indirme ile BIST verisi çeker.
+    200 ayrı HTTP çağrısı → ~8 toplu çağrıya düşürür.
+    E2-micro RAM koruması için küçük batch'ler (25 ticker) kullanır.
+    """
+    results = {}
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        tickers_str = " ".join(batch)
+        logging.info(f"[get_bist_data_batch] Batch {i//batch_size + 1}: {len(batch)} ticker indiriliyor...")
+
+        try:
+            raw_1d = yf.download(tickers_str, period="6mo", interval="1d",
+                                  group_by="ticker", threads=True, progress=False)
+            raw_1h = yf.download(tickers_str, period="1mo", interval="1h",
+                                  group_by="ticker", threads=True, progress=False)
+        except Exception as e:
+            logging.warning(f"[get_bist_data_batch] Batch download hata: {e}, tekli fallback...")
+            for sym in batch:
+                results[sym] = get_bist_data(sym)
+                _time.sleep(API_SLEEP_BIST)
+            continue
+
+        for sym in batch:
+            try:
+                if len(batch) == 1:
+                    # Tek ticker → MultiIndex yok
+                    df_1d = raw_1d.copy()
+                    df_1h = raw_1h.copy()
+                else:
+                    # MultiIndex → ticker bazında ayır
+                    level_values = raw_1d.columns.get_level_values(0).unique()
+                    if sym not in level_values:
+                        results[sym] = (None, None, None)
+                        continue
+                    df_1d = raw_1d[sym].copy()
+                    df_1h = raw_1h[sym].copy() if sym in raw_1h.columns.get_level_values(0).unique() else pd.DataFrame()
+
+                df_1d = clean_yf_df(df_1d) if not df_1d.empty else pd.DataFrame()
+                df_1h = clean_yf_df(df_1h) if not df_1h.empty else pd.DataFrame()
+
+                if df_1d.empty or df_1h.empty:
+                    results[sym] = (None, None, None)
+                    continue
+
+                df_4h = df_1h.resample('4h').agg({
+                    'open': 'first', 'high': 'max', 'low': 'min',
+                    'close': 'last', 'volume': 'sum'
+                }).dropna()
+
+                # K-02: DataGuard — batch BIST verisini de koru
+                df_1d = guard_dataframe(df_1d, sym, '1d')
+                df_4h = guard_dataframe(df_4h, sym, '4h')
+                if df_1d is None:
+                    results[sym] = (None, None, None)
+                    continue
+
+                results[sym] = (df_1d, df_4h, df_1h)
+            except Exception as e:
+                logging.warning(f"[get_bist_data_batch] {sym} parse: {e}")
+                results[sym] = (None, None, None)
+
+        # Batch arası RAM temizliği (E2-micro koruma)
+        del raw_1d, raw_1h
+        gc.collect()
+        _time.sleep(0.5)  # Batch'ler arası Yahoo throttle koruması
+
+    return results
+
+def get_bist_15m_batch(symbols, batch_size=25):
+    """ORB için 15dk batch download."""
+    results = {}
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        tickers_str = " ".join(batch)
+        try:
+            raw = yf.download(tickers_str, period="5d", interval="15m",
+                              group_by="ticker", threads=True, progress=False)
+            for sym in batch:
+                try:
+                    if len(batch) == 1:
+                        df = raw.copy()
+                    else:
+                        level_values = raw.columns.get_level_values(0).unique()
+                        if sym not in level_values:
+                            results[sym] = None
+                            continue
+                        df = raw[sym].copy()
+                    df = clean_yf_df(df) if not df.empty else None
+                    # K-02: DataGuard — 15m batch verisini de koru
+                    if df is not None:
+                        df = guard_dataframe(df, sym, '15m')
+                    results[sym] = df
+                except Exception as e:
+                    logging.warning(f"[get_bist_15m_batch] {sym}: {e}")
+                    results[sym] = None
+        except Exception as e:
+            logging.warning(f"[get_bist_15m_batch] Batch hata: {e}")
+            for sym in batch:
+                results[sym] = None
+
+        del raw
+        gc.collect()
+        _time.sleep(0.3)
+
+    return results
+
+def get_crypto_data(symbol):
+    limit = OHLCV_LIMIT
+    if not IS_USA_SERVER:
+        try:
+            ohlcv_1d = exchange.fetch_ohlcv(symbol, '1d', limit=limit)
+            df_1d = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+            ohlcv_4h = exchange.fetch_ohlcv(symbol, '4h', limit=limit)
+            df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+            for df in [df_1d, df_4h]:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df.set_index('timestamp', inplace=True)
+
+            # DataGuard: DG-01 + DG-02 + DG-04
+            df_1d = guard_dataframe(df_1d, symbol, "1d")
+            df_4h = guard_dataframe(df_4h, symbol, "4h")
+            if df_1d is None or df_4h is None:
+                logging.warning(f"[get_crypto_data] {symbol}: DataGuard reddetti, yedeklere geçiliyor")
+            else:
+                return df_1d, df_4h
+        except Exception as e:
+            logging.info(f"[get_crypto_data] Binance hatası, yedeklere geçiliyor: {e}")
+
+    # Kraken ve yfinance yedekleri
+    try:
+        try:
+            ohlcv_1d = exchange_fallback.fetch_ohlcv(symbol, '1d', limit=limit)
+            ohlcv_4h = exchange_fallback.fetch_ohlcv(symbol, '4h', limit=limit)
+        except Exception:
+            usd_sym = symbol.replace("/USDT", "/USD")
+            ohlcv_1d = exchange_fallback.fetch_ohlcv(usd_sym, '1d', limit=limit)
+            ohlcv_4h = exchange_fallback.fetch_ohlcv(usd_sym, '4h', limit=limit)
+
+        df_1d = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+        for df in [df_1d, df_4h]:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+
+        # K-02: DataGuard — Kraken yedek verisi de korunsun
+        df_1d = guard_dataframe(df_1d, symbol, '1d')
+        df_4h = guard_dataframe(df_4h, symbol, '4h')
+        if df_1d is None or df_4h is None:
+            logging.warning(f'[get_crypto_data] {symbol}: Kraken verisi DataGuard reddetti')
+        else:
+            return df_1d, df_4h
+    except Exception as ekr:
+        try:
+            yf_ticker = symbol.replace("/USDT", "-USD")
+            df_1d = yf.download(yf_ticker, period="6mo", interval="1d", progress=False)
+            df_1d = clean_yf_df(df_1d)
+
+            df_1h = yf.download(yf_ticker, period="1mo", interval="1h", progress=False)
+            df_1h = clean_yf_df(df_1h)
+
+            if df_1h.empty or df_1d.empty: return None, None
+
+            df_4h = df_1h.resample('4h').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna()
+
+            # K-02: DataGuard — yfinance yedek verisi de korunsun
+            df_1d = guard_dataframe(df_1d, symbol, '1d')
+            df_4h = guard_dataframe(df_4h, symbol, '4h')
+            if df_1d is None or df_4h is None:
+                logging.warning(f'[get_crypto_data] {symbol}: yfinance verisi DataGuard reddetti')
+                return None, None
+
+            return df_1d, df_4h
+        except Exception as eyf:
+            logging.warning(f"[get_crypto_data] {symbol} hiçbir kaynaktan çekilemedi: {eyf}")
+            return None, None
+
+def get_emtia_data(symbol):
+    """Emtia vadeli kontrat için 1D ve 4H verisini yfinance üzerinden çeker."""
+    try:
+        df_1d = yf.download(symbol, period="6mo", interval="1d", progress=False)
+        df_1d = clean_yf_df(df_1d)
+        if df_1d.empty:
+            return None, None
+        df_1h_raw = yf.download(symbol, period="2mo", interval="1h", progress=False)
+        df_1h_raw = clean_yf_df(df_1h_raw)
+        df_4h = None
+        if not df_1h_raw.empty:
+            df_4h = df_1h_raw.resample('4h').agg({
+                'open': 'first', 'high': 'max', 'low': 'min',
+                'close': 'last', 'volume': 'sum'
+            }).dropna()
+
+        # DataGuard: DG-01 + DG-02 + DG-04
+        df_1d = guard_dataframe(df_1d, symbol, "1d")
+        if df_1d is None:
+            return None, None
+        if df_4h is not None:
+            df_4h = guard_dataframe(df_4h, symbol, "4h")
+
+        return df_1d, df_4h
+    except Exception as e:
+        logging.warning(f"[get_emtia_data] {symbol}: {e}")
+        return None, None
+
+def get_bist_15m_data(symbol):
+    """BIST hissesi için 15 dakikalık veri çeker (ORB stratejisi için)."""
+    try:
+        df = yf.download(symbol, period="5d", interval="15m", progress=False)
+        df = clean_yf_df(df)
+        if df.empty:
+            return None
+        # K-02/FIX4: DataGuard — 15m verisi de korunsun
+        df = guard_dataframe(df, symbol, '15m')
+        return df
+    except Exception as e:
+        logging.warning(f"[get_bist_15m_data] {symbol}: {e}")
+        return None
+
+
+# ════════════════════════════════════════
+# Cache'li BTC & Endeks Fonksiyonları
+# ════════════════════════════════════════
+def get_btc_status():
+    """BTC > EMA20 Kontrolü (Zorunlu BTC İzni Ana Şalteri)"""
+    cached = _get_cached('btc_status')
+    if cached is not None:
+        return cached
+
+    res = False
+    df = None
+    if not IS_USA_SERVER:
+        try:
+            ohlcv_1d = exchange.fetch_ohlcv("BTC/USDT", '1d', limit=50)
+            df = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        except Exception as e:
+            logging.info(f"[get_btc_status] Binance hatası, yedeklere geçiliyor: {e}")
+
+    if df is None:
+        try:
+            ohlcv_1d = exchange_fallback.fetch_ohlcv("BTC/USDT", '1d', limit=50)
+            df = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        except Exception as ekr:
+            try:
+                df = yf.download("BTC-USD", period="3mo", interval="1d", progress=False)
+                df = clean_yf_df(df)
+            except Exception as eyf:
+                logging.warning(f"[get_btc_status] Veri çekilemedi: {eyf}")
+                _set_cached('btc_status', False)
+                return False
+
+    try:
+        df.ta.ema(length=20, append=True)
+        ema_col = 'ema_20' if 'ema_20' in df.columns else 'EMA_20'
+        close_col = 'close' if 'close' in df.columns else 'Close'
+        if len(df) >= 20:
+            last_close = df[close_col].iloc[-1]
+            last_ema = df[ema_col].iloc[-1]
+            if not pd.isna(last_ema) and last_close > last_ema:
+                res = True
+    except Exception as e:
+        logging.warning(f"[get_btc_status] analiz hatası: {e}")
+
+    _set_cached('btc_status', res)
+    return res
+
+def check_btc_not_pumping():
+    """BTC aşırı yükselişte (pumping) ise altcoin şortlamayı engeller. (RSI > 70 veya devasa mum)"""
+    cached = _get_cached('btc_pumping')
+    if cached is not None:
+        return cached
+
+    res = True
+    df = None
+    if not IS_USA_SERVER:
+        try:
+            ohlcv = exchange.fetch_ohlcv("BTC/USDT", '4h', limit=50)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        except Exception as e:
+            logging.info(f"[check_btc_not_pumping] Binance hatası, yedeklere geçiliyor: {e}")
+
+    if df is None:
+        try:
+            ohlcv = exchange_fallback.fetch_ohlcv("BTC/USDT", '4h', limit=50)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        except Exception as ekr:
+            try:
+                df_1h = yf.download("BTC-USD", period="1mo", interval="1h", progress=False)
+                df_1h = clean_yf_df(df_1h)
+                df = df_1h.resample('4h').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna()
+            except Exception as eyf:
+                logging.warning(f"[check_btc_not_pumping] Veri çekilemedi: {eyf}")
+                _set_cached('btc_pumping', True)
+                return True
+
+    try:
+        df.ta.rsi(length=14, append=True)
+        rsi_col = 'rsi_14' if 'rsi_14' in df.columns else 'RSI_14'
+        close_col = 'close' if 'close' in df.columns else 'Close'
+        open_col = 'open' if 'open' in df.columns else 'Open'
+        if len(df) >= 14:
+            last_rsi = df[rsi_col].iloc[-1]
+            last_close = df[close_col].iloc[-1]
+            last_open = df[open_col].iloc[-1]
+            pct_change = ((last_close - last_open) / last_open) * 100
+
+            if last_rsi > 70 or pct_change > 4.0:
+                res = False
+    except Exception as e:
+        logging.warning(f"[check_btc_not_pumping] analiz hatası: {e}")
+
+    _set_cached('btc_pumping', res)
+    return res
+
+def _get_btc_htf_bias():
+    """BTC'nin 1 Günlük HTF Bias'ını kontrol et (altcoin taraması için 1 kez çağrılır)."""
+    cached = _get_cached('btc_htf_bias')
+    if cached is not None:
+        return cached
+
+    # Lazy import to avoid circular dependency
+    from indicators import sniper_get_htf_bias
+
+    res = 0
+    df = None
+    if not IS_USA_SERVER:
+        try:
+            ohlcv = exchange.fetch_ohlcv("BTC/USDT", '1d', limit=60)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        except Exception as e:
+            logging.info(f"[_get_btc_htf_bias] Binance hatası, yedeklere geçiliyor: {e}")
+
+    if df is None:
+        try:
+            ohlcv = exchange_fallback.fetch_ohlcv("BTC/USDT", '1d', limit=60)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        except Exception as ekr:
+            try:
+                df = yf.download("BTC-USD", period="3mo", interval="1d", progress=False)
+                df = clean_yf_df(df)
+            except Exception as eyf:
+                logging.warning(f"[_get_btc_htf_bias] Veri çekilemedi: {eyf}")
+                _set_cached('btc_htf_bias', 0)
+                return 0
+
+    try:
+        res = sniper_get_htf_bias(df)
+    except Exception as e:
+        logging.warning(f"[_get_btc_htf_bias] analiz hatası: {e}")
+
+    _set_cached('btc_htf_bias', res)
+    return res
+
+def _check_dxy_shield():
+    """DXY (Dolar Endeksi) yükseliş trendinde mi? 5dk cache ile kontrol eder."""
+    cached = _get_cached('dxy_shield')
+    if cached is not None:
+        return cached
+    try:
+        df = yf.download("DX-Y.NYB", period="6mo", interval="1d", progress=False)
+        df = clean_yf_df(df)
+        if df.empty:
+            return False
+        df.ta.ema(length=50, append=True)
+        last = df.iloc[-1]
+        ema50 = last.get('EMA_50')
+        if ema50 is None or pd.isna(ema50):
+            return False
+        dxy_bullish = bool(last['close'] > ema50)
+        _set_cached('dxy_shield', dxy_bullish)
+        return dxy_bullish
+    except Exception as e:
+        logging.warning(f"[_check_dxy_shield] {e}")
+        return False
+
+def _is_btc_bullish_for_shorts():
+    """BTC 4H'da EMA20 üstünde + hacimli mi? True ise TÜM altcoin SHORT'lar engellenir."""
+    cached = _get_cached('btc_short_bias')
+    if cached is not None:
+        return cached
+
+    result = False
+    try:
+        df = None
+        if not IS_USA_SERVER:
+            try:
+                ohlcv = exchange.fetch_ohlcv("BTC/USDT", '4h', limit=50)
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            except Exception as e_bin:
+                logging.warning(f"[_is_btc_bullish_for_shorts] Binance hatası: {e_bin}")
+                ohlcv = exchange_fallback.fetch_ohlcv("BTC/USDT", '4h', limit=50)
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        else:
+            try:
+                ohlcv = exchange_fallback.fetch_ohlcv("BTC/USDT", '4h', limit=50)
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            except Exception as e_kr:
+                logging.warning(f"[_is_btc_bullish_for_shorts] Kraken hatası: {e_kr}")
+                df_1h = yf.download("BTC-USD", period="1mo", interval="1h", progress=False)
+                df_1h = clean_yf_df(df_1h)
+                df = df_1h.resample('4h').agg({
+                    'open': 'first', 'high': 'max', 'low': 'min',
+                    'close': 'last', 'volume': 'sum'
+                }).dropna()
+
+        if len(df) >= 25:
+            df.ta.ema(length=20, append=True)
+            df['vol_sma_20'] = df['volume'].rolling(20).mean()
+            last = df.iloc[-1]
+            ema20 = last.get('EMA_20')
+            vol_sma = last.get('vol_sma_20')
+            if ema20 is not None and not pd.isna(ema20):
+                price_above_ema = float(last['close']) > float(ema20)
+                volume_strong = True
+                if vol_sma is not None and not pd.isna(vol_sma):
+                    volume_strong = float(last['volume']) > float(vol_sma) * 0.8
+                result = price_above_ema and volume_strong
+    except Exception as e:
+        logging.warning(f"[_is_btc_bullish_for_shorts] {e}")
+
+    _set_cached('btc_short_bias', result)
+    return result
+
+def _get_xu100_daily_data():
+    """XU100 endeksinin günlük verisini çeker (RS stratejisi için, 5dk cache)."""
+    cached = _get_cached('xu100_daily')
+    if cached is not None:
+        return cached
+    try:
+        df = yf.download("XU100.IS", period="6mo", interval="1d", progress=False)
+        df = clean_yf_df(df)
+        if not df.empty:
+            _set_cached('xu100_daily', df)
+            return df
+    except Exception as e:
+        logging.warning(f"[_get_xu100_daily_data] {e}")
+    # Return stale cache if available
+    with _cache_lock:
+        entry = _cache.get('xu100_daily')
+        return entry.value if entry else None
+
+
+# ════════════════════════════════════════
+# Anlık Fiyat Çekme
+# ════════════════════════════════════════
+# K-08: Son bilinen fiyatlar — Price Sanity Band için referans
+_last_known_prices: dict[str, float] = {}
+
+def get_current_prices(tickers):
+    """
+    Verilen ticker listesi için anlık fiyatları çeker.
+    BIST, KRİPTO ve EMTİA karışık olabilir.
+    K-08: Price Sanity Band — %50'den fazla sapma tespit edilirse eski fiyat korunur.
+    """
+    prices = {}
+    crypto_tickers = [t for t in tickers if "/" in t]
+    bist_tickers = [t for t in tickers if ".IS" in t]
+    emtia_tickers = [t for t in tickers if "=F" in t or "=X" in t]
+
+    # BIST + EMTİA Fiyatlarını Çek (yfinance)
+    yf_tickers = bist_tickers + emtia_tickers
+    if yf_tickers:
+        for ticker in yf_tickers:
+            try:
+                t_obj = yf.Ticker(ticker)
+                try:
+                    last_price = t_obj.fast_info.last_price
+                except Exception:
+                    hist = t_obj.history(period="1d")
+                    last_price = hist['Close'].iloc[-1] if not hist.empty else None
+
+                if last_price is not None:
+                    last_price = float(last_price)
+                    # K-08: Price Sanity Band — BIST/Emtia sahte fiyat koruması
+                    if ticker in _last_known_prices:
+                        prev = _last_known_prices[ticker]
+                        change_pct = abs(last_price - prev) / prev
+                        if change_pct > 0.50:  # %50'den fazla sapma → şüpheli
+                            logging.warning(f'[Price Sanity] {ticker}: Fiyat %{change_pct*100:.1f} sapma! {prev:.4f} → {last_price:.4f} — ESKİ FİYAT KORUNUYOR')
+                            prices[ticker] = prev
+                            continue
+                    prices[ticker] = last_price
+                    _last_known_prices[ticker] = last_price
+            except Exception as e:
+                logging.warning(f"[get_current_prices] BIST {ticker}: {e}")
+
+    # KRIPTO Fiyatlarını Çek
+    if crypto_tickers:
+        if not IS_USA_SERVER:
+            try:
+                tickers_data = exchange.fetch_tickers(crypto_tickers)
+                for t in crypto_tickers:
+                    if t in tickers_data and 'last' in tickers_data[t] and tickers_data[t]['last']:
+                        _price = float(tickers_data[t]['last'])
+                        # K-08: Price Sanity Band — Binance kripto sahte fiyat koruması
+                        if t in _last_known_prices:
+                            _prev = _last_known_prices[t]
+                            _chg = abs(_price - _prev) / _prev
+                            if _chg > 0.50:
+                                logging.warning(f'[Price Sanity] {t}: Fiyat %{_chg*100:.1f} sapma! {_prev:.4f} → {_price:.4f} — ESKİ FİYAT KORUNUYOR')
+                                prices[t] = _prev
+                                continue
+                        prices[t] = _price
+                        _last_known_prices[t] = _price
+            except Exception as e:
+                logging.info(f"[get_current_prices] Binance toplu fiyat hatası: {e}")
+
+        if IS_USA_SERVER or not prices:
+            try:
+                tickers_data = exchange_fallback.fetch_tickers()
+                for t in crypto_tickers:
+                    if t in tickers_data and 'last' in tickers_data[t] and tickers_data[t]['last']:
+                        _kprice = float(tickers_data[t]['last'])
+                    else:
+                        usd_t = t.replace("/USDT", "/USD")
+                        if usd_t in tickers_data and 'last' in tickers_data[usd_t] and tickers_data[usd_t]['last']:
+                            _kprice = float(tickers_data[usd_t]['last'])
+                        else:
+                            continue
+                    # K-08: Price Sanity Band — Kraken kripto sahte fiyat koruması
+                    if t in _last_known_prices:
+                        _kprev = _last_known_prices[t]
+                        _kchg = abs(_kprice - _kprev) / _kprev
+                        if _kchg > 0.50:
+                            logging.warning(f'[Price Sanity] {t}: Fiyat %{_kchg*100:.1f} sapma! {_kprev:.4f} → {_kprice:.4f} — ESKİ FİYAT KORUNUYOR')
+                            prices[t] = _kprev
+                            continue
+                    prices[t] = _kprice
+                    _last_known_prices[t] = _kprice
+            except Exception as ekr:
+                logging.warning(f"[get_current_prices] Kraken fiyat hatası: {ekr}, yfinance deneniyor...")
+                for t in crypto_tickers:
+                    try:
+                        yf_ticker = t.replace("/USDT", "-USD")
+                        t_obj = yf.Ticker(yf_ticker)
+                        try:
+                            last_price = t_obj.fast_info.last_price
+                        except Exception:
+                            hist = t_obj.history(period="1d")
+                            last_price = hist['Close'].iloc[-1] if not hist.empty else None
+                        if last_price is not None:
+                            _yfprice = float(last_price)
+                            # K-08: Price Sanity Band — yfinance kripto sahte fiyat koruması
+                            if t in _last_known_prices:
+                                _yfprev = _last_known_prices[t]
+                                _yfchg = abs(_yfprice - _yfprev) / _yfprev
+                                if _yfchg > 0.50:
+                                    logging.warning(f'[Price Sanity] {t}: Fiyat %{_yfchg*100:.1f} sapma! {_yfprev:.4f} → {_yfprice:.4f} — ESKİ FİYAT KORUNUYOR')
+                                    prices[t] = _yfprev
+                                    continue
+                            prices[t] = _yfprice
+                            _last_known_prices[t] = _yfprice
+                    except Exception as eyf:
+                        logging.warning(f"[get_current_prices] Kripto {t} yfinance hatası: {eyf}")
+
+    return prices
