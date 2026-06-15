@@ -91,6 +91,8 @@ FAILED_MSG_FILE = "failed_messages.json"
 _price_fail_count = 0
 _last_hourly_summary = 0
 _last_darwinism_run = 0  # V3.2: Haftalık Darwinizm son çalışma zamanı
+last_snapshot_sent_date = ""
+latest_scan_metrics = {}
 
 if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -286,9 +288,16 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
     scan_duration = time.time() - scan_start
     print(f"⏱️ Tarama süresi: {scan_duration:.1f}s ({scan_duration/60:.1f} dk)")
     
-    # 📊 Piyasa Snapshot'ını (Excel) gönder
-    if watch_bot and scan_metrics:
-        asyncio.create_task(send_snapshot_excel(scan_metrics))
+    # 📊 Piyasa Snapshot'ını (Excel) güncel tut (gün sonu gönderilecektir)
+    global latest_scan_metrics
+    if scan_metrics:
+        latest_scan_metrics = scan_metrics
+        try:
+            with open('last_scan_metrics.json', 'w', encoding='utf-8') as f:
+                json.dump(scan_metrics, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[run_market_scan] Failed to save scan_metrics to json: {e}")
+
     
     # Tarama sonrası RAM temizliği (E2-micro 1GB RAM koruma)
     gc.collect()
@@ -665,6 +674,27 @@ async def main():
                     # Güncelle
                     remaining = [t for t in trades if t["status"] == "ACTIVE"]
                     _save_trades(remaining)
+
+            # V3.4: Gün sonu (23:00 TSİ) Market Snapshot Excel Gönderimi
+            if now_ist.hour == 23 and now_ist.minute == 0:
+                global last_snapshot_sent_date
+                today_str = now_ist.strftime("%Y-%m-%d")
+                if last_snapshot_sent_date != today_str:
+                    last_snapshot_sent_date = today_str
+                    metrics_to_send = None
+                    if latest_scan_metrics:
+                        metrics_to_send = latest_scan_metrics
+                    elif os.path.exists('last_scan_metrics.json'):
+                        try:
+                            with open('last_scan_metrics.json', 'r', encoding='utf-8') as f:
+                                metrics_to_send = json.load(f)
+                        except Exception:
+                            pass
+                    
+                    if metrics_to_send and watch_bot:
+                        logger.info(f"[main] Gün sonu Excel Snapshot gönderiliyor...")
+                        asyncio.create_task(send_snapshot_excel(metrics_to_send))
+
 
             # 15 dakikada bir tam tarama
             if time.time() - last_scan_time >= (SCAN_INTERVAL_MINUTES * 60):

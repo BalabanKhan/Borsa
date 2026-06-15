@@ -41,6 +41,9 @@ async def send_snapshot_excel(metrics_list):
         print("[Snapshot] No metrics collected, skipping snapshot generation.")
         return
 
+    if isinstance(metrics_list, dict):
+        metrics_list = list(metrics_list.values())
+
     now = datetime.now(timezone.utc)
     timestamp_str = now.strftime('%Y%m%d_%H%M')
     file_path = f"market_snapshot_{timestamp_str}.xlsx"
@@ -49,6 +52,7 @@ async def send_snapshot_excel(metrics_list):
         # DataFrame oluştur ve Excel'e kaydet
         df = pd.DataFrame(metrics_list)
         df.to_excel(file_path, index=False)
+
         
         caption = f"📊 <b>Anlık Piyasa Taraması (Market Snapshot)</b>\n📅 {now.strftime('%Y-%m-%d %H:%M')} (UTC)"
         
