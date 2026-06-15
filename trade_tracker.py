@@ -73,7 +73,7 @@ def save_trades(trades):
         _save_trades_unlocked(trades)
 
 
-def add_trade(ticker, signal, entry_price, sl, tp, reason, provider, strategy=""):
+def add_trade(ticker, signal, entry_price, sl, tp, reason, provider, strategy="", indicators=None, is_watch=False):
     # DG-06: Son Çıkış Kapısı — fiyat tutarlılığı kontrolü
     check_dict = {"ticker": ticker, "signal": signal, "entry_price": entry_price,
                   "sl": sl, "tp": tp, "market": "KRIPTO" if "/" in ticker else "BIST"}
@@ -102,11 +102,13 @@ def add_trade(ticker, signal, entry_price, sl, tp, reason, provider, strategy=""
             "reason": reason,
             "provider": provider,
             "strategy": strategy,
+            "indicators": indicators or {},
             "status": "ACTIVE",
             "trailing_dist": trailing_dist,
             "highest_high": highest_high,
             "lowest_low": lowest_low,
-            "entry_time": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S+00:00')
+            "entry_time": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S+00:00'),
+            "is_watch": is_watch
         }
         trades.append(new_trade)
         _save_trades_unlocked(trades)
@@ -573,7 +575,7 @@ TRADE_JOURNAL_CSV = "trade_journal.csv"
 _CSV_HEADERS = [
     "tarih", "sembol", "market", "strateji", "sinyal", "giris_fiyat",
     "cikis_fiyat", "sl", "tp", "net_pnl_pct", "rr_ratio", "rr_achieved",
-    "sure", "sonuc", "entry_time", "exit_time"
+    "sure", "sonuc", "entry_time", "exit_time", "is_watch", "indicators"
 ]
 
 
@@ -640,6 +642,20 @@ def _write_trade_journal_csv(trade):
         else:
             sonuc = status
 
+        # İndikatörleri düz string'e çevirme (Pipe-separated format: RSI:35.2|ADX:20.1)
+        indicators = trade.get("indicators", {})
+        raw_inds = trade.get("raw_indicators", {})
+        merged_inds = {}
+        if isinstance(indicators, dict): merged_inds.update(indicators)
+        if isinstance(raw_inds, dict): merged_inds.update(raw_inds)
+        
+        if merged_inds:
+            ind_str = " | ".join(f"{k}:{v}" for k, v in merged_inds.items())
+        elif isinstance(indicators, str):
+            ind_str = indicators
+        else:
+            ind_str = "N/A"
+
         row = [
             datetime.now(timezone.utc).strftime('%Y-%m-%d'),
             trade.get("ticker", ""),
@@ -657,6 +673,8 @@ def _write_trade_journal_csv(trade):
             sonuc,
             entry_time_str,
             exit_time_str,
+            "TRUE" if trade.get("is_watch", False) else "FALSE",
+            ind_str
         ]
 
         with open(TRADE_JOURNAL_CSV, 'a', newline='', encoding='utf-8-sig') as f:
@@ -711,32 +729,36 @@ def check_active_trades(current_prices_dict):
         else:
             profit_pct = ((entry_price - current_price) / entry_price) * 100
 
+        # WATCH kontrolü
+        is_watch = t.get("is_watch", False)
+
         # === 1. KARA KUĞU KONTROLÜ (en önce, fiyat patlayınca hemen çık) ===
         t, bs_notifs, is_black_swan = _check_black_swan(t, current_price, signal)
-        notifications.extend(bs_notifs)
+        if not is_watch: notifications.extend(bs_notifs)
         if is_black_swan:
             closed_trades.append(t)
             continue
 
-        # === 2. KADEMELİ KÂR AL (Scale-Out) ===
-        t, so_notifs = _check_scale_out(t, profit_pct, signal, strategy_name, current_price)
-        notifications.extend(so_notifs)
+        if not is_watch:
+            # === 2. KADEMELİ KÂR AL (Scale-Out) ===
+            t, so_notifs = _check_scale_out(t, profit_pct, signal, strategy_name, current_price)
+            notifications.extend(so_notifs)
 
-        # === 3. DİNAMİK İZLEYEN STOP (Trailing Stop) ===
-        t, ts_notifs = _update_trailing_stop(t, current_price, profit_pct, signal, strategy_name)
-        notifications.extend(ts_notifs)
+            # === 3. DİNAMİK İZLEYEN STOP (Trailing Stop) ===
+            t, ts_notifs = _update_trailing_stop(t, current_price, profit_pct, signal, strategy_name)
+            notifications.extend(ts_notifs)
 
-        # === 4. FONLAMA ORANI KALKANI (Funding Shield) ===
-        t, fs_notifs, funding_close = _check_funding_shield(t, current_price, profit_pct, signal)
-        notifications.extend(fs_notifs)
-        if funding_close:
-            _stamp_exit_data(t, current_price)
-            closed_trades.append(t)
-            continue
+            # === 4. FONLAMA ORANI KALKANI (Funding Shield) ===
+            t, fs_notifs, funding_close = _check_funding_shield(t, current_price, profit_pct, signal)
+            notifications.extend(fs_notifs)
+            if funding_close:
+                _stamp_exit_data(t, current_price)
+                closed_trades.append(t)
+                continue
 
-        # === 5. TEHLİKE BÖLGESİ (Danger Zone) ===
-        t, dz_notifs = _check_danger_zone(t, current_price, signal)
-        notifications.extend(dz_notifs)
+            # === 5. TEHLİKE BÖLGESİ (Danger Zone) ===
+            t, dz_notifs = _check_danger_zone(t, current_price, signal)
+            notifications.extend(dz_notifs)
 
         # === 6. ÇIKIŞ KONTROLLERI (TP & SL) ===
         sl = float(t["sl"])  # Güncellenmiş SL'yi al
@@ -744,24 +766,24 @@ def check_active_trades(current_prices_dict):
         if signal == "AL":
             if current_price >= tp and tp > 0:
                 close_msg = _format_close_message(t, current_price, signal, "TP")
-                notifications.append(close_msg)
+                if not is_watch: notifications.append(close_msg)
                 _stamp_exit_data(t, current_price)
                 t["status"] = "CLOSED_TP"
             elif current_price <= sl:
                 close_msg = _format_close_message(t, current_price, signal, "SL")
-                notifications.append(close_msg)
+                if not is_watch: notifications.append(close_msg)
                 _stamp_exit_data(t, current_price)
                 t["status"] = "CLOSED_SL"
 
         elif signal == "SAT":
             if current_price <= tp and tp > 0:
                 close_msg = _format_close_message(t, current_price, signal, "TP")
-                notifications.append(close_msg)
+                if not is_watch: notifications.append(close_msg)
                 _stamp_exit_data(t, current_price)
                 t["status"] = "CLOSED_TP"
             elif current_price >= sl:
                 close_msg = _format_close_message(t, current_price, signal, "SL")
-                notifications.append(close_msg)
+                if not is_watch: notifications.append(close_msg)
                 _stamp_exit_data(t, current_price)
                 t["status"] = "CLOSED_SL"
 

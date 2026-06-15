@@ -66,6 +66,25 @@ from conviction_scorer import (
 )
 
 
+
+def _extract_raw_indicators(l_vars):
+    """
+    Sinyal üretildiği andaki (locals() üzerinden) mevcut zaman dilimlerine ait 
+    ham indikatör verilerini (RSI, ADX, Hacim) dinamik olarak toplar.
+    Bu sayede 31 farklı strateji bloğunda kod tekrarı yapılmadan ham veriler 
+    Telegram loglarına ve CSV raporlarına aktarılır.
+    """
+    import pandas as pd
+    res = {}
+    for prefix in ['last_15m', 'last_1h', 'last_4h', 'last_1d', 'last_1w']:
+        if prefix in l_vars and isinstance(l_vars[prefix], pd.Series):
+            tf = prefix.split('_')[1].upper()
+            s = l_vars[prefix]
+            if not pd.isna(s.get('RSI_14')): res[f'RSI_{tf}'] = round(s['RSI_14'], 2)
+            if not pd.isna(s.get('ADX_14')): res[f'ADX_{tf}'] = round(s['ADX_14'], 2)
+            if not pd.isna(s.get('volume')): res[f'Vol_{tf}'] = round(s.get('volume', 0), 2)
+    return res
+
 def _get_consecutive_sl(symbol):
     """Penalty box'tan ardışık SL sayısını al (yoksa 0)."""
     try:
@@ -351,7 +370,7 @@ def _is_in_liquidity_window():
 # ════════════════════════════════════════
 # 1. BIST 100 STRATEJİ MODÜLÜ
 # ════════════════════════════════════════
-def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100_daily=None):
+def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100_daily=None, metrics_collector=None):
     signals = []
 
     # Pandas Mutability koruması: kaynak DataFrame'leri kirletme
@@ -400,6 +419,20 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     # V3.3: Piyasa rejimi (Conviction Scoring için)
     bist_regime = _get_bist_regime(xu100_daily)
 
+    if metrics_collector is not None:
+        metrics_collector[symbol] = {
+            "Symbol": symbol,
+            "Market": "BIST",
+            "Price": current_price,
+            "1D RSI": round(last_1d.get("RSI_14", 0), 2) if pd.notna(last_1d.get("RSI_14")) else None,
+            "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
+            "1H RSI": round(last_1h.get("RSI_14", 0), 2) if pd.notna(last_1h.get("RSI_14")) else None,
+            "1D SMA 50": round(last_1d.get("SMA_50", 0), 2) if pd.notna(last_1d.get("SMA_50")) else None,
+            "1D SMA 200": round(last_1d.get("SMA_200", 0), 2) if pd.notna(last_1d.get("SMA_200")) else None,
+            "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
+            "1H Volume": last_1h.get("volume")
+        }
+
     # BIST 1: DİP AVCILIĞI (Turnaround)
     if not pd.isna(last_1d.get('RSI_14')):
         if last_1d['RSI_14'] < 35:
@@ -425,11 +458,12 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                                 )
                                 _conv = calculate_conviction(_scores)
                                 if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                    signals.append({
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                         "ticker": symbol, "market": "BIST", "strategy": "BIST 1: DİP AVCILIĞI", "signal": "AL",
                                         "entry_price": current_price, "sl": sl, "tp": tp,
-                                        "conviction_score": _conv.total_score, "conviction_grade": _conv.grade,
+                                        "conviction_score": _conv.total_score, "conviction_grade": _conv.grade, "conviction_details": _conv.component_scores,
                                         "position_size_pct": _conv.position_size_pct,
+                                        "indicators": {"RSI_1G": round(last_1d.get("RSI_14", 0), 2), "RSI_1S": round(last_1h.get("RSI_14", 0), 2)},
                                         "reason": f"1G RSI<35 + Engulfing Onaylı Turnaround. (ATR Stop: -%{sl_pct:.1f})" + _conv.to_reason_suffix()
                                     })
 
@@ -455,11 +489,12 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                         )
                         _conv2 = calculate_conviction(_scores2)
                         if _conv2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                            signals.append({
+                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                 "ticker": symbol, "market": "BIST", "strategy": "BIST 2: TREND TAKİBİ", "signal": "AL",
                                 "entry_price": current_price, "sl": sl, "tp": _tp2,
-                                "conviction_score": _conv2.total_score, "conviction_grade": _conv2.grade,
+                                "conviction_score": _conv2.total_score, "conviction_grade": _conv2.grade, "conviction_details": _conv2.component_scores,
                                 "position_size_pct": _conv2.position_size_pct,
+                                "indicators": {"ADX_4S": round(last_4h.get("ADX_14", 0), 2), "RSI_1S": round(last_1h.get("RSI_14", 0), 2)},
                                 "reason": f"4S ADX>25 Trend + Engulfing Momentum. 1S EMA21 pullback. (ATR Stop: -%{sl_pct:.1f})" + _conv2.to_reason_suffix()
                             })
 
@@ -501,10 +536,10 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                                     )
                                     _conv3 = calculate_conviction(_scores3)
                                     if _conv3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                        signals.append({
+                                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                             "ticker": symbol, "market": "BIST", "strategy": "BIST 3: KIRILIM AVCILIĞI", "signal": "AL",
                                             "entry_price": current_price, "sl": sl, "tp": _tp3,
-                                            "conviction_score": _conv3.total_score, "conviction_grade": _conv3.grade,
+                                            "conviction_score": _conv3.total_score, "conviction_grade": _conv3.grade, "conviction_details": _conv3.component_scores,
                                             "position_size_pct": _conv3.position_size_pct,
                                             "reason": f"Günlükte daralma, hacimli direnç kırılımı + Mutlak TL hacmi onaylı. (ATR Stop: -%{sl_pct:.1f})" + _conv3.to_reason_suffix()
                                         })
@@ -543,11 +578,11 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                             )
                             _conv4 = calculate_conviction(_scores4)
                             if _conv4.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                signals.append({
+                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                     "ticker": symbol, "market": "BIST",
                                     "strategy": "BIST 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
                                     "entry_price": current_price, "sl": sl, "tp": tp,
-                                    "conviction_score": _conv4.total_score, "conviction_grade": _conv4.grade,
+                                    "conviction_score": _conv4.total_score, "conviction_grade": _conv4.grade, "conviction_details": _conv4.component_scores,
                                     "position_size_pct": _conv4.position_size_pct,
                                     "reason": (
                                         f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
@@ -579,11 +614,11 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 )
                 _conv5u = calculate_conviction(_scores5u)
                 if _conv5u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                    signals.append({
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "BIST",
                         "strategy": "BIST 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "AL",
                         "entry_price": current_price, "sl": sl, "tp": _tp5u,
-                        "conviction_score": _conv5u.total_score, "conviction_grade": _conv5u.grade,
+                        "conviction_score": _conv5u.total_score, "conviction_grade": _conv5u.grade, "conviction_details": _conv5u.component_scores,
                         "position_size_pct": _conv5u.position_size_pct,
                         "reason": (
                             f"🗜️ Squeeze Patlaması!\n"
@@ -611,11 +646,11 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 )
                 _conv5d = calculate_conviction(_scores5d)
                 if _conv5d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                    signals.append({
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "BIST",
                         "strategy": "BIST 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "SAT",
                         "entry_price": current_price, "sl": sl, "tp": _tp5d,
-                        "conviction_score": _conv5d.total_score, "conviction_grade": _conv5d.grade,
+                        "conviction_score": _conv5d.total_score, "conviction_grade": _conv5d.grade, "conviction_details": _conv5d.component_scores,
                         "position_size_pct": _conv5d.position_size_pct,
                         "reason": (
                             f"🗜️ Squeeze Aşağı Patlaması!\n"
@@ -651,11 +686,11 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                     )
                     _conv6 = calculate_conviction(_scores6)
                     if _conv6.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                        signals.append({
+                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                             "ticker": symbol, "market": "BIST",
                             "strategy": "BIST 6: GÖRECELİ GÜÇ RADARI (RS)", "signal": "AL",
                             "entry_price": current_price, "sl": sl, "tp": _tp6,
-                            "conviction_score": _conv6.total_score, "conviction_grade": _conv6.grade,
+                            "conviction_score": _conv6.total_score, "conviction_grade": _conv6.grade, "conviction_details": _conv6.component_scores,
                             "position_size_pct": _conv6.position_size_pct,
                             "reason": (
                                 f"🏋️ Endekse Kafa Tutan Hisse!\n"
@@ -695,11 +730,11 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                     )
                     _conv7 = calculate_conviction(_scores7)
                     if _conv7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                        signals.append({
+                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                             "ticker": symbol, "market": "BIST",
                             "strategy": "BIST 7: VWAP KURUMSAL MIKNATISI", "signal": "AL",
                             "entry_price": current_price, "sl": sl, "tp": _tp7,
-                            "conviction_score": _conv7.total_score, "conviction_grade": _conv7.grade,
+                            "conviction_score": _conv7.total_score, "conviction_grade": _conv7.grade, "conviction_details": _conv7.component_scores,
                             "position_size_pct": _conv7.position_size_pct,
                             "reason": (
                                 f"⚓ VWAP Bounce (Kurumsal Mıknatıs) + 4 Kapı Zırhı!\n"
@@ -733,11 +768,11 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
             )
             _conv8 = calculate_conviction(_scores8)
             if _conv8.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "BIST",
                     "strategy": "BIST 8: SESSİZ BİRİKİM RADARI (OBV)", "signal": "AL",
                     "entry_price": current_price, "sl": sl, "tp": _tp8,
-                    "conviction_score": _conv8.total_score, "conviction_grade": _conv8.grade,
+                    "conviction_score": _conv8.total_score, "conviction_grade": _conv8.grade, "conviction_details": _conv8.component_scores,
                     "position_size_pct": _conv8.position_size_pct,
                     "reason": (
                         f"🕵️ Sessiz Birikim + CMF Onaylı!\n"
@@ -781,11 +816,11 @@ def scan_orb_bist(symbol, df_15m):
         )
         _conv9u = calculate_conviction(_scores9u)
         if _conv9u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-            signals.append({
+            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                 "ticker": symbol, "market": "BIST",
                 "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "AL", "is_day_trade": True,
                 "entry_price": current_price, "sl": cage_mid, "tp": current_price + tp_range,
-                "conviction_score": _conv9u.total_score, "conviction_grade": _conv9u.grade,
+                "conviction_score": _conv9u.total_score, "conviction_grade": _conv9u.grade, "conviction_details": _conv9u.component_scores,
                 "position_size_pct": _conv9u.position_size_pct,
                 "reason": (
                     f"⏱️ Açılış Kafesi Kırılımı (ORB)\n"
@@ -805,11 +840,11 @@ def scan_orb_bist(symbol, df_15m):
         )
         _conv9d = calculate_conviction(_scores9d)
         if _conv9d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-            signals.append({
+            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                 "ticker": symbol, "market": "BIST",
                 "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "SAT", "is_day_trade": True,
                 "entry_price": current_price, "sl": cage_mid, "tp": current_price - tp_range,
-                "conviction_score": _conv9d.total_score, "conviction_grade": _conv9d.grade,
+                "conviction_score": _conv9d.total_score, "conviction_grade": _conv9d.grade, "conviction_details": _conv9d.component_scores,
                 "position_size_pct": _conv9d.position_size_pct,
                 "reason": (
                     f"⏱️ Açılış Kafesi Aşağı Kırılımı (ORB)\n"
@@ -826,7 +861,7 @@ def scan_orb_bist(symbol, df_15m):
 # ════════════════════════════════════════
 # 2. KRİPTO STRATEJİ MODÜLÜ
 # ════════════════════════════════════════
-def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bias=0):
+def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bias=0, metrics_collector=None):
     signals = []
 
     if len(df_1d) < 50 or len(df_4h) < 20:
@@ -850,6 +885,21 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     last_1d = df_1d.iloc[-1]
     last_4h = df_4h.iloc[-1]
     current_price = last_4h['close']
+
+    if metrics_collector is not None:
+        metrics_collector[symbol] = {
+            "Symbol": symbol,
+            "Market": "KRIPTO",
+            "Price": current_price,
+            "1D RSI": round(last_1d.get("RSI_14", 0), 2) if pd.notna(last_1d.get("RSI_14")) else None,
+            "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
+            "1H RSI": None,
+            "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
+            "1D SMA 200": None,
+            "Trend": "Bullish" if last_1d.get("EMA_20", 0) > last_1d.get("EMA_50", float('inf')) else "Bearish",
+            "1H Volume": last_4h.get("volume")
+        }
+
 
     # KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI
     if not is_weekend_fakeout_time():
@@ -878,11 +928,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                 )
                                 _conv_c1 = calculate_conviction(_scores_c1)
                                 if _conv_c1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                    signals.append({
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                         "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI", "signal": "AL",
                                         "entry_price": current_price, "sl": sl, "tp": tp,
-                                        "conviction_score": _conv_c1.total_score, "conviction_grade": _conv_c1.grade,
+                                        "conviction_score": _conv_c1.total_score, "conviction_grade": _conv_c1.grade, "conviction_details": _conv_c1.component_scores,
                                         "position_size_pct": _conv_c1.position_size_pct,
+                                        "indicators": {"RSI_4S": round(last_4h.get("RSI_14", 0), 2)},
                                         "reason": f"Pozitif Uyuşmazlık + OI Çöküşü (>%15) tespit edildi! Balina temizliği bitti." + _conv_c1.to_reason_suffix()
                                     })
 
@@ -926,10 +977,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         )
                                         _conv_c2 = calculate_conviction(_scores_c2)
                                         if _conv_c2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                            signals.append({
+                                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                                 "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 2: MEGA TREND TAKİBİ", "signal": "AL",
                                                 "entry_price": current_price, "sl": sl, "tp": _tp_c2,
-                                                "conviction_score": _conv_c2.total_score, "conviction_grade": _conv_c2.grade,
+                                                "conviction_score": _conv_c2.total_score, "conviction_grade": _conv_c2.grade, "conviction_details": _conv_c2.component_scores,
                                                 "position_size_pct": _conv_c2.position_size_pct,
                                                 "reason": f"1G EMA20>50 Trendi. BTC Dominans '{btcdom_trend}' yönünde (Güvenli). Hacim onaylı. ATR Stop aktif." + _conv_c2.to_reason_suffix()
                                             })
@@ -969,10 +1020,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         )
                                         _conv_c3 = calculate_conviction(_scores_c3)
                                         if _conv_c3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                            signals.append({
+                                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                                 "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)", "signal": "AL",
                                                 "entry_price": current_price, "sl": sl, "tp": _tp_c3,
-                                                "conviction_score": _conv_c3.total_score, "conviction_grade": _conv_c3.grade,
+                                                "conviction_score": _conv_c3.total_score, "conviction_grade": _conv_c3.grade, "conviction_details": _conv_c3.component_scores,
                                                 "position_size_pct": _conv_c3.position_size_pct,
                                                 "reason": f"1G Daralma, Retest sekmesi. Fonlama: %{funding_rate:.4f}. Hacim: Onaylı." + _conv_c3.to_reason_suffix()
                                             })
@@ -1006,10 +1057,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     )
                     _conv_s1 = calculate_conviction(_scores_s1)
                     if _conv_s1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                        signals.append({
+                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                             "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 1: FOMO İNFAZI", "signal": "SAT",
                             "entry_price": current_price, "sl": sl, "tp": tp,
-                            "conviction_score": _conv_s1.total_score, "conviction_grade": _conv_s1.grade,
+                            "conviction_score": _conv_s1.total_score, "conviction_grade": _conv_s1.grade, "conviction_details": _conv_s1.component_scores,
                             "position_size_pct": _conv_s1.position_size_pct,
                             "reason": f"4S RSI>85 ve {trigger_reason}. Fonlama (+%{funding_rate:.4f}) pozitif." + _conv_s1.to_reason_suffix()
                         })
@@ -1041,10 +1092,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             )
                             _conv_s2 = calculate_conviction(_scores_s2)
                             if _conv_s2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                signals.append({
+                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                     "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 2: KANLI ŞELALE SÖRFÜ", "signal": "SAT",
                                     "entry_price": current_price, "sl": sl, "tp": tp,
-                                    "conviction_score": _conv_s2.total_score, "conviction_grade": _conv_s2.grade,
+                                    "conviction_score": _conv_s2.total_score, "conviction_grade": _conv_s2.grade, "conviction_details": _conv_s2.component_scores,
                                     "position_size_pct": _conv_s2.position_size_pct,
                                     "reason": f"1G Ayı Trendi, 4S ADX>30. EMA20 Ret. BTC Dominans '{btcdom_trend}'." + _conv_s2.to_reason_suffix()
                                 })
@@ -1080,10 +1131,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                 )
                                 _conv_s3 = calculate_conviction(_scores_s3)
                                 if _conv_s3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                    signals.append({
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                         "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 3: UÇURUM ÇÖKÜŞÜ", "signal": "SAT",
                                         "entry_price": current_price, "sl": sl, "tp": tp,
-                                        "conviction_score": _conv_s3.total_score, "conviction_grade": _conv_s3.grade,
+                                        "conviction_score": _conv_s3.total_score, "conviction_grade": _conv_s3.grade, "conviction_details": _conv_s3.component_scores,
                                         "position_size_pct": _conv_s3.position_size_pct,
                                         "reason": f"90S Desteği kırıldı, %1.5 toleransla Retest yapıldı ve reddedildi." + _conv_s3.to_reason_suffix()
                                     })
@@ -1118,11 +1169,11 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             )
                             _conv_c4l = calculate_conviction(_scores_c4l)
                             if _conv_c4l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                signals.append({
+                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                     "ticker": symbol, "market": "KRIPTO",
                                     "strategy": "KRİPTO 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
                                     "entry_price": current_price, "sl": sl, "tp": tp,
-                                    "conviction_score": _conv_c4l.total_score, "conviction_grade": _conv_c4l.grade,
+                                    "conviction_score": _conv_c4l.total_score, "conviction_grade": _conv_c4l.grade, "conviction_details": _conv_c4l.component_scores,
                                     "position_size_pct": _conv_c4l.position_size_pct,
                                     "reason": (
                                         f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
@@ -1163,11 +1214,11 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             )
                             _conv_c4s = calculate_conviction(_scores_c4s)
                             if _conv_c4s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                signals.append({
+                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                     "ticker": symbol, "market": "KRIPTO",
                                     "strategy": "SHORT 4: KESKİN NİŞANCI (OTE)", "signal": "SAT",
                                     "entry_price": current_price, "sl": sl, "tp": tp,
-                                    "conviction_score": _conv_c4s.total_score, "conviction_grade": _conv_c4s.grade,
+                                    "conviction_score": _conv_c4s.total_score, "conviction_grade": _conv_c4s.grade, "conviction_details": _conv_c4s.component_scores,
                                     "position_size_pct": _conv_c4s.position_size_pct,
                                     "reason": (
                                         f"🎯 SHORT SMC Kurulum{fvg_label}\n"
@@ -1206,11 +1257,11 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 )
                 _conv_c5 = calculate_conviction(_scores_c5)
                 if _conv_c5.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                    signals.append({
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
                         "strategy": "KRİPTO 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": sig_type,
                         "entry_price": current_price, "sl": sl, "tp": tp,
-                        "conviction_score": _conv_c5.total_score, "conviction_grade": _conv_c5.grade,
+                        "conviction_score": _conv_c5.total_score, "conviction_grade": _conv_c5.grade, "conviction_details": _conv_c5.component_scores,
                         "position_size_pct": _conv_c5.position_size_pct,
                         "reason": (
                             f"🗜️ Squeeze Patlaması ({sq_dir.upper()})!\n"
@@ -1237,11 +1288,11 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 )
                 _conv_c6 = calculate_conviction(_scores_c6)
                 if _conv_c6.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                    signals.append({
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
                         "strategy": "KRİPTO 6: VWAP KURUMSAL MIKNATISI", "signal": "AL",
                         "entry_price": current_price, "sl": sl, "tp": _tp_c6,
-                        "conviction_score": _conv_c6.total_score, "conviction_grade": _conv_c6.grade,
+                        "conviction_score": _conv_c6.total_score, "conviction_grade": _conv_c6.grade, "conviction_details": _conv_c6.component_scores,
                         "position_size_pct": _conv_c6.position_size_pct,
                         "reason": (
                             f"⚓ VWAP Bounce (Kurumsal Mıknatıs)!\n"
@@ -1274,11 +1325,11 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 )
                 _conv_c7 = calculate_conviction(_scores_c7)
                 if _conv_c7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                    signals.append({
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
                         "strategy": "KRİPTO 7: SESSİZ BİRİKİM RADARI (OBV)", "signal": "AL",
                         "entry_price": current_price, "sl": sl, "tp": _tp_c7,
-                        "conviction_score": _conv_c7.total_score, "conviction_grade": _conv_c7.grade,
+                        "conviction_score": _conv_c7.total_score, "conviction_grade": _conv_c7.grade, "conviction_details": _conv_c7.component_scores,
                         "position_size_pct": _conv_c7.position_size_pct,
                         "reason": (
                             f"🕵️ Sessiz Birikim + CMF Onaylı!\n"
@@ -1294,7 +1345,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
 # ════════════════════════════════════════
 # 3. EMTİA STRATEJİ MODÜLÜ
 # ════════════════════════════════════════
-def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
+def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_collector=None):
     """Emtia strateji analizi. 3 strateji + DXY/ATR/Haber kalkanları."""
     signals = []
 
@@ -1331,6 +1382,21 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
 
     last_1d = df_1d.iloc[-1]
     current_price = float(last_1d['close'])
+
+    if metrics_collector is not None:
+        metrics_collector[symbol] = {
+            "Symbol": symbol,
+            "Market": "EMTIA",
+            "Price": current_price,
+            "1D RSI": round(last_1d.get("RSI_14", 0), 2) if pd.notna(last_1d.get("RSI_14")) else None,
+            "4H ADX": round(df_4h.iloc[-1].get("ADX_14", 0), 2) if df_4h is not None and not df_4h.empty and pd.notna(df_4h.iloc[-1].get("ADX_14")) else None,
+            "1H RSI": None,
+            "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
+            "1D SMA 200": None,
+            "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
+            "1H Volume": None
+        }
+
 
     atr_mult = EMTIA_ATR_MULT.get(symbol, 2.5)
     atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
@@ -1381,11 +1447,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
                         )
                         _conv_e1l = calculate_conviction(_scores_e1l)
                         if _conv_e1l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                            signals.append({
+                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                 "ticker": symbol, "market": "EMTİA",
                                 "strategy": "EMTİA 1: TREND SÖRFÜ (MEGA TREND)", "signal": "AL",
                                 "entry_price": current_price, "sl": sl, "tp": tp,
-                                "conviction_score": _conv_e1l.total_score, "conviction_grade": _conv_e1l.grade,
+                                "conviction_score": _conv_e1l.total_score, "conviction_grade": _conv_e1l.grade, "conviction_details": _conv_e1l.component_scores,
                                 "position_size_pct": _conv_e1l.position_size_pct,
                                 "reason": (
                                     f"🏄 {emtia_name} Mega Trend!\n"
@@ -1412,11 +1478,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
                     )
                     _conv_e1s = calculate_conviction(_scores_e1s)
                     if _conv_e1s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                        signals.append({
+                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                             "ticker": symbol, "market": "EMTİA",
                             "strategy": "EMTİA 1: TREND SÖRFÜ (MEGA TREND)", "signal": "SAT",
                             "entry_price": current_price, "sl": sl, "tp": tp,
-                            "conviction_score": _conv_e1s.total_score, "conviction_grade": _conv_e1s.grade,
+                            "conviction_score": _conv_e1s.total_score, "conviction_grade": _conv_e1s.grade, "conviction_details": _conv_e1s.component_scores,
                             "position_size_pct": _conv_e1s.position_size_pct,
                             "reason": (
                                 f"🏄 {emtia_name} Düşüş Trendi!\n"
@@ -1454,11 +1520,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
                         )
                         _conv_e2l = calculate_conviction(_scores_e2l)
                         if _conv_e2l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                            signals.append({
+                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                 "ticker": symbol, "market": "EMTİA",
                                 "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "AL",
                                 "entry_price": current_price, "sl": sl, "tp": tp,
-                                "conviction_score": _conv_e2l.total_score, "conviction_grade": _conv_e2l.grade,
+                                "conviction_score": _conv_e2l.total_score, "conviction_grade": _conv_e2l.grade, "conviction_details": _conv_e2l.component_scores,
                                 "position_size_pct": _conv_e2l.position_size_pct,
                                 "reason": (
                                     f"🎯 {emtia_name} SMC Kurulum{fvg_label}\n"
@@ -1493,11 +1559,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
                         )
                         _conv_e2s = calculate_conviction(_scores_e2s)
                         if _conv_e2s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                            signals.append({
+                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                 "ticker": symbol, "market": "EMTİA",
                                 "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "SAT",
                                 "entry_price": current_price, "sl": sl, "tp": tp,
-                                "conviction_score": _conv_e2s.total_score, "conviction_grade": _conv_e2s.grade,
+                                "conviction_score": _conv_e2s.total_score, "conviction_grade": _conv_e2s.grade, "conviction_details": _conv_e2s.component_scores,
                                 "position_size_pct": _conv_e2s.position_size_pct,
                                 "reason": (
                                     f"🎯 {emtia_name} SHORT SMC Kurulum{fvg_label}\n"
@@ -1525,11 +1591,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
             )
             _conv_e3l = calculate_conviction(_scores_e3l)
             if _conv_e3l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "EMTİA",
                     "strategy": "EMTİA 3: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "AL",
                     "entry_price": current_price, "sl": sl, "tp": tp,
-                    "conviction_score": _conv_e3l.total_score, "conviction_grade": _conv_e3l.grade,
+                    "conviction_score": _conv_e3l.total_score, "conviction_grade": _conv_e3l.grade, "conviction_details": _conv_e3l.component_scores,
                     "position_size_pct": _conv_e3l.position_size_pct,
                     "reason": (
                         f"🗜️ {emtia_name} Squeeze Patlaması!\n"
@@ -1551,11 +1617,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
             )
             _conv_e3s = calculate_conviction(_scores_e3s)
             if _conv_e3s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "EMTİA",
                     "strategy": "EMTİA 3: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "SAT",
                     "entry_price": current_price, "sl": sl, "tp": tp,
-                    "conviction_score": _conv_e3s.total_score, "conviction_grade": _conv_e3s.grade,
+                    "conviction_score": _conv_e3s.total_score, "conviction_grade": _conv_e3s.grade, "conviction_details": _conv_e3s.component_scores,
                     "position_size_pct": _conv_e3s.position_size_pct,
                     "reason": (
                         f"🗜️ {emtia_name} Aşağı Squeeze Patlaması!\n"
@@ -1571,7 +1637,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False):
 # ════════════════════════════════════════
 # 4. 🐻 AYI AVCISI STRATEJİ MODÜLÜ
 # ════════════════════════════════════════
-def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False):
+def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collector=None):
     """Ağır Sıklet SHORT tarayıcı. 3 strateji + 3 çelik kalkan."""
     signals = []
 
@@ -1594,6 +1660,21 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False):
     df_4h['vol_sma_20'] = df_4h['volume'].rolling(20).mean()
     last_4h = df_4h.iloc[-1]
     current_price = float(last_4h['close'])
+
+    if metrics_collector is not None and symbol not in metrics_collector:
+        metrics_collector[symbol] = {
+            "Symbol": symbol,
+            "Market": "KRIPTO (Ayı)",
+            "Price": current_price,
+            "1D RSI": round(df_1d.iloc[-1].get("RSI_14", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get("RSI_14")) else None,
+            "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
+            "1H RSI": None,
+            "1D SMA 50": round(df_1d.iloc[-1].get("EMA_50", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get("EMA_50")) else None,
+            "1D SMA 200": None,
+            "Trend": "Bullish" if df_1d is not None and not df_1d.empty and df_1d.iloc[-1].get("EMA_20", 0) > df_1d.iloc[-1].get("EMA_50", float('inf')) else "Bearish",
+            "1H Volume": last_4h.get("volume")
+        }
+
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
@@ -1636,11 +1717,11 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False):
             )
             _conv_bh1 = calculate_conviction(_scores_bh1)
             if _conv_bh1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "AYI_AVCISI",
                     "strategy": "SHORT 1: ZİRVE TUZAĞI (SFP)", "signal": "SAT",
                     "entry_price": current_price, "sl": sl, "tp": tp,
-                    "conviction_score": _conv_bh1.total_score, "conviction_grade": _conv_bh1.grade,
+                    "conviction_score": _conv_bh1.total_score, "conviction_grade": _conv_bh1.grade, "conviction_details": _conv_bh1.component_scores,
                     "position_size_pct": _conv_bh1.position_size_pct,
                     "reason": (
                         f"🧹 {symbol} Zirve Tuzağı!\n"
@@ -1675,11 +1756,11 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False):
             )
             _conv_bh2 = calculate_conviction(_scores_bh2)
             if _conv_bh2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "AYI_AVCISI",
                     "strategy": "SHORT 2: PAHALI BÖLGE REDDİ (SMC PREMIUM)", "signal": "SAT",
                     "entry_price": current_price, "sl": sl, "tp": tp,
-                    "conviction_score": _conv_bh2.total_score, "conviction_grade": _conv_bh2.grade,
+                    "conviction_score": _conv_bh2.total_score, "conviction_grade": _conv_bh2.grade, "conviction_details": _conv_bh2.component_scores,
                     "position_size_pct": _conv_bh2.position_size_pct,
                     "reason": (
                         f"🎯 {symbol} Premium Bölge Reddi!\n"
@@ -1714,11 +1795,11 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False):
             )
             _conv_bh3 = calculate_conviction(_scores_bh3)
             if _conv_bh3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "AYI_AVCISI",
                     "strategy": "SHORT 3: YORGUNLUK TEPESİ (DİVERGENCE)", "signal": "SAT",
                     "entry_price": current_price, "sl": sl, "tp": tp,
-                    "conviction_score": _conv_bh3.total_score, "conviction_grade": _conv_bh3.grade,
+                    "conviction_score": _conv_bh3.total_score, "conviction_grade": _conv_bh3.grade, "conviction_details": _conv_bh3.component_scores,
                     "position_size_pct": _conv_bh3.position_size_pct,
                     "reason": (
                         f"🪫 {symbol} Yorgunluk Tepesi!\n"
@@ -1737,7 +1818,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False):
 # TOPLU TARAMA ORKESTRATÖRLERİ
 # ════════════════════════════════════════
 def scan_all_markets():
-    """Tüm piyasaları tarar ve sinyal listesi döndürür.
+    """Tüm piyasaları tarar ve (sinyal_listesi, scan_metrics) döndürür.
     
     Scale-Up Optimizasyonları:
     - Batch yfinance download (BIST 200 çağrı → 8 çağrı)
@@ -1746,6 +1827,7 @@ def scan_all_markets():
     - Süre ölçümü (her piyasa segmenti)
     """
     all_signals = []
+    scan_metrics = {}
     scan_start = _time.time()
     
     # Döngü başında temizlik
@@ -1773,7 +1855,7 @@ def scan_all_markets():
                     # DG-05: MTF hizalama kontrolü
                     if not guard_mtf_bundle(sym, df_1d, df_4h, df_1h):
                         continue
-                    sigs = analyze_strategies_bist(sym, df_1d, df_4h, df_1h, xu100_down, xu100_daily)
+                    sigs = analyze_strategies_bist(sym, df_1d, df_4h, df_1h, xu100_down, xu100_daily, metrics_collector=scan_metrics)
                     # FM-04: Rejime göre filtrele
                     sigs = _apply_regime_filter(sigs, bist_regime, market="BIST")
                     all_signals.extend(sigs)
@@ -1814,7 +1896,7 @@ def scan_all_markets():
                 # DG-05: MTF hizalama kontrolü
                 if not guard_mtf_bundle(sym, df_1d, df_4h):
                     continue
-                sigs = analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias)
+                sigs = analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias, metrics_collector=scan_metrics)
                 all_signals.extend(sigs)
         except Exception as e:
             logging.warning(f"[scan_all_markets] KRİPTO {sym}: {e}")
@@ -1838,7 +1920,7 @@ def scan_all_markets():
                     # DG-05: MTF hizalama kontrolü
                     if df_4h is not None and not guard_mtf_bundle(sym, df_1d, df_4h):
                         continue
-                    sigs = analyze_strategies_emtia(sym, df_1d, df_4h, dxy_bullish)
+                    sigs = analyze_strategies_emtia(sym, df_1d, df_4h, dxy_bullish, metrics_collector=scan_metrics)
                     all_signals.extend(sigs)
             except Exception as e:
                 logging.warning(f"[scan_all_markets] EMTİA {sym}: {e}")
@@ -1860,7 +1942,7 @@ def scan_all_markets():
                 # Cache'den okur → API çağrısı SIFIR (Kripto'da zaten çekildi)
                 df_1d, df_4h = get_crypto_data_cached(sym)
                 if df_1d is not None and df_4h is not None:
-                    sigs = analyze_bear_hunter(sym, df_1d, df_4h, btc_bullish)
+                    sigs = analyze_bear_hunter(sym, df_1d, df_4h, btc_bullish, metrics_collector=scan_metrics)
                     all_signals.extend(sigs)
             except Exception as e:
                 logging.warning(f"[scan_all_markets] AYI_AVCISI {sym}: {e}")
@@ -1887,5 +1969,5 @@ def scan_all_markets():
     # DG-03 + DG-06: Son Çıkış Kapısı — Yönlendirme + Fiyat Bütünlüğü
     all_signals = guard_signal_output(all_signals)
     
-    return all_signals
+    return all_signals, scan_metrics
 

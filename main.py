@@ -35,6 +35,7 @@ logger.addHandler(_console_handler)
 from data_fetcher import scan_all_markets, get_current_prices
 from trade_tracker import add_trade, check_active_trades, load_trades
 from circuit_breaker import is_circuit_open, get_status_message as cb_status
+from market_snapshot import send_snapshot_excel
 
 # ════ V3.2 Kaos Çözümleri ════
 from penalty_box import (
@@ -137,6 +138,23 @@ def format_signal_message(trade_data):
         conv_emoji = {"STRONG": "🟢", "MEDIUM": "🟡", "WATCH": "🟠"}.get(conv_grade, "⚪")
         conv_line = f"{conv_emoji} <b>Conviction:</b> <code>{conv_score:.0f}/100 ({conv_grade})</code> | Poz: %{conv_pos}\n"
 
+    conv_details = trade_data.get('conviction_details')
+    details_str = ""
+    if conv_details and isinstance(conv_details, dict):
+        details_str = "<b>Puanlama Detayları:</b>\n"
+        for k, v in conv_details.items():
+            if v > 0:
+                details_str += f" ├ {k}: <code>+{v:.1f}</code>\n"
+        details_str += " └────────────────\n"
+
+    # V3.4: Dinamik olarak toplanan ham göstergelerin (RSI, ADX vs.) mesaja eklenmesi
+    raw_inds = trade_data.get('raw_indicators')
+    if raw_inds and isinstance(raw_inds, dict):
+        details_str += "<b>Giriş Metrikleri:</b>\n"
+        for k, v in raw_inds.items():
+            details_str += f" ├ {k}: <code>{v}</code>\n"
+        details_str += " └────────────────\n"
+
     # FM-02: Signal TTL — Dinamik Geçerlilik Tavanı/Tabanı
     ttl_pct = 0.015  # %1.5
     if signal_dir == "AL":
@@ -164,8 +182,9 @@ def format_signal_message(trade_data):
         f"<b>Giriş Fiyatı:</b> <code>{entry_price:.4f}</code>\n"
         f"<b>Zarar Kes (SL):</b> <code>{sl_price:.4f}</code>\n"
         f"<b>Kar Al (TP):</b> <code>{tp_price:.4f}</code>\n"
-        f"{rr_line}"
+                f"{rr_line}"
         f"{conv_line}"
+        f"{details_str}"
         f"-------------------------------------\n"
         f"<b>Sistem Gerekçesi:</b>\n"
         f"<i>{trade_data.get('reason', 'Sebep belirtilmemiş.')}</i>\n"
@@ -263,9 +282,13 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
     # SERBEST kalır → check_active_trades() her 60 saniye çalışmaya DEVAM EDER.
     loop = asyncio.get_event_loop()
     scan_start = time.time()
-    signals = await loop.run_in_executor(None, scan_all_markets)
+    signals, scan_metrics = await loop.run_in_executor(None, scan_all_markets)
     scan_duration = time.time() - scan_start
     print(f"⏱️ Tarama süresi: {scan_duration:.1f}s ({scan_duration/60:.1f} dk)")
+    
+    # 📊 Piyasa Snapshot'ını (Excel) gönder
+    if watch_bot and scan_metrics:
+        asyncio.create_task(send_snapshot_excel(scan_metrics))
     
     # Tarama sonrası RAM temizliği (E2-micro 1GB RAM koruma)
     gc.collect()
@@ -366,7 +389,7 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
             conv_emoji = {"STRONG": "🟢", "MEDIUM": "🟡", "WATCH": "🟠"}.get(conv_grade, "⚪")
             logger.info(f"[V3.3 Conviction] {conv_emoji} {ticker}: Score={conv_score:.0f} Grade={conv_grade} Poz=%{pos_size}")
         
-        # V3.3.2: WATCH grade → ayrı kanala gönder, trade açma
+        # V3.3.2: WATCH grade → ayrı kanala gönder, sanal olarak izle
         if conv_grade == 'WATCH':
             if watch_bot and WATCH_CHAT_IDS:
                 watch_msg = format_signal_message({
@@ -381,8 +404,39 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
                 logger.info(f'[WATCH] {ticker} izleme listesine gönderildi ({strategy}).')
             else:
                 logger.debug(f'[WATCH] {ticker}: WATCH sinyali — bot/chat_id yok, atlanıyor.')
-            continue  # Trade açma, sadece izle
 
+            # İşlemi SANAL olarak kaydet (is_watch=True)
+            trade = add_trade(
+                ticker=ticker,
+                signal=decision.get("signal", "AL"),
+                entry_price=entry_price,
+                sl=sl_price,
+                tp=tp_price,
+                reason=decision.get("reason", "Neden belirtilmedi"),
+                provider="Algorithm",
+                strategy=strategy,
+                indicators=decision.get("indicators", {}),
+                is_watch=True
+            )
+            
+            if trade is not None:
+                # V3.3: Conviction bilgilerini trade kaydına ekle
+                trade["conviction_score"] = conv_score
+                trade["conviction_grade"] = conv_grade
+                trade["position_size_pct"] = pos_size
+                
+                if decision.get("is_day_trade"):
+                    trade["is_day_trade"] = True
+                    from trade_tracker import load_trades as _lt, save_trades as _st
+                    all_t = _lt()
+                    for t in all_t:
+                        if t.get("id") == trade.get("id"):
+                            t["is_day_trade"] = True
+                    _st(all_t)
+
+                logger.info(f'[WATCH] {ticker} sanal izlemeye eklendi.')
+
+            continue  # Gerçek trade açma, sadece sanal izle
         print(f"✅ Sistem {ticker} için AL kararı verdi! ({decision.get('strategy')})")
         
         # İşlemi kaydet
@@ -394,7 +448,8 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
             tp=tp_price,
             reason=decision.get("reason", "Neden belirtilmedi"),
             provider="Algorithm",
-            strategy=strategy
+            strategy=strategy,
+            indicators=decision.get("indicators", {})
         )
 
         if trade is None:

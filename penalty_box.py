@@ -21,7 +21,7 @@ PENALTY_LEVELS = {
 }
 
 # Günlük komisyon limiti (sermayenin yüzdesi olarak)
-DAILY_COMMISSION_LIMIT_PCT = 1.0
+DAILY_COMMISSION_LIMIT_PCT = 99.0  # DİKKAT: TEST İÇİN 99.0 YAPILDI. (Normal canlı sistem değeri: 1.0)
 
 
 def _load_state_unlocked() -> dict:
