@@ -256,10 +256,7 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
     now_cleanup = time.time()
     signal_cooldown = {k: v for k, v in signal_cooldown.items() if now_cleanup - v < COOLDOWN_SECONDS}
     
-    # FM-03: Devre Kesici kontrolü — sessiz moddaysa taramayı atla
-    if is_circuit_open():
-        logger.info("[FM-03] 🔴 Devre Kesici AKTİF — tarama atlanıyor.")
-        return
+    # FM-03: Devre Kesici kontrolü (Option B: Strateji bazlı olduğu için tarama atlanmıyor, sinyal bazlı kontrol edilecek)
 
     # FAZ 1: Taramayı ayrı thread'e taşı → Kör Pencere (Blind Spot) ÇÖZÜMÜ
     # scan_all_markets() senkron, 10-12 dk sürer. Bu sürede main event loop
@@ -319,6 +316,11 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
             continue
 
         # ════ V3.2 KAOS FİLTRELERİ (Sinyal üretilmeden ÖNCE) ════
+        
+        # FM-03: Devre Kesici (Per-Strategy)
+        if is_circuit_open(ticker, strategy):
+            logger.info(f"[FM-03] 🔴 Devre Kesici {strategy} için AKTİF — sinyal atlanıyor.")
+            continue
         
         # V3.2 Kaos #4: Ceza Kutusu — varlık cezalı mı?
         if is_asset_penalized(ticker):
@@ -449,6 +451,10 @@ async def main():
         try:
             watch_bot = Bot(token=WATCH_BOT_TOKEN)
             print('✅ WATCH Telegram Bot bağlantısı kuruldu.')
+            if WATCH_CHAT_IDS:
+                await send_telegram_message(watch_bot, WATCH_CHAT_IDS, "👁️ <b>WATCH Bot Doğrulama</b>\nBu kanal üzerinden izleme sinyalleri (WATCH) iletilecektir. Bağlantı başarılı.")
+            else:
+                print('⚠️ TELEGRAM_WATCH_CHAT_ID tanımlı değil! WATCH sinyalleri gönderilemeyecek.')
         except Exception as e:
             print(f'⚠️ WATCH Bot başlatma hatası: {e}')
     else:

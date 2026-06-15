@@ -75,17 +75,13 @@ def _read_circuit_breaker():
     """Circuit breaker durumunu oku."""
     path = os.path.join(BASE_DIR, 'circuit_breaker_state.json')
     if not os.path.exists(path):
-        return {'status': 'KAPALI', 'consecutive_sl': 0, 'daily_sl': 0}
+        return {'strategies': {}}
     try:
         with open(path, 'r', encoding='utf-8') as f:
             state = json.load(f)
-            return {
-                'status': 'AÇIK' if state.get('silent_mode') else 'KAPALI',
-                'consecutive_sl': state.get('consecutive_sl', 0),
-                'daily_sl': state.get('daily_sl_count', 0)
-            }
+            return {'strategies': state.get('strategies', {})}
     except Exception:
-        return {'status': 'BİLİNMİYOR', 'consecutive_sl': 0, 'daily_sl': 0}
+        return {'strategies': {}}
 
 def _read_penalty_box():
     """Penalty box durumunu oku."""
@@ -476,10 +472,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 document.getElementById('s-ram').textContent=s.ram||'N/A';
                 document.getElementById('s-scan').textContent=s.last_scan||'—';
                 const cb=d.circuit_breaker||{};
-                const cbText=cb.status||'KAPALI';
+                const strats=cb.strategies||{};
+                const keys=Object.keys(strats);
+                let cbHtml='';
+                if(keys.length===0){
+                    cbHtml='<span style="color:#3fb950">KAPALI (Veri Yok)</span>';
+                }else{
+                    cbHtml=keys.map(k=>{
+                        const st=strats[k];
+                        const isOpen=st.silent_mode;
+                        const status=isOpen?'AÇIK':'KAPALI';
+                        const color=isOpen?'#f85149':'#3fb950';
+                        return `<span style="color:${color}">${k}: ${status}</span>`;
+                    }).join(' | ');
+                }
                 const cbEl=document.getElementById('s-cb');
-                cbEl.textContent=cbText;
-                cbEl.style.color=cbText.includes('AÇIK')?'#f85149':'#3fb950';
+                cbEl.innerHTML=cbHtml;
                 const pb=d.penalty_box||[];
                 document.getElementById('s-pb').textContent=pb.length>0?pb.length+' varlık':'temiz';
 

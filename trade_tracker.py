@@ -825,7 +825,7 @@ def check_active_trades(current_prices_dict):
                 rr_achieved = -rr_achieved
             
             if "SL" in status or "BLACK_SWAN" in status:
-                cb_msg = record_sl(ticker_ct)
+                cb_msg = record_sl(ticker_ct, strategy_ct)
                 if cb_msg:
                     cb_notifications.append(cb_msg)
                 
@@ -847,7 +847,7 @@ def check_active_trades(current_prices_dict):
                     })
                 
             elif "TP" in status:
-                record_tp()
+                record_tp(ticker_ct, strategy_ct)
                 
                 # V3.2 Kaos #4: Ceza Kutusu — TP kaydı (SL sayacı düşer)
                 record_asset_tp(ticker_ct)

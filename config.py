@@ -304,3 +304,10 @@ CONVICTION_THRESHOLDS_EXPERIMENT = {
     'MEDIUM': 55,
     'WATCH': 40,
 }
+
+# ════════════════════════════════════════
+# Devre Kesici (Circuit Breaker)
+# ════════════════════════════════════════
+MAX_CONSECUTIVE_SL = 3       # Ard arda 3 SL → devre aç (sessiz mod)
+COOLDOWN_HOURS = 24          # Sessiz mod süresi (saat)
+DAILY_MAX_SL = 5             # Günlük toplam SL limiti (ardışık olmasa bile)
