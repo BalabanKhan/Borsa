@@ -129,6 +129,111 @@ ADX_TREND_THRESHOLD = 25
 ADX_STRONG_TREND = 30
 
 # ════════════════════════════════════════
+# V3.4 Conviction Soft Score Eşikleri (Sıkılaştırılmış)
+# ════════════════════════════════════════
+SOFT_ADX_CENTER = 28.0
+SOFT_ADX_K = 0.35
+
+SOFT_VOL_RATIO_CENTER = 1.8
+SOFT_VOL_RATIO_K = 3.0
+
+SOFT_RR_CENTER = 2.5
+SOFT_RR_K = 2.5
+
+SOFT_RSI_TREND_CENTER = 55.0
+SOFT_RSI_TREND_MULT = 2.5
+
+SOFT_RSI_OVERSOLD_BIST_CENTER = 30.0
+SOFT_RSI_OVERSOLD_CRYPTO_CENTER = 25.0
+
+SOFT_SQUEEZE_MIN = 0.03
+SOFT_SQUEEZE_MAX = 0.15
+
+SOFT_EMA_DIP_MULT = 5.7
+SOFT_EMA_DIP_MAX_PCT = 7.0
+
+# ════════════════════════════════════════
+# V3.4 Conviction Scorer Alt-Puanlama (Fuzzy Logic) Sabitleri (SSOT)
+# 
+# Bu bölümdeki katsayılar conviction_scorer.py içindeki algoritmik esnetmeleri, 
+# cezaları ve bonusları (magic numbers) kontrol eder. İnsan/Yapay Zeka anlaşılabilirliği
+# için kategorize edilmiştir.
+# ════════════════════════════════════════
+
+# --- ADX & Momentum Sınırları ---
+# ADX > 40 olduğunda trendin olgunlaştığı kabul edilir ve "decay" (ceza) uygulanır.
+SOFT_ADX_MATURITY_START = 40.0       # Olgunlaşma cezasının başladığı ADX seviyesi
+SOFT_ADX_MATURITY_MULT = 3.0         # Aşılan her 1 puan için uygulanacak ceza katsayısı
+SOFT_ADX_MATURITY_MIN = 15.0         # Ceza sonrası düşülebilecek minimum puan sınırı
+SOFT_ADX_MOMENTUM_UP = 1.10          # ADX yükseliyorsa uygulanacak bonus çarpanı (%10)
+SOFT_ADX_MOMENTUM_DOWN = 0.85        # ADX düşüyorsa uygulanacak ceza çarpanı (%15)
+
+# --- RSI Esneklik Limitleri ---
+# RSI dip avcılığında hedeflenen merkez noktadan uzaklaşıldıkça puanı düşüren sapan sınırları
+SOFT_RSI_OVERSOLD_MIN_DIST = 20.0    # Merkezden aşağı sapma toleransı (örn: merkez 30 ise 10'da puan 100 olur)
+SOFT_RSI_OVERSOLD_MAX_DIST = 15.0    # Merkezden yukarı sapma toleransı (örn: merkez 30 ise 45'te puan sıfırlanır)
+
+# --- EMA Hizalama ve Dizilim Puanları (LONG Stratejiler) ---
+# Fiyatın ve EMA'ların birbiri üzerindeki konumlarına göre verilen kısmi puanlar (Toplamı ~100)
+SOFT_EMA_ALIGN_PRICE_FAST = 30.0     # Fiyat > EMA(Fast) ise verilecek puan
+SOFT_EMA_ALIGN_FAST_MID = 40.0       # EMA(Fast) > EMA(Mid) ise verilecek puan
+SOFT_EMA_ALIGN_MID_SLOW = 30.0       # EMA(Mid) > EMA(Slow) ise verilecek puan
+SOFT_EMA_ALIGN_FAST_SLOW = 15.0      # Sadece EMA(Fast) > EMA(Slow) ise verilecek puan (Mid tutmuyorsa)
+SOFT_EMA_ALIGN_NO_SLOW = 15.0        # EMA(Slow) verisi yoksa verilen varsayılan puan
+
+# --- EMA Dip Mesafesi Puanlaması (Dip Avcılığı İçin) ---
+# Fiyatın EMA altındaki derinliğini fırsat bilip ekstra puan üreten lojik
+SOFT_EMA_DIP_MAX_SCORE = 40.0        # Fiyat EMA'dan çok uzaktaysa alınabilecek maksimum puan
+SOFT_EMA_DIP_MIN_SCORE = 5.0         # Fiyat EMA'nın üzerindeyse verilen minimum puan
+SOFT_EMA_DIP_STRUCT_BULL = 35.0      # Fiyat dipte ama EMA yapısı boğa (Fast > Mid) kaldıysa fırsat bonusu
+SOFT_EMA_DIP_STRUCT_BEAR = 10.0      # EMA yapısı ayıya döndüyse düşük fırsat bonusu
+SOFT_EMA_DIP_SLOW_BULL = 25.0        # EMA(Slow) bazlı uzun vadeli yapı boğaysa eklenecek puan
+SOFT_EMA_DIP_SLOW_HALF = 12.0        # Kısmi boğa yapısı (sadece Fast > Slow)
+SOFT_EMA_DIP_SLOW_NONE = 12.0        # Slow verisi eksikse verilecek nötr puan
+
+# --- EMA Hizalama ve Dizilim Puanları (SHORT Stratejiler) ---
+# Fiyatın ve EMA'ların altında olması durumunda verilen puanlar (Ayı dizilimi)
+SOFT_EMA_SHORT_PRICE_FAST = 30.0     # Fiyat < EMA(Fast) ise
+SOFT_EMA_SHORT_FAST_MID = 40.0       # EMA(Fast) < EMA(Mid) ise (Death cross)
+SOFT_EMA_SHORT_MID_SLOW = 30.0       # EMA(Mid) < EMA(Slow) ise (Tam ayı dizilimi)
+SOFT_EMA_SHORT_FAST_SLOW = 15.0      # Kısmi ayı dizilimi
+SOFT_EMA_SHORT_NO_SLOW = 15.0        # Veri yoksa verilen puan
+
+# --- Piyasa Rejimi (Regime) Puan Çarpanları ---
+# Makro rejim algılandığında temel skorun üzerine eklenecek taban puanlar
+SOFT_REGIME_BULL = 100.0             # Boğa rejimindeyken
+SOFT_REGIME_NEUTRAL = 50.0           # Nötr (Yatay) rejimdeyken
+SOFT_REGIME_BEAR = 10.0              # Ayı rejimindeyken
+
+# --- Mantıksal Eşik Puanları (İkili Durumlar) ---
+SOFT_ENGULFING_YES = 85.0            # Yutan mum formasyonu varsa
+SOFT_ENGULFING_NO = 30.0             # Yoksa (Cezalandırılır ama tamamen sıfırlanmaz)
+SOFT_RSI_DIR_UP = 80.0               # RSI yukarı yönlüyse
+SOFT_RSI_DIR_DOWN = 20.0             # RSI aşağı yönlüyse
+SOFT_MACRO_ALIGNED = 90.0            # Endeks/BTC yönü stratejiyle aynı yöndeyse
+SOFT_MACRO_NOT_ALIGNED = 30.0        # Makro uyum yoksa
+
+# --- Stop Loss (SL) Ceza Seviyeleri ---
+SOFT_PENALTY_0 = 100.0               # Ardışık SL yok (Tertemiz, tam puan)
+SOFT_PENALTY_1 = 75.0                # 1 ardışık SL yemiş (%25 kesinti)
+SOFT_PENALTY_2 = 45.0                # 2 ardışık SL yemiş (Riskli, skor düşürülür)
+SOFT_PENALTY_3_PLUS = 0.0            # 3 veya daha fazla ardışık SL (Skor sıfırlanır)
+
+# --- Logaritmik Hacim Ölçeklemesi (Min-Max Aralıkları) ---
+# Mutlak hacimlerin logaritmik olarak puanlanmasında kullanılan sınırlar
+SOFT_DOLLAR_VOL_CRYPTO_MIN = 100_000         # Kriptoda 0 puan getirecek en alt USD hacim sınırı
+SOFT_DOLLAR_VOL_CRYPTO_MAX = 10_000_000      # Kriptoda 100 puan getirecek tavan USD hacim sınırı
+SOFT_DOLLAR_VOL_EMTIA_MIN = 50_000           # Emtiada alt sınır
+SOFT_DOLLAR_VOL_EMTIA_MAX = 5_000_000        # Emtiada üst sınır
+SOFT_DOLLAR_VOL_BIST_MIN = 1_000_000         # BIST'te (TL) alt sınır
+SOFT_DOLLAR_VOL_BIST_MAX = 100_000_000       # BIST'te (TL) üst sınır
+
+# Rejim-Adaptif Conviction Eşikleri
+REGIME_THRESHOLDS_BULL = {"STRONG": 75, "MEDIUM": 60, "WATCH": 45}
+REGIME_THRESHOLDS_NEUTRAL = {"STRONG": 75, "MEDIUM": 52, "WATCH": 38}
+REGIME_THRESHOLDS_BEAR = {"STRONG": 80, "MEDIUM": 48, "WATCH": 35}
+
+# ════════════════════════════════════════
 # Bollinger & Squeeze
 # ════════════════════════════════════════
 BB_SQUEEZE_WIDTH = 0.15

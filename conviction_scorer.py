@@ -25,6 +25,36 @@ import json
 import threading
 from dataclasses import dataclass, field
 
+from config import (
+    SOFT_ADX_CENTER, SOFT_ADX_K,
+    SOFT_VOL_RATIO_CENTER, SOFT_VOL_RATIO_K,
+    SOFT_RR_CENTER, SOFT_RR_K,
+    SOFT_RSI_TREND_CENTER, SOFT_RSI_TREND_MULT,
+    SOFT_RSI_OVERSOLD_BIST_CENTER, SOFT_RSI_OVERSOLD_CRYPTO_CENTER,
+    SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX,
+    SOFT_EMA_DIP_MULT, SOFT_EMA_DIP_MAX_PCT,
+    REGIME_THRESHOLDS_BULL, REGIME_THRESHOLDS_NEUTRAL, REGIME_THRESHOLDS_BEAR,
+    # V3.4 Soft Score Magic Number Aktarımı
+    SOFT_ADX_MATURITY_START, SOFT_ADX_MATURITY_MULT, SOFT_ADX_MATURITY_MIN,
+    SOFT_ADX_MOMENTUM_UP, SOFT_ADX_MOMENTUM_DOWN,
+    SOFT_RSI_OVERSOLD_MIN_DIST, SOFT_RSI_OVERSOLD_MAX_DIST,
+    SOFT_EMA_ALIGN_PRICE_FAST, SOFT_EMA_ALIGN_FAST_MID, SOFT_EMA_ALIGN_MID_SLOW,
+    SOFT_EMA_ALIGN_FAST_SLOW, SOFT_EMA_ALIGN_NO_SLOW,
+    SOFT_EMA_DIP_MAX_SCORE, SOFT_EMA_DIP_MIN_SCORE, SOFT_EMA_DIP_STRUCT_BULL,
+    SOFT_EMA_DIP_STRUCT_BEAR, SOFT_EMA_DIP_SLOW_BULL, SOFT_EMA_DIP_SLOW_HALF,
+    SOFT_EMA_DIP_SLOW_NONE,
+    SOFT_EMA_SHORT_PRICE_FAST, SOFT_EMA_SHORT_FAST_MID, SOFT_EMA_SHORT_MID_SLOW,
+    SOFT_EMA_SHORT_FAST_SLOW, SOFT_EMA_SHORT_NO_SLOW,
+    SOFT_REGIME_BULL, SOFT_REGIME_NEUTRAL, SOFT_REGIME_BEAR,
+    SOFT_ENGULFING_YES, SOFT_ENGULFING_NO,
+    SOFT_RSI_DIR_UP, SOFT_RSI_DIR_DOWN,
+    SOFT_MACRO_ALIGNED, SOFT_MACRO_NOT_ALIGNED,
+    SOFT_PENALTY_0, SOFT_PENALTY_1, SOFT_PENALTY_2, SOFT_PENALTY_3_PLUS,
+    SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_CRYPTO_MAX,
+    SOFT_DOLLAR_VOL_EMTIA_MIN, SOFT_DOLLAR_VOL_EMTIA_MAX,
+    SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,19 +180,19 @@ def score_adx(adx_value: float, adx_prev: float = None) -> float:
     if _is_nan(adx_value):
         return 0.0
 
-    base = sigmoid_score(adx_value, center=25, k=0.3)
+    base = sigmoid_score(adx_value, center=SOFT_ADX_CENTER, k=SOFT_ADX_K)
 
-    # Olgunlaşma cezası: ADX > 40 → trend olgunlaştı, azalan fırsat
-    if adx_value > 40:
-        decay = (adx_value - 40) * 3
-        base = max(15, base - decay)
+    # Olgunlaşma cezası: trend olgunlaştı, azalan fırsat
+    if adx_value > SOFT_ADX_MATURITY_START:
+        decay = (adx_value - SOFT_ADX_MATURITY_START) * SOFT_ADX_MATURITY_MULT
+        base = max(SOFT_ADX_MATURITY_MIN, base - decay)
 
     # Momentum bonusu/cezası: yükselen ADX = güç artıyor
     if not _is_nan(adx_prev):
         if adx_value > adx_prev:
-            base = min(100, base * 1.10)
+            base = min(100, base * SOFT_ADX_MOMENTUM_UP)
         else:
-            base *= 0.85
+            base *= SOFT_ADX_MOMENTUM_DOWN
 
     return round(base, 1)
 
@@ -176,8 +206,8 @@ def score_rsi_oversold(rsi: float, market: str = "BIST") -> float:
     """
     if _is_nan(rsi):
         return 0.0
-    center = 35 if market == "BIST" else 28
-    return round(inverse_linear_score(rsi, center - 20, center + 15), 1)
+    center = SOFT_RSI_OVERSOLD_BIST_CENTER if market == "BIST" else SOFT_RSI_OVERSOLD_CRYPTO_CENTER
+    return round(inverse_linear_score(rsi, center - SOFT_RSI_OVERSOLD_MIN_DIST, center + SOFT_RSI_OVERSOLD_MAX_DIST), 1)
 
 
 def score_rsi_trend(rsi: float, market: str = "BIST") -> float:
@@ -187,9 +217,9 @@ def score_rsi_trend(rsi: float, market: str = "BIST") -> float:
     """
     if _is_nan(rsi):
         return 0.0
-    center = 52
+    center = SOFT_RSI_TREND_CENTER
     dist = abs(rsi - center)
-    return round(max(0, 100 - dist * 2.0), 1)  # 3→2.0: güçlü trendlerde RSI sürtünmesi azaltıldı
+    return round(max(0, 100 - dist * SOFT_RSI_TREND_MULT), 1)
 
 
 def score_volume_ratio(volume: float, vol_sma: float) -> float:
@@ -202,7 +232,7 @@ def score_volume_ratio(volume: float, vol_sma: float) -> float:
     if _is_nan(vol_sma) or vol_sma <= 0 or _is_nan(volume):
         return 0.0
     ratio = volume / vol_sma
-    return round(sigmoid_score(ratio, center=1.5, k=2.5), 1)
+    return round(sigmoid_score(ratio, center=SOFT_VOL_RATIO_CENTER, k=SOFT_VOL_RATIO_K), 1)
 
 
 def score_dollar_volume(dollar_vol: float, market: str = "KRIPTO") -> float:
@@ -210,11 +240,11 @@ def score_dollar_volume(dollar_vol: float, market: str = "KRIPTO") -> float:
     if _is_nan(dollar_vol) or dollar_vol <= 0:
         return 0.0
     if market == "KRIPTO":
-        return round(log_score(dollar_vol, 100_000, 10_000_000), 1)
+        return round(log_score(dollar_vol, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_CRYPTO_MAX), 1)
     elif market == "EMTIA":
-        return round(log_score(dollar_vol, 50_000, 5_000_000), 1)
+        return round(log_score(dollar_vol, SOFT_DOLLAR_VOL_EMTIA_MIN, SOFT_DOLLAR_VOL_EMTIA_MAX), 1)
     else:  # BIST
-        return round(log_score(dollar_vol, 1_000_000, 100_000_000), 1)
+        return round(log_score(dollar_vol, SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX), 1)
 
 
 def score_rr_ratio(rr: float) -> float:
@@ -226,7 +256,7 @@ def score_rr_ratio(rr: float) -> float:
     """
     if _is_nan(rr) or rr <= 0:
         return 0.0
-    return round(sigmoid_score(rr, center=2.0, k=2.0), 1)
+    return round(sigmoid_score(rr, center=SOFT_RR_CENTER, k=SOFT_RR_K), 1)
 
 
 def score_ema_alignment(price: float, ema_fast: float, ema_mid: float,
@@ -241,16 +271,16 @@ def score_ema_alignment(price: float, ema_fast: float, ema_mid: float,
 
     score = 0.0
     if price > ema_fast:
-        score += 30
+        score += SOFT_EMA_ALIGN_PRICE_FAST
     if ema_fast > ema_mid:
-        score += 40
+        score += SOFT_EMA_ALIGN_FAST_MID
     if not _is_nan(ema_slow):
         if ema_mid > ema_slow:
-            score += 30
+            score += SOFT_EMA_ALIGN_MID_SLOW
         elif ema_fast > ema_slow:
-            score += 15
+            score += SOFT_EMA_ALIGN_FAST_SLOW
     else:
-        score += 15  # Veri yoksa nötr
+        score += SOFT_EMA_ALIGN_NO_SLOW  # Veri yoksa nötr
 
     return score
 
@@ -270,24 +300,24 @@ def score_ema_dip_distance(price: float, ema_fast: float, ema_mid: float,
     # Fiyatın EMA'dan uzaklığı: daha aşağıda = daha iyi
     if price < ema_fast:
         pct_below = (ema_fast - price) / ema_fast * 100
-        score += min(40, pct_below * 8)  # %5 aşağıda = 40 puan tam
+        score += min(SOFT_EMA_DIP_MAX_SCORE, pct_below * SOFT_EMA_DIP_MULT)  # Dinamik çarpan
     else:
-        score += 5  # EMA üstünde = minimal puan
+        score += SOFT_EMA_DIP_MIN_SCORE  # EMA üstünde = minimal puan
 
     # EMA yapısal sağlık: hala boğa dizilimi = bounce şansı yüksek
     if ema_fast > ema_mid:
-        score += 35  # Yapı bozulmamış = büyük bonus
+        score += SOFT_EMA_DIP_STRUCT_BULL  # Yapı bozulmamış = büyük bonus
     else:
-        score += 10  # Yapı bozuk = düşük bonus
+        score += SOFT_EMA_DIP_STRUCT_BEAR  # Yapı bozuk = düşük bonus
 
     # Slow EMA bonus
     if not _is_nan(ema_slow):
         if ema_mid > ema_slow:
-            score += 25  # Uzun vadeli trend sağlam
+            score += SOFT_EMA_DIP_SLOW_BULL  # Uzun vadeli trend sağlam
         elif ema_fast > ema_slow:
-            score += 12
+            score += SOFT_EMA_DIP_SLOW_HALF
     else:
-        score += 12  # Veri yoksa nötr
+        score += SOFT_EMA_DIP_SLOW_NONE  # Veri yoksa nötr
 
     return min(100.0, score)
 
@@ -304,37 +334,37 @@ def score_ema_short(price: float, ema_fast: float, ema_mid: float,
 
     score = 0.0
     if price < ema_fast:
-        score += 30  # Fiyat EMA altında = SHORT güçlü
+        score += SOFT_EMA_SHORT_PRICE_FAST  # Fiyat EMA altında = SHORT güçlü
     if ema_fast < ema_mid:
-        score += 40  # Death cross = düşüş trendi
+        score += SOFT_EMA_SHORT_FAST_MID  # Death cross = düşüş trendi
     if not _is_nan(ema_slow):
         if ema_mid < ema_slow:
-            score += 30  # Tam ayı dizilimi
+            score += SOFT_EMA_SHORT_MID_SLOW  # Tam ayı dizilimi
         elif ema_fast < ema_slow:
-            score += 15
+            score += SOFT_EMA_SHORT_FAST_SLOW
     else:
-        score += 15  # Veri yoksa nötr
+        score += SOFT_EMA_SHORT_NO_SLOW  # Veri yoksa nötr
 
     return score
 
 
 def score_regime(regime: str) -> float:
     """Piyasa rejimi puanlama — LONG stratejiler (BULL/NEUTRAL/BEAR)."""
-    return {"BULL": 100.0, "NEUTRAL": 50.0, "BEAR": 10.0}.get(regime, 50.0)
+    return {"BULL": SOFT_REGIME_BULL, "NEUTRAL": SOFT_REGIME_NEUTRAL, "BEAR": SOFT_REGIME_BEAR}.get(regime, 50.0)
 
 
 def score_regime_short(regime: str) -> float:
     """SHORT stratejileri için piyasa rejimi (BEAR = iyi, BULL = kötü)."""
-    return {"BEAR": 100.0, "NEUTRAL": 50.0, "BULL": 10.0}.get(regime, 50.0)
+    return {"BEAR": SOFT_REGIME_BULL, "NEUTRAL": SOFT_REGIME_NEUTRAL, "BULL": SOFT_REGIME_BEAR}.get(regime, 50.0)
 
 
 def score_engulfing(has_engulfing: bool) -> float:
     """
     Engulfing mum onayı puanlama.
     Eski: yoksa → TAM REDDET
-    Yeni: var→85, yok→30 (cezalandır ama öldürme)
+    Yeni: var→SOFT_ENGULFING_YES, yok→SOFT_ENGULFING_NO (cezalandır ama öldürme)
     """
-    return 85.0 if has_engulfing else 30.0
+    return SOFT_ENGULFING_YES if has_engulfing else SOFT_ENGULFING_NO
 
 
 def score_rsi_direction(rsi_current: float, rsi_prev: float) -> float:
@@ -342,29 +372,28 @@ def score_rsi_direction(rsi_current: float, rsi_prev: float) -> float:
     if _is_nan(rsi_current) or _is_nan(rsi_prev):
         return 50.0
     if rsi_current > rsi_prev:
-        return 80.0
+        return SOFT_RSI_DIR_UP
     elif rsi_current < rsi_prev:
-        return 20.0
+        return SOFT_RSI_DIR_DOWN
     return 50.0
 
 
 def score_macro_alignment(is_aligned: bool) -> float:
     """Makro uyum puanlama (endeks/BTC yönü)."""
-    return 90.0 if is_aligned else 30.0
+    return SOFT_MACRO_ALIGNED if is_aligned else SOFT_MACRO_NOT_ALIGNED
 
 
 def score_penalty_level(consecutive_sl: int) -> float:
     """
     Ceza seviyesi puanlama.
-    0 SL → 100, 1 SL → 75, 2 SL → 45, 3-4 → düşük, 5+ → hard block
     """
     if consecutive_sl <= 0:
-        return 100.0
+        return SOFT_PENALTY_0
     elif consecutive_sl == 1:
-        return 75.0
+        return SOFT_PENALTY_1
     elif consecutive_sl == 2:
-        return 45.0
-    return 0.0
+        return SOFT_PENALTY_2
+    return SOFT_PENALTY_3_PLUS
 
 
 # ════════════════════════════════════════
@@ -576,14 +605,20 @@ def calculate_conviction(
 
     result.total_score = round(total, 1)
 
-    # Rejim-adaptif eşikler: regime skoru düşükse eşikleri gevşet
+    # Rejim-adaptif eşikler: config tabanlı sıkılaştırılmış limitler
     regime_score = scores.get("regime", 50.0)
     if regime_score >= 80:       # BULL (veya SHORT'ta BEAR → iyi)
-        t_strong, t_medium, t_watch = THRESHOLD_STRONG, THRESHOLD_MEDIUM, THRESHOLD_WATCH
+        t_strong = REGIME_THRESHOLDS_BULL["STRONG"]
+        t_medium = REGIME_THRESHOLDS_BULL["MEDIUM"]
+        t_watch = REGIME_THRESHOLDS_BULL["WATCH"]
     elif regime_score >= 40:     # NEUTRAL
-        t_strong, t_medium, t_watch = 68, 52, 38
+        t_strong = REGIME_THRESHOLDS_NEUTRAL["STRONG"]
+        t_medium = REGIME_THRESHOLDS_NEUTRAL["MEDIUM"]
+        t_watch = REGIME_THRESHOLDS_NEUTRAL["WATCH"]
     else:                        # BEAR long pozisyonlar (regime=10)
-        t_strong, t_medium, t_watch = 65, 48, 35
+        t_strong = REGIME_THRESHOLDS_BEAR["STRONG"]
+        t_medium = REGIME_THRESHOLDS_BEAR["MEDIUM"]
+        t_watch = REGIME_THRESHOLDS_BEAR["WATCH"]
 
     if total >= t_strong:
         result.grade = CONVICTION_STRONG
@@ -686,7 +721,7 @@ def build_breakout_scores(
     market="BIST",
 ):
     """Kırılım/Squeeze stratejileri (BIST 3/5, KRİPTO 3) için skor paketi."""
-    squeeze_score = inverse_linear_score(bb_width, 0.05, 0.20) if bb_width else 50.0
+    squeeze_score = inverse_linear_score(bb_width, SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX) if bb_width else 50.0
 
     return {
         "adx":           squeeze_score,

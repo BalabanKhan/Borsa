@@ -785,7 +785,11 @@ def check_active_trades(current_prices_dict):
     # Kapanan işlemleri arşivle + Circuit Breaker bildir
     if closed_trades:
         _archive_closed_trades(closed_trades)
-        # FM-03: Circuit Breaker — SL/TP sayacı güncelle
+        # FM-03: Lokal Devre Kesici (Circuit Breaker) — Hisse Bazlı İzolasyon
+        # Sistem global bir devre kesici yerine hisse bazlı (lokal) çalışır.
+        # Böylece bir hissede peş peşe stop olunursa, sadece o hisse cezalandırılır (penalty box),
+        # sistemin geri kalanı veya diğer hisseler/stratejiler çalışmaya devam eder.
+        # Bu yapı "cascading failure" (zincirleme çöküş) riskini önler.
         cb_notifications = []
         for ct in closed_trades:
             status = ct.get("status", "")
