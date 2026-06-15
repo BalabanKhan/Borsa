@@ -5,3 +5,4 @@ ccxt
 pandas
 pandas_ta
 yfinance
+openpyxl
