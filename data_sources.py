@@ -380,7 +380,7 @@ def get_crypto_data(symbol):
         df_1d = guard_dataframe(df_1d, symbol, '1d')
         df_4h = guard_dataframe(df_4h, symbol, '4h')
         if df_1d is None or df_4h is None:
-            logging.warning(f'[get_crypto_data] {symbol}: Kraken verisi DataGuard reddetti')
+            raise ValueError(f'[get_crypto_data] {symbol}: Kraken verisi DataGuard reddetti')
         else:
             return df_1d, df_4h
     except Exception as ekr:
