@@ -1315,7 +1315,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 _tp_c6 = current_price * 1.10
                 _rr_c6 = abs(_tp_c6 - current_price) / max(abs(current_price - sl), 1e-8)
                 _scores_c6 = build_trend_scores(
-                    adx=None, price=current_price, ema_fast=vwap_val, ema_mid=None, ema_slow=None,
+                    adx=None, adx_prev=None, price=current_price, ema_fast=vwap_val, ema_mid=None, ema_slow=None,
+                    rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
                     volume=last_4h.get('volume', 0), vol_sma=None, dollar_vol=last_4h.get('volume', 0) * current_price,
                     rr=_rr_c6, has_engulfing=True, regime="BULL", macro_aligned=btc_ok,
                     consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
