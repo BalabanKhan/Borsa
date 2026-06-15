@@ -527,7 +527,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                                 now = datetime.now(ZoneInfo("Europe/Istanbul"))
                                 if now.time() >= dt_time(10, 30):
                                     sl = current_price - dynamic_sl_dist
-                                    _tp3 = current_price * 1.10
+                                    _tp3 = current_price + (dynamic_sl_dist * 3.0)
                                     _rr3 = abs(_tp3 - current_price) / max(abs(current_price - sl), 1e-8)
                                     _scores3 = build_breakout_scores(
                                         bb_width=bb_width, price=current_price,
@@ -605,7 +605,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
                 ema_fallback = last_1d.get('EMA_21', last_1d.get('EMA_8', current_price * 0.95))
                 sl = min(sq_mid, ema_fallback) if not pd.isna(ema_fallback) else sq_mid
-                _tp5u = current_price * 1.15
+                _tp5u = current_price + (dynamic_sl_dist * 3.0)
                 _rr5u = abs(_tp5u - current_price) / max(abs(current_price - sl), 1e-8)
                 _scores5u = build_breakout_scores(
                     bb_width=None, price=current_price,
@@ -637,7 +637,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
                 ema_fallback = last_1d.get('EMA_21', last_1d.get('EMA_8', current_price * 1.05))
                 sl = max(sq_mid, ema_fallback) if not pd.isna(ema_fallback) else sq_mid
-                _tp5d = current_price * 0.85
+                _tp5d = current_price - (dynamic_sl_dist * 3.0)
                 _rr5d = abs(current_price - _tp5d) / max(abs(sl - current_price), 1e-8)
                 _scores5d = build_breakout_scores(
                     bb_width=None, price=current_price,
@@ -676,7 +676,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                         sl = swing_lows_rs[-1][1] * 0.98
                     else:
                         sl = current_price * 0.95
-                    _tp6 = current_price * 1.12
+                    _tp6 = current_price + (dynamic_sl_dist * 3.0)
                     _rr6 = abs(_tp6 - current_price) / max(abs(current_price - sl), 1e-8)
                     _scores6 = build_trend_scores(
                         adx=None, adx_prev=None,
@@ -720,7 +720,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 guarded_vol_sma = _apply_volume_sma_guard(df_1h, vol_sma_20)
                 if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
                     sl = wick_low * 0.995
-                    _tp7 = current_price * 1.06
+                    _tp7 = current_price + (dynamic_sl_dist * 3.0)
                     _rr7 = abs(_tp7 - current_price) / max(abs(current_price - sl), 1e-8)
                     _scores7 = build_trend_scores(
                         adx=None, adx_prev=None,
@@ -757,7 +757,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
             sl = (obv_box_high + obv_box_low) / 2
             cmf_val = calculate_cmf(df_1d)
             cmf_label = f"CMF: {cmf_val:.3f} (Temiz ✅)" if cmf_val is not None else "CMF: N/A"
-            _tp8 = current_price * 1.12
+            _tp8 = current_price + (dynamic_sl_dist * 3.0)
             _rr8 = abs(_tp8 - current_price) / max(abs(current_price - sl), 1e-8)
             _scores8 = build_dip_scores(
                 rsi_daily=last_1d.get('RSI_14', 50), rsi_hourly=last_1h.get('RSI_14', 50),
@@ -949,7 +949,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             if oi_crash:
                                 lowest_wick = last_4h['low']
                                 sl = lowest_wick * 0.99
-                                tp = current_price * 1.15
+                                sl_dist = abs(current_price - sl)
+                                tp = current_price + (sl_dist * 3.0)
                                 _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
                                 _prev_4h = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
                                 _scores_c1 = build_dip_scores(
@@ -997,7 +998,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         sl_atr = current_price - capped_sl_dist
                                         sl_ema = last_4h.get('EMA_50', current_price) * 0.98
                                         sl = max(sl_atr, sl_ema)
-                                        _tp_c2 = current_price * 1.30
+                                        sl_dist = abs(current_price - sl)
+                                        _tp_c2 = current_price + (sl_dist * 3.0)
                                         _rr_c2 = abs(_tp_c2 - current_price) / max(abs(current_price - sl), 1e-8)
                                         _adx_prev_c2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
                                         _prev_4h_c2 = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
@@ -1043,7 +1045,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                     # AM-03: Mutlak saatlik hacim eşiği
                                     if _has_absolute_hourly_volume(last_4h['volume'], current_price, "KRIPTO"):
                                         sl = current_price * 0.95
-                                        _tp_c3 = current_price * 1.15
+                                        sl_dist = abs(current_price - sl)
+                                        _tp_c3 = current_price + (sl_dist * 3.0)
                                         _rr_c3 = abs(_tp_c3 - current_price) / max(abs(current_price - sl), 1e-8)
                                         _scores_c3 = build_breakout_scores(
                                             bb_width=last_width, price=current_price,
@@ -1076,7 +1079,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 msb_ok, msb_low, msb_idx = sniper_detect_msb(df_4h, swing_lows, point_type="low")
                 if div_found or msb_ok:
                     sl = last_4h['high'] * 1.02
-                    tp = current_price * 0.85
+                    sl_dist = abs(sl - current_price)
+                    tp = current_price - (sl_dist * 3.0)
                     trigger_reason = "Negatif Uyuşmazlık" if div_found else "Market Structure Break (Düşük Dip)"
                     _rr_s1 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                     _adx_prev_s1 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
@@ -1112,7 +1116,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             raw_atr_sl = ATR_MULTIPLIER_CRYPTO * atr_val
                             capped_sl_dist = min(raw_atr_sl, current_price * ATR_CAP_CRYPTO)
                             sl = current_price + capped_sl_dist
-                            tp = current_price * 0.80
+                            sl_dist = abs(sl - current_price)
+                            tp = current_price - (sl_dist * 3.0)
                             _rr_s2 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                             _adx_prev_s2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
                             _scores_s2 = build_short_scores(
@@ -1151,7 +1156,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             funding_rate = get_funding_rate(symbol)
                             if funding_rate >= 0.0:
                                 sl = support_lookback * 1.02
-                                tp = current_price * 0.80
+                                sl_dist = abs(sl - current_price)
+                                tp = current_price - (sl_dist * 3.0)
                                 _rr_s3 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                                 _adx_prev_s3 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
                                 _scores_s3 = build_short_scores(
@@ -1276,11 +1282,13 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 ema20_4h = last_4h.get('EMA_20', current_price)
                 if sq_dir == "up":
                     sl = min(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
-                    tp = current_price * 1.20
+                    sl_dist = abs(current_price - sl)
+                    tp = current_price + (sl_dist * 3.0)
                     sig_type = "AL"
                 else:
                     sl = max(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
-                    tp = current_price * 0.80
+                    sl_dist = abs(sl - current_price)
+                    tp = current_price - (sl_dist * 3.0)
                     sig_type = "SAT"
                 _rr_c5 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8) if sig_type == "AL" else abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                 _scores_c5 = build_breakout_scores(
@@ -1312,7 +1320,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
             bounce_ok, wick_low = detect_vwap_bounce(df_4h, vwap_val)
             if bounce_ok and wick_low is not None:
                 sl = wick_low * 0.99
-                _tp_c6 = current_price * 1.10
+                sl_dist = abs(current_price - sl)
+                _tp_c6 = current_price + (sl_dist * 3.0)
                 _rr_c6 = abs(_tp_c6 - current_price) / max(abs(current_price - sl), 1e-8)
                 _scores_c6 = build_trend_scores(
                     adx=None, adx_prev=None, price=current_price, ema_fast=vwap_val, ema_mid=None, ema_slow=None,
@@ -1349,7 +1358,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 sl = (obv_box_high + obv_box_low) / 2  # RED-12: Kutu ortası SL
                 cmf_val = calculate_cmf(df_1d)
                 cmf_label = f"CMF: {cmf_val:.3f} ✅" if cmf_val is not None else "CMF: N/A"
-                _tp_c7 = current_price * 1.20
+                sl_dist = abs(current_price - sl)
+                _tp_c7 = current_price + (sl_dist * 3.0)
                 _rr_c7 = abs(_tp_c7 - current_price) / max(abs(current_price - sl), 1e-8)
                 _scores_c7 = build_dip_scores(
                     rsi_daily=last_1d.get('RSI_14'), rsi_hourly=None, rsi_prev=None,
