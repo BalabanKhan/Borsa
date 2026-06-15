@@ -38,6 +38,7 @@ from config import (  # noqa: F401
 # ═══ Data Sources (Veri Çekme) ═══
 from data_sources import (  # noqa: F401
     get_bist_data, get_crypto_data, get_emtia_data, get_bist_15m_data,
+    get_emtia_1h_data,
     get_bist_data_batch, get_bist_15m_batch,
     get_crypto_data_cached, clear_cycle_cache, purge_expired_cache,
     is_bist_open, is_weekend_fakeout_time, check_xu100_wind,

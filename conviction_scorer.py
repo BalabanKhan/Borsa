@@ -53,7 +53,7 @@ from config import (
     SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_CRYPTO_MAX,
     SOFT_DOLLAR_VOL_EMTIA_MIN, SOFT_DOLLAR_VOL_EMTIA_MAX,
     SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX,
-    RR_MINIMUM
+    RR_MINIMUM, SOFT_UNCERTAINTY_PENALTY
 )
 
 
@@ -337,6 +337,8 @@ def score_ema_dip_distance(price: float, ema_fast: float, ema_mid: float,
     return min(100.0, score)
 
 
+# 99 yapılmıştır
+# SHORT EMA dizilimi puanlamasında eksik veri durumunda nötr 50.0 yerine SOFT_UNCERTAINTY_PENALTY (0.0) dönülmektedir.
 def score_ema_short(price: float, ema_fast: float, ema_mid: float,
                     ema_slow: float = None) -> float:
     """
@@ -345,7 +347,7 @@ def score_ema_short(price: float, ema_fast: float, ema_mid: float,
     Ters dizilim (fast < mid < slow) = en iyi.
     """
     if _is_nan(price) or _is_nan(ema_fast) or _is_nan(ema_mid):
-        return 50.0  # Veri yoksa nötr (Bear Hunter NaN koruması)
+        return SOFT_UNCERTAINTY_PENALTY  # Veri yoksa belirsizlik cezası uygulanır
 
     score = 0.0
     if price < ema_fast:
@@ -382,10 +384,12 @@ def score_engulfing(has_engulfing: bool) -> float:
     return SOFT_ENGULFING_YES if has_engulfing else SOFT_ENGULFING_NO
 
 
+# 99 yapılmıştır
+# RSI yön puanlamasında eksik veri durumunda nötr 50.0 yerine SOFT_UNCERTAINTY_PENALTY (0.0) dönülmektedir.
 def score_rsi_direction(rsi_current: float, rsi_prev: float) -> float:
     """RSI yön puanlama: yükseliyor mu düşüyor mu."""
     if _is_nan(rsi_current) or _is_nan(rsi_prev):
-        return 50.0
+        return SOFT_UNCERTAINTY_PENALTY
     if rsi_current > rsi_prev:
         return SOFT_RSI_DIR_UP
     elif rsi_current < rsi_prev:
@@ -415,6 +419,8 @@ def score_penalty_level(consecutive_sl: int) -> float:
 # Hard Block Kontrolleri
 # ════════════════════════════════════════
 
+# 99 yapılmıştır
+# check_hard_blocks fonksiyonuna kritik veri eksikliği için is_core_indicators_nan parametresi ve HB-8 bloğu eklenmiştir.
 def check_hard_blocks(
     volume: float,
     price: float,
@@ -424,6 +430,7 @@ def check_hard_blocks(
     sl_direction_ok: bool = True,
     rr_ratio: float = None,
     consecutive_sl: int = 0,
+    is_core_indicators_nan: bool = False,
 ) -> tuple:
     """
     Asla esnetilemeyen güvenlik kontrolleri.
@@ -452,9 +459,11 @@ def check_hard_blocks(
     if rr_ratio is not None and rr_ratio < RR_MINIMUM:
         return True, f"HB-6: R:R < {RR_MINIMUM} — risk/ödül yetersiz"
 
-
     if consecutive_sl >= 5:
         return True, "HB-7: 5+ ardışık SL — yapısal sorun"
+
+    if is_core_indicators_nan:
+        return True, "HB-8: Kritik teknik gösterge verisi eksik (NaN) — işlem yapılamaz"
 
     return False, ""
 
@@ -601,6 +610,19 @@ def calculate_conviction(
         ConvictionResult
     """
     result = ConvictionResult()
+    
+    # 99 yapılmıştır
+    # Gönderilen soft skorlar içinde NaN varsa halüsinasyonu önlemek için HB-8 ile veto edilir.
+    is_core_indicators_nan = False
+    for factor in (weights or WEIGHTS).keys():
+        if factor in scores and _is_nan(scores[factor]):
+            is_core_indicators_nan = True
+            break
+
+    if is_core_indicators_nan:
+        hard_blocked = True
+        block_reason = "HB-8: Kritik teknik gösterge verisi eksik (NaN) — işlem yapılamaz"
+
     result.hard_blocked = hard_blocked
     result.hard_block_reason = block_reason
 

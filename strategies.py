@@ -35,7 +35,7 @@ from config import (
 from data_sources import (
     get_bist_data, get_crypto_data, get_emtia_data, get_bist_15m_data,
     get_bist_data_batch, get_bist_15m_batch,
-    get_crypto_data_cached, clear_cycle_cache, purge_expired_cache,
+    get_crypto_data_cached, get_crypto_1h_data, get_emtia_1h_data, clear_cycle_cache, purge_expired_cache,
     is_bist_open, is_weekend_fakeout_time, check_xu100_wind,
     get_btc_status, check_btc_not_pumping,
     get_funding_rate, fetch_crypto_oi_crash, get_btc_dominance_trend,
@@ -457,9 +457,14 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
         }
 
     # BIST 1: DİP AVCILIĞI (Turnaround)
+    # BIST 1: DİP AVCILIĞI (Turnaround)
     if not pd.isna(last_1d.get('RSI_14')):
         if last_1d[f'RSI_{config.IND_RSI_LENGTH}'] < 35:
-            if not pd.isna(last_1h.get('RSI_14')) and not pd.isna(prev_1h.get('RSI_14')) and not pd.isna(last_1h.get('EMA_8')) and not pd.isna(last_1h.get('vol_sma_20')):
+            # DIP_RSI_1D_SMA200_ALIGN_ENABLED: 1D Fiyat > SMA200 trend hizalamasını sorgular (Long yönlü teyit)
+            sma_200 = last_1d.get('SMA_200')
+            trend_aligned = not config.DIP_RSI_1D_SMA200_ALIGN_ENABLED or (sma_200 is not None and not pd.isna(sma_200) and current_price > sma_200)
+            
+            if trend_aligned and not pd.isna(last_1h.get('RSI_14')) and not pd.isna(prev_1h.get('RSI_14')) and not pd.isna(last_1h.get('EMA_8')) and not pd.isna(last_1h.get('vol_sma_20')):
                 if last_1h['close'] > last_1h['EMA_8'] and prev_1h['close'] <= prev_1h['EMA_8'] and last_1h['close'] > last_1h['open']:
                     # AM-01: Engulfing momentum onayı — ölü kedi sıçraması filtresi
                     if not check_bullish_engulfing_momentum(df_1h):
@@ -467,7 +472,11 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                     else:
                         # RED-01: Volume SMA manipülasyon koruması
                         guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
-                        if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                        
+                        # DIP_VOLUME_SPIKE_REQUIRED: dip dönüş mumunda hacim patlaması şartını sorgular (Volume Spike)
+                        volume_spike_ok = not config.DIP_VOLUME_SPIKE_REQUIRED or (last_1h['volume'] >= guarded_vol_sma * config.DIP_VOLUME_SPIKE_MULT)
+                        
+                        if volume_spike_ok and _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
                             if last_1h[f'RSI_{config.IND_RSI_LENGTH}'] > prev_1h[f'RSI_{config.IND_RSI_LENGTH}']:
                                 sl = current_price - dynamic_sl_dist
                                 tp = last_1d.get('EMA_21', current_price * 1.05)
@@ -492,8 +501,22 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
 
     # BIST 2: TREND TAKİBİ
     if not pd.isna(last_4h.get('ADX_14')) and not pd.isna(last_4h.get('EMA_8')) and not pd.isna(last_4h.get('EMA_21')):
+        # TREND_BB_SQUEEZE_BLOCKED: Dar bant squeeze içindeyken trend takibini bloke eder (Chop market engeli)
+        in_squeeze = False
+        if config.TREND_BB_SQUEEZE_BLOCKED:
+            bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
+            bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
+            bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
+            if bb_upper_col and bb_lower_col and bb_mid_col:
+                bbu = last_1d[bb_upper_col[0]]
+                bbl = last_1d[bb_lower_col[0]]
+                bbm = last_1d[bb_mid_col[0]]
+                bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
+                if bb_width < 0.15:
+                    in_squeeze = True
+
         # RED-02: ADX momentum kontrolü — gecikmeli ve olgunlaşmış trend filtresi
-        if _adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h[f'EMA_{config.IND_EMA_21}']:
+        if not in_squeeze and _adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h[f'EMA_{config.IND_EMA_21}']:
             if not pd.isna(last_1h.get('EMA_21')):
                 if last_1h['low'] <= last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h['open']:
                     # AM-01: Engulfing momentum onayı — pullback'te gerçek dönüş mü?
@@ -533,7 +556,14 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
 
         bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
         if bb_width < 0.15:
-            if current_price > month_high:
+            # BREAKOUT_RETEST_REQUIRED: direnç kırılımı sonrası retest/pullback aralığı teyidi
+            retest_ok = True
+            if config.BREAKOUT_RETEST_REQUIRED:
+                max_limit = month_high * (1.0 + (config.BREAKOUT_RETEST_TOLERANCE_PCT / 100.0))
+                if not (month_high <= current_price <= max_limit):
+                    retest_ok = False
+
+            if retest_ok and current_price > month_high:
                 # RED-05: Gap-Up filtresi — sabah gap'i ile sahte kırılım engelle
                 prev_close = df_1d.iloc[-2]['close'] if len(df_1d) >= 2 else current_price
                 gap_pct = abs(last_1h['open'] - prev_close) / max(prev_close, 1e-8) * 100
@@ -582,46 +612,66 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 sweep_idx = swing_lows[-1][0] if swing_lows else None
                 ote_top, ote_bottom = sniper_calculate_ote_body(df_4h, sweep_idx, msb_idx, direction="long")
                 if ote_top > 0 and ote_bottom > 0 and ote_bottom <= current_price <= ote_top:
-                    # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-                    if not pd.isna(last_1h.get('vol_sma_20')):
-                        guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
-                        if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
-                            has_fvg, fvg_low, fvg_high = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
-
-                            sl = sweep_low * 0.995
-                            sl_dist = max(current_price - sl, 1e-8)
-                            tp = current_price + (sl_dist * 3.0)
-                            fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
-                            _rr4 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
-                            _scores4 = build_breakout_scores(
-                                bb_width=None, price=current_price,
-                                ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
-                                volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
-                                rr=_rr4, regime=bist_regime,
-                                macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
-                            )
-                            _conv4 = calculate_conviction(_scores4)
-                            if _conv4.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                    "ticker": symbol, "market": "BIST",
-                                    "strategy": "BIST 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
-                                    "entry_price": current_price, "sl": sl, "tp": tp,
-                                    "conviction_score": _conv4.total_score, "conviction_grade": _conv4.grade, "conviction_details": _conv4.component_scores,
-                                    "position_size_pct": _conv4.position_size_pct,
-                                    "reason": (
-                                        f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
-                                        f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
-                                        f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
-                                        f"🎣 OTE Bölgesi (Gövde): {ote_bottom:.2f} - {ote_top:.2f}\n"
-                                        f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
-                                    ) + _conv4.to_reason_suffix()
-                                })
+                    # SMC OTE FVG Filtresi (SMC_FVG_REQUIRED = True ise FVG bulunması şarttır)
+                    has_fvg, Fvg_low, fvg_high = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
+                    fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                    
+                    if fvg_ok:
+                        # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
+                        ltf_confirm = True
+                        if config.SMC_LTF_MSB_CONFIRM:
+                            swing_highs_1h = sniper_find_swing_points(df_1h, point_type="high", neighbors=2)
+                            ltf_msb_ok, _, _ = sniper_detect_msb(df_1h, swing_highs_1h, point_type="high")
+                            if not ltf_msb_ok:
+                                ltf_confirm = False
+                        
+                        if ltf_confirm and not pd.isna(last_1h.get('vol_sma_20')):
+                            guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+                            if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                                sl = sweep_low * 0.995
+                                sl_dist = max(current_price - sl, 1e-8)
+                                tp = current_price + (sl_dist * 3.0)
+                                fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
+                                _rr4 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                                _scores4 = build_breakout_scores(
+                                    bb_width=None, price=current_price,
+                                    ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                                    volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                                    rr=_rr4, regime=bist_regime,
+                                    macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                                )
+                                if has_fvg:
+                                    # SMC_FVG_BONUS: FVG bulunması durumunda inanç skoruna (engulfing alt bileşeniyle) eklenir
+                                    _scores4["engulfing"] = min(100.0, _scores4["engulfing"] + config.SMC_FVG_BONUS)
+                                _conv4 = calculate_conviction(_scores4)
+                                if _conv4.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                        "ticker": symbol, "market": "BIST",
+                                        "strategy": "BIST 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
+                                        "entry_price": current_price, "sl": sl, "tp": tp,
+                                        "conviction_score": _conv4.total_score, "conviction_grade": _conv4.grade, "conviction_details": _conv4.component_scores,
+                                        "position_size_pct": _conv4.position_size_pct,
+                                        "reason": (
+                                            f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
+                                            f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
+                                            f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
+                                            f"🎣 OTE Bölgesi (Gövde): {ote_bottom:.2f} - {ote_top:.2f}\n"
+                                            f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
+                                        ) + _conv4.to_reason_suffix()
+                                    })
 
     # BIST 5: VOLATİLİTE SIKIŞMASI (Squeeze)
     squeeze_fired, sq_dir, sq_candle = detect_squeeze(df_1d)
     if squeeze_fired and sq_dir == "up" and not xu100_down:
+        # SQUEEZE_TREND_ALIGN_REQUIRED: squeeze patlama yönünün günlük ana trendle uyumu
+        trend_aligned = True
+        if config.SQUEEZE_TREND_ALIGN_REQUIRED:
+            sma_200 = last_1d.get('SMA_200')
+            if sma_200 is not None and not pd.isna(sma_200):
+                trend_aligned = current_price > sma_200
+
         # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-        if not pd.isna(last_1h.get('vol_sma_20')):
+        if trend_aligned and not pd.isna(last_1h.get('vol_sma_20')):
             guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
             if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
                 sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
@@ -652,8 +702,15 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                         ) + _conv5u.to_reason_suffix()
                     })
     elif squeeze_fired and sq_dir == "down":
+        # SQUEEZE_TREND_ALIGN_REQUIRED: squeeze patlama yönünün günlük ana trendle uyumu
+        trend_aligned = True
+        if config.SQUEEZE_TREND_ALIGN_REQUIRED:
+            sma_200 = last_1d.get('SMA_200')
+            if sma_200 is not None and not pd.isna(sma_200):
+                trend_aligned = current_price < sma_200
+
         # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-        if not pd.isna(last_1h.get('vol_sma_20')):
+        if trend_aligned and not pd.isna(last_1h.get('vol_sma_20')):
             guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
             if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
                 sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
@@ -689,8 +746,14 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
         rs_strong, rs_trend_up, idx_stressed, idx_recovering = calculate_relative_strength(df_1d, xu100_daily)
         # RED-14: İmkansız AND gevşetmesi — endeks stres dışındaysa da kabul et
         if rs_strong and rs_trend_up and (idx_recovering or not idx_stressed):
+            # RS_ENTRY_TIMING_RSI_LIMIT: timing teyidi (RSI çok aşırı alımda olmamalı, pull-back fırsatı sunmalı)
+            rsi_timing_ok = True
+            if not pd.isna(last_1h.get('RSI_14')):
+                if last_1h['RSI_14'] > config.RS_ENTRY_TIMING_RSI_LIMIT:
+                    rsi_timing_ok = False
+
             # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-            if not pd.isna(last_1h.get('vol_sma_20')):
+            if rsi_timing_ok and not pd.isna(last_1h.get('vol_sma_20')):
                 guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
                 if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
                     swing_lows_rs = sniper_find_swing_points(df_1d, point_type="low", neighbors=2)
@@ -851,17 +914,24 @@ def scan_orb_bist(symbol, df_15m):
     if current_price > cage_high and last['close'] > last['open']:
         if bist100_trend != "BULL":
              return signals  # Hard Block: Endeks Bullish değil
+
+        # ORB Hacim ve Gövde Kapanış Teyidi
+        # ORB_BODY_CLOSE_REQUIRED: Mum kapanış gövdesinin kafes üst sınırının üzerinde olmasını şart koşar.
+        # ORB_VOLUME_MULT: Kırılım hacminin, RVOL'in N katı olmasını şart koşar.
+        body_ok = not config.ORB_BODY_CLOSE_REQUIRED or (last['close'] > cage_high)
+        vol_ok = current_vol >= rvol * config.ORB_VOLUME_MULT
              
-        _sl9u = cage_mid
-        _tp9u = current_price + tp_range
-        _rr9u = abs(_tp9u - current_price) / max(abs(current_price - _sl9u), 1e-8)
-        _scores9u = build_breakout_scores(
-            bb_width=None, price=current_price,
-            ema_fast=ema21, ema_mid=today_vwap, ema_slow=None,
-            volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
-            rr=_rr9u, regime="BULL",
-            macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
-        )
+        if body_ok and vol_ok:
+            _sl9u = cage_mid
+            _tp9u = current_price + tp_range
+            _rr9u = abs(_tp9u - current_price) / max(abs(current_price - _sl9u), 1e-8)
+            _scores9u = build_breakout_scores(
+                bb_width=None, price=current_price,
+                ema_fast=ema21, ema_mid=today_vwap, ema_slow=None,
+                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
+                rr=_rr9u, regime="BULL",
+                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+            )
         _conv9u = calculate_conviction(_scores9u)
         if _conv9u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
@@ -883,16 +953,21 @@ def scan_orb_bist(symbol, df_15m):
     elif current_price < cage_low and last['close'] < last['open']:
         if bist100_trend == "BULL":
              return signals  # Hard Block: Endeks Bullish iken short açma
+
+        # ORB Hacim ve Gövde Kapanış Teyidi
+        body_ok = not config.ORB_BODY_CLOSE_REQUIRED or (last['close'] < cage_low)
+        vol_ok = current_vol >= rvol * config.ORB_VOLUME_MULT
              
-        _sl9d = cage_mid
-        _tp9d = current_price - tp_range
-        _rr9d = abs(tp_range) / max(abs(cage_mid - current_price), 1e-8)
-        _scores9d = build_breakout_scores(
-            bb_width=None, price=current_price, ema_fast=today_vwap, ema_mid=ema21, ema_slow=None,
-            volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
-            rr=_rr9d, regime="BEAR", macro_aligned=True,
-            consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
-        )
+        if body_ok and vol_ok:
+            _sl9d = cage_mid
+            _tp9d = current_price - tp_range
+            _rr9d = abs(tp_range) / max(abs(cage_mid - current_price), 1e-8)
+            _scores9d = build_breakout_scores(
+                bb_width=None, price=current_price, ema_fast=today_vwap, ema_mid=ema21, ema_slow=None,
+                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
+                rr=_rr9d, regime="BEAR", macro_aligned=True,
+                consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+            )
         _conv9d = calculate_conviction(_scores9d)
         if _conv9d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
@@ -927,9 +1002,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     df_1d = df_1d.copy()
     df_4h = df_4h.copy()
 
+    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
     df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
     df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
     df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
+    if len(df_1d) >= 200:
+        df_1d.ta.sma(length=200, append=True)
 
     df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
     df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
@@ -951,7 +1029,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
             "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
             "1H RSI": None,
             "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
-            "1D SMA 200": None,
+            "1D SMA 200": round(last_1d.get("SMA_200", 0), 2) if pd.notna(last_1d.get("SMA_200")) else None,
             "Trend": "Bullish" if last_1d.get("EMA_20", 0) > last_1d.get("EMA_50", float('inf')) else "Bearish",
             "1H Volume": last_4h.get("volume")
         }
@@ -960,43 +1038,66 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     # KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI
     if not is_weekend_fakeout_time():
         if not pd.isna(last_4h.get('RSI_14')) and not pd.isna(last_4h.get('EMA_20')) and not pd.isna(last_4h.get('vol_sma_20')):
-            div_found, _, _, _, _ = detect_bullish_divergence(df_4h)
-            if div_found:
-                # RED-07: Anlamlı hacim kontrolü + RED-06: Darth Maul filtresi
-                guarded_vol_sma = _apply_volume_sma_guard(df_4h, last_4h['vol_sma_20'])
-                if _is_meaningful_volume(last_4h['volume'], guarded_vol_sma, current_price, "KRIPTO"):
-                    if not _is_darth_maul(last_4h):
-                        if current_price > last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h['open']:
-                            oi_crash = fetch_crypto_oi_crash(symbol)
-                            if oi_crash:
-                                lowest_wick = last_4h['low']
-                                sl = lowest_wick * 0.99
-                                sl_dist = abs(current_price - sl)
-                                tp = current_price + (sl_dist * 3.0)
-                                _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
-                                _prev_4h = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
-                                _scores_c1 = build_dip_scores(
-                                    rsi_daily=last_4h.get('RSI_14', 50), rsi_hourly=last_4h.get('RSI_14', 50),
-                                    rsi_prev=_prev_4h.get('RSI_14', 50),
-                                    price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'),
-                                    volume=last_4h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_4h['volume'] * current_price,
-                                    rr=_rr_c1, has_engulfing=False, regime="BULL",
-                                    macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
-                                )
-                                _conv_c1 = calculate_conviction(_scores_c1)
-                                if _conv_c1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                        "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI", "signal": "AL",
-                                        "entry_price": current_price, "sl": sl, "tp": tp,
-                                        "conviction_score": _conv_c1.total_score, "conviction_grade": _conv_c1.grade, "conviction_details": _conv_c1.component_scores,
-                                        "position_size_pct": _conv_c1.position_size_pct,
-                                        "indicators": {"RSI_4S": round(last_4h.get("RSI_14", 0), 2)},
-                                        "reason": f"Pozitif Uyuşmazlık + OI Çöküşü (>%15) tespit edildi! Balina temizliği bitti." + _conv_c1.to_reason_suffix()
-                                    })
+            # DIP_RSI_1D_EMA50_ALIGN_ENABLED: Kripto 1G Fiyat > EMA50 trend hizalamasını sorgular (Long yönlü teyit)
+            ema_50_1d = last_1d.get(f'EMA_{config.IND_EMA_SLOW}') if last_1d is not None else None
+            trend_aligned = not config.DIP_RSI_1D_EMA50_ALIGN_ENABLED or (ema_50_1d is not None and not pd.isna(ema_50_1d) and current_price > ema_50_1d)
+
+            if trend_aligned:
+                div_found, _, _, _, _ = detect_bullish_divergence(df_4h)
+                if div_found:
+                    # RED-07: Anlamlı hacim kontrolü + RED-06: Darth Maul filtresi
+                    guarded_vol_sma = _apply_volume_sma_guard(df_4h, last_4h['vol_sma_20'])
+                    
+                    # DIP_VOLUME_SPIKE_REQUIRED: dip dönüş mumunda hacim patlaması şartını sorgular (Volume Spike)
+                    volume_spike_ok = not config.DIP_VOLUME_SPIKE_REQUIRED or (last_4h['volume'] >= guarded_vol_sma * config.DIP_VOLUME_SPIKE_MULT)
+                    
+                    if volume_spike_ok and _is_meaningful_volume(last_4h['volume'], guarded_vol_sma, current_price, "KRIPTO"):
+                        if not _is_darth_maul(last_4h):
+                            if current_price > last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h['open']:
+                                oi_crash = fetch_crypto_oi_crash(symbol)
+                                if oi_crash:
+                                    lowest_wick = last_4h['low']
+                                    sl = lowest_wick * 0.99
+                                    sl_dist = abs(current_price - sl)
+                                    tp = current_price + (sl_dist * 3.0)
+                                    _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                                    _prev_4h = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
+                                    _scores_c1 = build_dip_scores(
+                                        rsi_daily=last_4h.get('RSI_14', 50), rsi_hourly=last_4h.get('RSI_14', 50),
+                                        rsi_prev=_prev_4h.get('RSI_14', 50),
+                                        price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'),
+                                        volume=last_4h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_4h['volume'] * current_price,
+                                        rr=_rr_c1, has_engulfing=False, regime="BULL",
+                                        macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                                    )
+                                    _conv_c1 = calculate_conviction(_scores_c1)
+                                    if _conv_c1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                            "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI", "signal": "AL",
+                                            "entry_price": current_price, "sl": sl, "tp": tp,
+                                            "conviction_score": _conv_c1.total_score, "conviction_grade": _conv_c1.grade, "conviction_details": _conv_c1.component_scores,
+                                            "position_size_pct": _conv_c1.position_size_pct,
+                                            "indicators": {"RSI_4S": round(last_4h.get("RSI_14", 0), 2)},
+                                            "reason": f"Pozitif Uyuşmazlık + OI Çöküşü (>%15) tespit edildi! Balina temizliği bitti." + _conv_c1.to_reason_suffix()
+                                        })
 
     # KRİPTO 2: MEGA TREND TAKİBİ
     if not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')):
-        if last_1d[f'EMA_{config.IND_EMA_MID}'] > last_1d[f'EMA_{config.IND_EMA_SLOW}'] and last_1d['close'] > last_1d[f'EMA_{config.IND_EMA_MID}']:
+        # TREND_BB_SQUEEZE_BLOCKED: Dar bant squeeze içindeyken trend takibini bloke eder (Chop market engeli)
+        in_squeeze = False
+        if config.TREND_BB_SQUEEZE_BLOCKED:
+            bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
+            bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
+            bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
+            if bb_upper_col and bb_lower_col and bb_mid_col:
+                bbu = last_1d[bb_upper_col[0]]
+                bbl = last_1d[bb_lower_col[0]]
+                bbm = last_1d[bb_mid_col[0]]
+                bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
+                if bb_width < 0.15:
+                    in_squeeze = True
+
+        if not in_squeeze and last_1d[f'EMA_{config.IND_EMA_MID}'] > last_1d[f'EMA_{config.IND_EMA_SLOW}'] and last_1d['close'] > last_1d[f'EMA_{config.IND_EMA_MID}']:
             atr_col = 'ATRr_14' if 'ATRr_14' in last_4h.index else 'ATR_14'
             if not pd.isna(last_4h.get('ADX_14')) and not pd.isna(last_4h.get('EMA_20')) and not pd.isna(last_4h.get(atr_col)):
                 if last_4h['ADX_14'] > 25:
@@ -1060,7 +1161,14 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                         # RED-06: Darth Maul kaos mumu filtresi
                         if not _is_darth_maul(last_4h):
                             local_high = df_4h['high'].tail(15).max()
-                            if last_4h['low'] <= local_high * 0.99 and current_price > last_4h['open']:
+                            # BREAKOUT_RETEST_REQUIRED: direnç kırılımı sonrası retest/pullback aralığı teyidi
+                            retest_ok = True
+                            if config.BREAKOUT_RETEST_REQUIRED:
+                                max_limit = local_high * (1.0 + (config.BREAKOUT_RETEST_TOLERANCE_PCT / 100.0))
+                                if not (local_high <= current_price <= max_limit):
+                                    retest_ok = False
+
+                            if retest_ok and current_price > local_high and last_4h['low'] <= local_high * 0.99 and current_price > last_4h['open']:
                                 has_unlocks = check_token_unlocks(symbol)
                                 funding_rate = get_funding_rate(symbol)
                                 if not has_unlocks and funding_rate <= 0.0:
@@ -1092,38 +1200,49 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
 
     if btc_not_pumping:
         # SHORT 1: FOMO İNFAZI (MSB / Divergence)
-        if not pd.isna(last_4h.get('RSI_14')) and last_4h[f'RSI_{config.IND_RSI_LENGTH}'] > 85:
-            funding_rate = get_funding_rate(symbol)
-            # AM-04: Fonlama Vampiri Kalkanı — negatif fonlamada short YASAK
-            if funding_rate is not None and _is_funding_safe_for_short(funding_rate) and funding_rate >= 0.01:
-                div_found, _, _, _, _ = detect_bearish_divergence(df_4h)
-                swing_lows = sniper_find_swing_points(df_4h, point_type="low")
-                msb_ok, msb_low, msb_idx = sniper_detect_msb(df_4h, swing_lows, point_type="low")
-                if div_found or msb_ok:
-                    sl = last_4h['high'] * 1.02
-                    sl_dist = abs(sl - current_price)
-                    tp = current_price - (sl_dist * 3.0)
-                    trigger_reason = "Negatif Uyuşmazlık" if div_found else "Market Structure Break (Düşük Dip)"
-                    _rr_s1 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
-                    _adx_prev_s1 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
-                    _scores_s1 = build_short_scores(
-                        adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_s1,
-                        price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
-                        rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
-                        volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
-                        dollar_vol=last_4h['volume'] * current_price,
-                        rr=_rr_s1, has_engulfing=False, regime="BEAR", macro_aligned=True,
-                        consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
-                    )
-                    _conv_s1 = calculate_conviction(_scores_s1)
-                    if _conv_s1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                            "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 1: FOMO İNFAZI", "signal": "SAT",
-                            "entry_price": current_price, "sl": sl, "tp": tp,
-                            "conviction_score": _conv_s1.total_score, "conviction_grade": _conv_s1.grade, "conviction_details": _conv_s1.component_scores,
-                            "position_size_pct": _conv_s1.position_size_pct,
-                            "reason": f"4S RSI>85 ve {trigger_reason}. Fonlama (+%{funding_rate:.4f}) pozitif." + _conv_s1.to_reason_suffix()
-                        })
+        if not pd.isna(last_4h.get('RSI_14')) and last_4h[f'RSI_{config.IND_RSI_LENGTH}'] > config.SHORT_RSI_OVERBOUGHT_LIMIT:
+            # SHORT_TREND_ALIGN_REQUIRED: Short yönlü trend hizalamasını sorgular (fiyatın 50 EMA / 200 SMA altında olması)
+            trend_aligned = True
+            if config.SHORT_TREND_ALIGN_REQUIRED:
+                ema_50_1d = last_1d.get(f'EMA_{config.IND_EMA_SLOW}')
+                sma_200_1d = last_1d.get('SMA_200')
+                if ema_50_1d is not None and not pd.isna(ema_50_1d) and current_price >= ema_50_1d:
+                    trend_aligned = False
+                if sma_200_1d is not None and not pd.isna(sma_200_1d) and current_price >= sma_200_1d:
+                    trend_aligned = False
+
+            if trend_aligned:
+                funding_rate = get_funding_rate(symbol)
+                # AM-04: Fonlama Vampiri Kalkanı — negatif fonlamada short YASAK
+                if funding_rate is not None and _is_funding_safe_for_short(funding_rate) and funding_rate >= 0.01:
+                    div_found, _, _, _, _ = detect_bearish_divergence(df_4h)
+                    swing_lows = sniper_find_swing_points(df_4h, point_type="low")
+                    msb_ok, msb_low, msb_idx = sniper_detect_msb(df_4h, swing_lows, point_type="low")
+                    if div_found or msb_ok:
+                        sl = last_4h['high'] * 1.02
+                        sl_dist = abs(sl - current_price)
+                        tp = current_price - (sl_dist * 3.0)
+                        trigger_reason = "Negatif Uyuşmazlık" if div_found else "Market Structure Break (Düşük Dip)"
+                        _rr_s1 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
+                        _adx_prev_s1 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+                        _scores_s1 = build_short_scores(
+                            adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_s1,
+                            price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
+                            rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
+                            volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
+                            dollar_vol=last_4h['volume'] * current_price,
+                            rr=_rr_s1, has_engulfing=False, regime="BEAR", macro_aligned=True,
+                            consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                        )
+                        _conv_s1 = calculate_conviction(_scores_s1)
+                        if _conv_s1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 1: FOMO İNFAZI", "signal": "SAT",
+                                "entry_price": current_price, "sl": sl, "tp": tp,
+                                "conviction_score": _conv_s1.total_score, "conviction_grade": _conv_s1.grade, "conviction_details": _conv_s1.component_scores,
+                                "position_size_pct": _conv_s1.position_size_pct,
+                                "reason": f"4S RSI>{config.SHORT_RSI_OVERBOUGHT_LIMIT:.0f} ve {trigger_reason}. Fonlama (+%{funding_rate:.4f}) pozitif." + _conv_s1.to_reason_suffix()
+                            })
 
         # SHORT 2: KANLI ŞELALE SÖRFÜ
         if not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')):
@@ -1215,38 +1334,72 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     ote_top, ote_bottom = sniper_calculate_ote_body(df_4h, sweep_idx, msb_idx, direction="long")
                     if ote_top > 0 and ote_bottom > 0 and ote_bottom <= current_price <= ote_top:
                         has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
-                        funding_rate = get_funding_rate(symbol)
-                        if funding_rate <= 0.0:
-                            sl = sweep_low * 0.995
-                            sl_dist = max(current_price - sl, 1e-8)
-                            tp = current_price + (sl_dist * 3.0)
-                            fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
-                            _rr_c4l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
-                            _scores_c4l = build_breakout_scores(
-                                bb_width=None, price=current_price,
-                                ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
-                                volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
-                                dollar_vol=last_4h['volume'] * current_price,
-                                rr=_rr_c4l, regime="BULL", macro_aligned=True,
-                                consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
-                            )
-                            _conv_c4l = calculate_conviction(_scores_c4l)
-                            if _conv_c4l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                    "ticker": symbol, "market": "KRIPTO",
-                                    "strategy": "KRİPTO 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
-                                    "entry_price": current_price, "sl": sl, "tp": tp,
-                                    "conviction_score": _conv_c4l.total_score, "conviction_grade": _conv_c4l.grade, "conviction_details": _conv_c4l.component_scores,
-                                    "position_size_pct": _conv_c4l.position_size_pct,
-                                    "reason": (
-                                        f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
-                                        f"🧹 Likidite: Eski dip ({sweep_low:.4f}) temizlendi.\n"
-                                        f"📐 MSB: Yapı kırılımı ({msb_high:.4f}) onaylı.\n"
-                                        f"🎣 OTE Bölgesi (Gövde): {ote_bottom:.4f} - {ote_top:.4f}\n"
-                                        f"📊 Fonlama: %{funding_rate:.4f} (Negatif Yakıt)\n"
-                                        f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
-                                    ) + _conv_c4l.to_reason_suffix()
-                                })
+                        fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                        
+                        if fvg_ok:
+                            # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
+                            ltf_confirm = True
+                            df_1h_crypto = None
+                            if config.SMC_LTF_MSB_CONFIRM:
+                                df_1h_crypto = get_crypto_1h_data(symbol)
+                                if df_1h_crypto is not None and not df_1h_crypto.empty:
+                                    df_1h_crypto = df_1h_crypto.copy()
+                                    df_1h_crypto.ta.ema(length=config.IND_EMA_FAST, append=True)
+                                    df_1h_crypto.ta.ema(length=config.IND_EMA_21, append=True)
+                                    swing_highs_1h = sniper_find_swing_points(df_1h_crypto, point_type="high", neighbors=2)
+                                    ltf_msb_ok, _, _ = sniper_detect_msb(df_1h_crypto, swing_highs_1h, point_type="high")
+                                    if not ltf_msb_ok:
+                                        ltf_confirm = False
+                                else:
+                                    ltf_confirm = False
+                            
+                            if ltf_confirm:
+                                funding_rate = get_funding_rate(symbol)
+                                if funding_rate <= 0.0:
+                                    sl = sweep_low * 0.995
+                                    sl_dist = max(current_price - sl, 1e-8)
+                                    tp = current_price + (sl_dist * 3.0)
+                                    fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
+                                    _rr_c4l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                                    
+                                    # 1H verisi varsa onun EMA'larını kullan
+                                    ema_fast_val = None
+                                    ema_mid_val = None
+                                    if config.SMC_LTF_MSB_CONFIRM and df_1h_crypto is not None and not df_1h_crypto.empty:
+                                        ema_fast_val = df_1h_crypto.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
+                                        ema_mid_val = df_1h_crypto.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
+                                    else:
+                                        ema_fast_val = last_4h.get('EMA_20')
+                                        ema_mid_val = last_4h.get('EMA_50')
+
+                                    _scores_c4l = build_breakout_scores(
+                                        bb_width=None, price=current_price,
+                                        ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
+                                        volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
+                                        dollar_vol=last_4h['volume'] * current_price,
+                                        rr=_rr_c4l, regime="BULL", macro_aligned=True,
+                                        consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                    )
+                                    if has_fvg:
+                                        _scores_c4l["engulfing"] = min(100.0, _scores_c4l["engulfing"] + config.SMC_FVG_BONUS)
+                                        
+                                    _conv_c4l = calculate_conviction(_scores_c4l)
+                                    if _conv_c4l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                            "ticker": symbol, "market": "KRIPTO",
+                                            "strategy": "KRİPTO 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
+                                            "entry_price": current_price, "sl": sl, "tp": tp,
+                                            "conviction_score": _conv_c4l.total_score, "conviction_grade": _conv_c4l.grade, "conviction_details": _conv_c4l.component_scores,
+                                            "position_size_pct": _conv_c4l.position_size_pct,
+                                            "reason": (
+                                                f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
+                                                f"🧹 Likidite: Eski dip ({sweep_low:.4f}) temizlendi.\n"
+                                                f"📐 MSB: Yapı kırılımı ({msb_high:.4f}) onaylı.\n"
+                                                f"🎣 OTE Bölgesi (Gövde): {ote_bottom:.4f} - {ote_top:.4f}\n"
+                                                f"📊 Fonlama: %{funding_rate:.4f} (Negatif Yakıt)\n"
+                                                f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
+                                            ) + _conv_c4l.to_reason_suffix()
+                                        })
 
         elif btc_sniper_bias == -1:
             swing_highs_s = sniper_find_swing_points(df_4h, point_type="high")
@@ -1259,40 +1412,74 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     ote_top, ote_bottom = sniper_calculate_ote(msb_low, sweep_high)
                     if ote_bottom <= current_price <= ote_top:
                         has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bearish")
-                        funding_rate = get_funding_rate(symbol)
-                        if funding_rate >= 0.0:
-                            sl = sweep_high * 1.005
-                            sl_dist = max(sl - current_price, 1e-8)
-                            tp = current_price - (sl_dist * 3.0)
-                            fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
-                            _rr_c4s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
-                            _adx_prev_c4s = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
-                            _scores_c4s = build_short_scores(
-                                adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_c4s,
-                                price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
-                                rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
-                                volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
-                                dollar_vol=last_4h['volume'] * current_price,
-                                rr=_rr_c4s, has_engulfing=False, regime="BEAR", macro_aligned=True,
-                                consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
-                            )
-                            _conv_c4s = calculate_conviction(_scores_c4s)
-                            if _conv_c4s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                    "ticker": symbol, "market": "KRIPTO",
-                                    "strategy": "SHORT 4: KESKİN NİŞANCI (OTE)", "signal": "SAT",
-                                    "entry_price": current_price, "sl": sl, "tp": tp,
-                                    "conviction_score": _conv_c4s.total_score, "conviction_grade": _conv_c4s.grade, "conviction_details": _conv_c4s.component_scores,
-                                    "position_size_pct": _conv_c4s.position_size_pct,
-                                    "reason": (
-                                        f"🎯 SHORT SMC Kurulum{fvg_label}\n"
-                                        f"🧹 Likidite: Eski tepe ({sweep_high:.4f}) temizlendi.\n"
-                                        f"📐 Bearish MSB: Yapı kırılımı ({msb_low:.4f}) aşağı onaylı.\n"
-                                        f"🎣 Premium OTE: {ote_bottom:.4f} - {ote_top:.4f}\n"
-                                        f"📊 Fonlama: +%{funding_rate:.4f} (Pozitif = Short Yakıtı)\n"
-                                        f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
-                                    ) + _conv_c4s.to_reason_suffix()
-                                })
+                        fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                        
+                        if fvg_ok:
+                            # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
+                            ltf_confirm = True
+                            df_1h_crypto = None
+                            if config.SMC_LTF_MSB_CONFIRM:
+                                df_1h_crypto = get_crypto_1h_data(symbol)
+                                if df_1h_crypto is not None and not df_1h_crypto.empty:
+                                    df_1h_crypto = df_1h_crypto.copy()
+                                    df_1h_crypto.ta.ema(length=config.IND_EMA_FAST, append=True)
+                                    df_1h_crypto.ta.ema(length=config.IND_EMA_21, append=True)
+                                    swing_lows_1h = sniper_find_swing_points(df_1h_crypto, point_type="low", neighbors=2)
+                                    ltf_msb_ok, _, _ = sniper_detect_msb(df_1h_crypto, swing_lows_1h, point_type="low")
+                                    if not ltf_msb_ok:
+                                        ltf_confirm = False
+                                else:
+                                    ltf_confirm = False
+                                    
+                            if ltf_confirm:
+                                funding_rate = get_funding_rate(symbol)
+                                if funding_rate >= 0.0:
+                                    sl = sweep_high * 1.005
+                                    sl_dist = max(sl - current_price, 1e-8)
+                                    tp = current_price - (sl_dist * 3.0)
+                                    fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
+                                    _rr_c4s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
+                                    _adx_prev_c4s = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+                                    
+                                    # 1H verisi varsa onun EMA'larını kullan
+                                    ema_fast_val = None
+                                    ema_mid_val = None
+                                    if config.SMC_LTF_MSB_CONFIRM and df_1h_crypto is not None and not df_1h_crypto.empty:
+                                        ema_fast_val = df_1h_crypto.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
+                                        ema_mid_val = df_1h_crypto.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
+                                    else:
+                                        ema_fast_val = last_4h.get('EMA_20')
+                                        ema_mid_val = last_4h.get('EMA_50')
+
+                                    _scores_c4s = build_short_scores(
+                                        adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_c4s,
+                                        price=current_price, ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
+                                        rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
+                                        volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
+                                        dollar_vol=last_4h['volume'] * current_price,
+                                        rr=_rr_c4s, has_engulfing=False, regime="BEAR", macro_aligned=True,
+                                        consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                    )
+                                    if has_fvg:
+                                        _scores_c4s["engulfing"] = min(100.0, _scores_c4s["engulfing"] + config.SMC_FVG_BONUS)
+                                        
+                                    _conv_c4s = calculate_conviction(_scores_c4s)
+                                    if _conv_c4s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                            "ticker": symbol, "market": "KRIPTO",
+                                            "strategy": "SHORT 4: KESKİN NİŞANCI (OTE)", "signal": "SAT",
+                                            "entry_price": current_price, "sl": sl, "tp": tp,
+                                            "conviction_score": _conv_c4s.total_score, "conviction_grade": _conv_c4s.grade, "conviction_details": _conv_c4s.component_scores,
+                                            "position_size_pct": _conv_c4s.position_size_pct,
+                                            "reason": (
+                                                f"🎯 SHORT SMC Kurulum{fvg_label}\n"
+                                                f"🧹 Likidite: Eski tepe ({sweep_high:.4f}) temizlendi.\n"
+                                                f"📐 Bearish MSB: Yapı kırılımı ({msb_low:.4f}) aşağı onaylı.\n"
+                                                f"🎣 Premium OTE: {ote_bottom:.4f} - {ote_top:.4f}\n"
+                                                f"📊 Fonlama: +%{funding_rate:.4f} (Pozitif = Short Yakıtı)\n"
+                                                f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
+                                            ) + _conv_c4s.to_reason_suffix()
+                                        })
 
     # KRİPTO 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)
     if not is_weekend_fakeout_time():
@@ -1439,6 +1626,8 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
     df_1d.ta.adx(length=config.IND_ADX_LENGTH, append=True)
     df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
     df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
+    if len(df_1d) >= 200:
+        df_1d.ta.sma(length=200, append=True)
 
     if df_4h is not None and len(df_4h) >= 20:
         df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
@@ -1461,7 +1650,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
             "4H ADX": round(df_4h.iloc[-1].get("ADX_14", 0), 2) if df_4h is not None and not df_4h.empty and pd.notna(df_4h.iloc[-1].get("ADX_14")) else None,
             "1H RSI": None,
             "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
-            "1D SMA 200": None,
+            "1D SMA 200": round(last_1d.get("SMA_200", 0), 2) if pd.notna(last_1d.get("SMA_200")) else None,
             "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
             "1H Volume": None
         }
@@ -1490,6 +1679,20 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
 
     # EMTİA 1: TREND SÖRFÜ
     if df_4h is not None and len(df_4h) >= 20:
+        # TREND_BB_SQUEEZE_BLOCKED: Dar bant squeeze içindeyken trend takibini bloke eder (Chop market engeli)
+        in_squeeze = False
+        if config.TREND_BB_SQUEEZE_BLOCKED:
+            bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
+            bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
+            bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
+            if bb_upper_col and bb_lower_col and bb_mid_col:
+                bbu = last_1d[bb_upper_col[0]]
+                bbl = last_1d[bb_lower_col[0]]
+                bbm = last_1d[bb_mid_col[0]]
+                bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
+                if bb_width < 0.15:
+                    in_squeeze = True
+
         last_4h = df_4h.iloc[-1]
         adx_4h = last_4h.get('ADX_14')
         ema8_4h = last_4h.get('EMA_8')
@@ -1497,7 +1700,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
 
         if (not pd.isna(adx_4h) and not pd.isna(ema8_4h) and not pd.isna(ema21_4h)):
             # RED-02: ADX momentum kontrolü
-            if _adx_momentum_ok(df_4h, last_4h) and ema8_4h > ema21_4h:
+            if not in_squeeze and _adx_momentum_ok(df_4h, last_4h) and ema8_4h > ema21_4h:
                 if (last_4h['low'] <= ema21_4h and last_4h['close'] > ema21_4h
                         and last_4h['close'] > last_4h['open']):
                     if not dxy_block_long:
@@ -1530,7 +1733,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                                 ) + _conv_e1l.to_reason_suffix()
                             })
 
-            elif adx_4h > 25 and ema8_4h < ema21_4h:
+            elif not in_squeeze and adx_4h > 25 and ema8_4h < ema21_4h:
                 if (last_4h['high'] >= ema21_4h and last_4h['close'] < ema21_4h
                         and last_4h['close'] < last_4h['open']):
                     sl = current_price + dynamic_sl_dist
@@ -1575,35 +1778,69 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                     ote_top, ote_bottom = sniper_calculate_ote(sweep_low, msb_high)
                     if ote_bottom <= current_price <= ote_top:
                         has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
-                        sl = sweep_low - (atr_val * 0.5)
-                        sl_dist = max(current_price - sl, 1e-8)
-                        tp = current_price + (sl_dist * 3.0)
-                        fvg_label = " + FVG ✅" if has_fvg else ""
-                        dxy_note = "\n🛡️ DXY: Dolar zayıf ✅" if is_dxy_sensitive else ""
-                        _rr_e2l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
-                        _scores_e2l = build_breakout_scores(
-                            bb_width=None, price=current_price, ema_fast=None, ema_mid=None, ema_slow=None,
-                            volume=last_4h.get('volume', 0) if 'last_4h' in dir() else 0, vol_sma=last_4h.get('vol_sma_20') if 'last_4h' in dir() else None,
-                            dollar_vol=(last_4h.get('volume', 0) if 'last_4h' in dir() else 0) * current_price,
-                            rr=_rr_e2l, regime="BULL",
-                            macro_aligned=(not dxy_block_long), consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
-                        )
-                        _conv_e2l = calculate_conviction(_scores_e2l)
-                        if _conv_e2l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                "ticker": symbol, "market": "EMTİA",
-                                "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "AL",
-                                "entry_price": current_price, "sl": sl, "tp": tp,
-                                "conviction_score": _conv_e2l.total_score, "conviction_grade": _conv_e2l.grade, "conviction_details": _conv_e2l.component_scores,
-                                "position_size_pct": _conv_e2l.position_size_pct,
-                                "reason": (
-                                    f"🎯 {emtia_name} SMC Kurulum{fvg_label}\n"
-                                    f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
-                                    f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
-                                    f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
-                                    f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%){dxy_note}"
-                                ) + _conv_e2l.to_reason_suffix()
-                            })
+                        fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                        
+                        if fvg_ok:
+                            # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
+                            ltf_confirm = True
+                            df_1h_emtia = None
+                            if config.SMC_LTF_MSB_CONFIRM:
+                                df_1h_emtia = get_emtia_1h_data(symbol)
+                                if df_1h_emtia is not None and not df_1h_emtia.empty:
+                                    df_1h_emtia = df_1h_emtia.copy()
+                                    df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
+                                    df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
+                                    swing_highs_1h = sniper_find_swing_points(df_1h_emtia, point_type="high", neighbors=2)
+                                    ltf_msb_ok, _, _ = sniper_detect_msb(df_1h_emtia, swing_highs_1h, point_type="high")
+                                    if not ltf_msb_ok:
+                                        ltf_confirm = False
+                                else:
+                                    ltf_confirm = False
+
+                            if ltf_confirm:
+                                sl = sweep_low - (atr_val * 0.5)
+                                sl_dist = max(current_price - sl, 1e-8)
+                                tp = current_price + (sl_dist * 3.0)
+                                fvg_label = " + FVG ✅" if has_fvg else ""
+                                dxy_note = "\n🛡️ DXY: Dolar zayıf ✅" if is_dxy_sensitive else ""
+                                _rr_e2l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                                
+                                # 1H verisi varsa onun EMA'larını kullan
+                                ema_fast_val = None
+                                ema_mid_val = None
+                                if config.SMC_LTF_MSB_CONFIRM and df_1h_emtia is not None and not df_1h_emtia.empty:
+                                    ema_fast_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
+                                    ema_mid_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
+                                else:
+                                    ema_fast_val = last_4h.get('EMA_8')
+                                    ema_mid_val = last_4h.get('EMA_21')
+
+                                _scores_e2l = build_breakout_scores(
+                                    bb_width=None, price=current_price, ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
+                                    volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
+                                    dollar_vol=last_4h.get('volume', 0) * current_price,
+                                    rr=_rr_e2l, regime="BULL",
+                                    macro_aligned=(not dxy_block_long), consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
+                                )
+                                if has_fvg:
+                                    _scores_e2l["engulfing"] = min(100.0, _scores_e2l["engulfing"] + config.SMC_FVG_BONUS)
+
+                                _conv_e2l = calculate_conviction(_scores_e2l)
+                                if _conv_e2l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                        "ticker": symbol, "market": "EMTİA",
+                                        "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "AL",
+                                        "entry_price": current_price, "sl": sl, "tp": tp,
+                                        "conviction_score": _conv_e2l.total_score, "conviction_grade": _conv_e2l.grade, "conviction_details": _conv_e2l.component_scores,
+                                        "position_size_pct": _conv_e2l.position_size_pct,
+                                        "reason": (
+                                            f"🎯 {emtia_name} SMC Kurulum{fvg_label}\n"
+                                            f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
+                                            f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
+                                            f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
+                                            f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%){dxy_note}"
+                                        ) + _conv_e2l.to_reason_suffix()
+                                    })
 
         elif htf_bias == -1:
             swing_lows = sniper_find_swing_points(df_4h, point_type="low")
@@ -1616,34 +1853,68 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                     ote_top, ote_bottom = sniper_calculate_ote(msb_low, sweep_high)
                     if ote_bottom <= current_price <= ote_top:
                         has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bearish")
-                        sl = sweep_high + (atr_val * 0.5)
-                        sl_dist = max(sl - current_price, 1e-8)
-                        tp = current_price - (sl_dist * 3.0)
-                        fvg_label = " + FVG ✅" if has_fvg else ""
-                        _rr_e2s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
-                        _scores_e2s = build_breakout_scores(
-                            bb_width=None, price=current_price, ema_fast=None, ema_mid=None, ema_slow=None,
-                            volume=last_4h.get('volume', 0) if 'last_4h' in dir() else 0, vol_sma=last_4h.get('vol_sma_20') if 'last_4h' in dir() else None,
-                            dollar_vol=(last_4h.get('volume', 0) if 'last_4h' in dir() else 0) * current_price,
-                            rr=_rr_e2s, regime="BEAR",
-                            macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
-                        )
-                        _conv_e2s = calculate_conviction(_scores_e2s)
-                        if _conv_e2s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                "ticker": symbol, "market": "EMTİA",
-                                "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "SAT",
-                                "entry_price": current_price, "sl": sl, "tp": tp,
-                                "conviction_score": _conv_e2s.total_score, "conviction_grade": _conv_e2s.grade, "conviction_details": _conv_e2s.component_scores,
-                                "position_size_pct": _conv_e2s.position_size_pct,
-                                "reason": (
-                                    f"🎯 {emtia_name} SHORT SMC Kurulum{fvg_label}\n"
-                                    f"🧹 Likidite: Eski tepe ({sweep_high:.2f}) temizlendi.\n"
-                                    f"📐 MSB: Aşağı yapı kırılımı ({msb_low:.2f}).\n"
-                                    f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
-                                    f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%)"
-                                ) + _conv_e2s.to_reason_suffix()
-                            })
+                        fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                        
+                        if fvg_ok:
+                            # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
+                            ltf_confirm = True
+                            df_1h_emtia = None
+                            if config.SMC_LTF_MSB_CONFIRM:
+                                df_1h_emtia = get_emtia_1h_data(symbol)
+                                if df_1h_emtia is not None and not df_1h_emtia.empty:
+                                    df_1h_emtia = df_1h_emtia.copy()
+                                    df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
+                                    df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
+                                    swing_lows_1h = sniper_find_swing_points(df_1h_emtia, point_type="low", neighbors=2)
+                                    ltf_msb_ok, _, _ = sniper_detect_msb(df_1h_emtia, swing_lows_1h, point_type="low")
+                                    if not ltf_msb_ok:
+                                        ltf_confirm = False
+                                else:
+                                    ltf_confirm = False
+
+                            if ltf_confirm:
+                                sl = sweep_high + (atr_val * 0.5)
+                                sl_dist = max(sl - current_price, 1e-8)
+                                tp = current_price - (sl_dist * 3.0)
+                                fvg_label = " + FVG ✅" if has_fvg else ""
+                                _rr_e2s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
+                                
+                                # 1H verisi varsa onun EMA'larını kullan
+                                ema_fast_val = None
+                                ema_mid_val = None
+                                if config.SMC_LTF_MSB_CONFIRM and df_1h_emtia is not None and not df_1h_emtia.empty:
+                                    ema_fast_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
+                                    ema_mid_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
+                                else:
+                                    ema_fast_val = last_4h.get('EMA_8')
+                                    ema_mid_val = last_4h.get('EMA_21')
+
+                                _scores_e2s = build_breakout_scores(
+                                    bb_width=None, price=current_price, ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
+                                    volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
+                                    dollar_vol=last_4h.get('volume', 0) * current_price,
+                                    rr=_rr_e2s, regime="BEAR",
+                                    macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
+                                )
+                                if has_fvg:
+                                    _scores_e2s["engulfing"] = min(100.0, _scores_e2s["engulfing"] + config.SMC_FVG_BONUS)
+
+                                _conv_e2s = calculate_conviction(_scores_e2s)
+                                if _conv_e2s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                        "ticker": symbol, "market": "EMTİA",
+                                        "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "SAT",
+                                        "entry_price": current_price, "sl": sl, "tp": tp,
+                                        "conviction_score": _conv_e2s.total_score, "conviction_grade": _conv_e2s.grade, "conviction_details": _conv_e2s.component_scores,
+                                        "position_size_pct": _conv_e2s.position_size_pct,
+                                        "reason": (
+                                            f"🎯 {emtia_name} SHORT SMC Kurulum{fvg_label}\n"
+                                            f"🧹 Likidite: Eski tepe ({sweep_high:.2f}) temizlendi.\n"
+                                            f"📐 MSB: Aşağı yapı kırılımı ({msb_low:.2f}).\n"
+                                            f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
+                                            f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%)"
+                                        ) + _conv_e2s.to_reason_suffix()
+                                    })
 
     # EMTİA 3: VOLATİLİTE SIKIŞMASI (Squeeze)
     squeeze_fired, sq_dir, sq_candle = detect_squeeze(df_1d)
@@ -1721,6 +1992,12 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     # Pandas Mutability koruması: kaynak DataFrame'leri kirletme
     df_1d = df_1d.copy() if df_1d is not None else None
     df_4h = df_4h.copy()
+    if df_1d is not None:
+        df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+        df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
+        df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
+        if len(df_1d) >= 200:
+            df_1d.ta.sma(length=200, append=True)
 
     df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
     # Bear Hunter: EMA/ADX/RSI/vol_sma hesapla (1F fix — NaN sorunu çözümü)
@@ -1741,7 +2018,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
             "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
             "1H RSI": None,
             "1D SMA 50": round(df_1d.iloc[-1].get("EMA_50", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get("EMA_50")) else None,
-            "1D SMA 200": None,
+            "1D SMA 200": round(df_1d.iloc[-1].get("SMA_200", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get("SMA_200")) else None,
             "Trend": "Bullish" if df_1d is not None and not df_1d.empty and df_1d.iloc[-1].get("EMA_20", 0) > df_1d.iloc[-1].get("EMA_50", float('inf')) else "Bearish",
             "1H Volume": last_4h.get("volume")
         }
@@ -1844,43 +2121,53 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
                 })
 
     # SHORT 3: YORGUNLUK TEPESİ (Divergence)
-    div_found, sh_1, sh_2, rsi_1, rsi_2 = detect_bearish_divergence(df_4h)
-    if div_found:
-        sl = sh_2 + (atr_val * 0.5)
-        sl_dist = max(sl - current_price, 1e-8)
-        tp = current_price - (sl_dist * 3.0)
-        risk = sl - current_price
-        reward = current_price - tp
-        if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
-            rr_ratio = reward / risk
-            sl_pct = (risk / current_price) * 100
-            _adx_prev_bh3 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
-            _scores_bh3 = build_short_scores(
-                adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_bh3,
-                price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
-                rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
-                volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
-                dollar_vol=last_4h.get('volume', 0) * current_price,
-                rr=rr_ratio, has_engulfing=False, regime="BEAR",
-                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
-            )
-            _conv_bh3 = calculate_conviction(_scores_bh3)
-            if _conv_bh3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                    "ticker": symbol, "market": "AYI_AVCISI",
-                    "strategy": "SHORT 3: YORGUNLUK TEPESİ (DİVERGENCE)", "signal": "SAT",
-                    "entry_price": current_price, "sl": sl, "tp": tp,
-                    "conviction_score": _conv_bh3.total_score, "conviction_grade": _conv_bh3.grade, "conviction_details": _conv_bh3.component_scores,
-                    "position_size_pct": _conv_bh3.position_size_pct,
-                    "reason": (
-                        f"🪫 {symbol} Yorgunluk Tepesi!\n"
-                        f"Fiyat: {sh_1:.2f} → {sh_2:.2f} (Higher High)\n"
-                        f"RSI: {rsi_1:.0f} → {rsi_2:.0f} (Lower High) ⚠️\n"
-                        f"Hacim düştü + 4S EMA20 kırıldı.\n"
-                        f"📐 R:R Oranı: {rr_ratio:.1f}:1\n"
-                        f"👑 BTC: Zayıf ✅{funding_note}"
-                    ) + _conv_bh3.to_reason_suffix()
-                })
+    trend_aligned = True
+    if config.SHORT_TREND_ALIGN_REQUIRED:
+        ema_50_1d = df_1d.iloc[-1].get(f'EMA_{config.IND_EMA_SLOW}') if df_1d is not None and not df_1d.empty else None
+        sma_200_1d = df_1d.iloc[-1].get('SMA_200') if df_1d is not None and not df_1d.empty else None
+        if ema_50_1d is not None and not pd.isna(ema_50_1d) and current_price >= ema_50_1d:
+            trend_aligned = False
+        if sma_200_1d is not None and not pd.isna(sma_200_1d) and current_price >= sma_200_1d:
+            trend_aligned = False
+
+    if trend_aligned:
+        div_found, sh_1, sh_2, rsi_1, rsi_2 = detect_bearish_divergence(df_4h)
+        if div_found:
+            sl = sh_2 + (atr_val * 0.5)
+            sl_dist = max(sl - current_price, 1e-8)
+            tp = current_price - (sl_dist * 3.0)
+            risk = sl - current_price
+            reward = current_price - tp
+            if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
+                rr_ratio = reward / risk
+                sl_pct = (risk / current_price) * 100
+                _adx_prev_bh3 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+                _scores_bh3 = build_short_scores(
+                    adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_bh3,
+                    price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
+                    rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
+                    volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
+                    dollar_vol=last_4h.get('volume', 0) * current_price,
+                    rr=rr_ratio, has_engulfing=False, regime="BEAR",
+                    macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                )
+                _conv_bh3 = calculate_conviction(_scores_bh3)
+                if _conv_bh3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                        "ticker": symbol, "market": "AYI_AVCISI",
+                        "strategy": "SHORT 3: YORGUNLUK TEPESİ (DİVERGENCE)", "signal": "SAT",
+                        "entry_price": current_price, "sl": sl, "tp": tp,
+                        "conviction_score": _conv_bh3.total_score, "conviction_grade": _conv_bh3.grade, "conviction_details": _conv_bh3.component_scores,
+                        "position_size_pct": _conv_bh3.position_size_pct,
+                        "reason": (
+                            f"🪫 {symbol} Yorgunluk Tepesi!\n"
+                            f"Fiyat: {sh_1:.2f} → {sh_2:.2f} (Higher High)\n"
+                            f"RSI: {rsi_1:.0f} → {rsi_2:.0f} (Lower High) ⚠️\n"
+                            f"Hacim düştü + 4S EMA20 kırıldı.\n"
+                            f"📐 R:R Oranı: {rr_ratio:.1f}:1\n"
+                            f"👑 BTC: Zayıf ✅{funding_note}"
+                        ) + _conv_bh3.to_reason_suffix()
+                    })
 
     return signals
 

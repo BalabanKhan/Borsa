@@ -547,3 +547,17 @@ def guard_signal_output(signals: list[dict]) -> list[dict]:
         )
 
     return clean_signals
+
+
+# 99 yapılmıştır
+# DG-07: Teknik Gösterge Bütünlüğü Kontrolü.
+# Strateji hesaplamalarından sonra indikatörlerdeki NaN değerlerini kontrol eder ve sızıntıları engeller.
+def validate_indicators_integrity(indicator_dict: dict, required_indicators: list) -> tuple[bool, str]:
+    tag = "[DG-07] İndikatör Doğrulama"
+    if not isinstance(indicator_dict, dict):
+        return False, f"{tag}: Verilen indikatör yapısı dict değil"
+    for ind in required_indicators:
+        val = indicator_dict.get(ind)
+        if val is None or (isinstance(val, float) and math.isnan(val)):
+            return False, f"{tag}: Kritik gösterge '{ind}' eksik veya NaN"
+    return True, ""

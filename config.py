@@ -335,6 +335,12 @@ CACHE_TTL_SECONDS = 300        # 5 dk cache
 SCAN_INTERVAL_MINUTES = 15
 HEARTBEAT_INTERVAL = 6 * 3600  # 6 saatte 1 heartbeat
 COOLDOWN_SECONDS = 3600        # 1 saat sinyal cooldown
+# 99 yapılmıştır
+# Veri çekim derinliği ve eksik veri durumunda uygulanacak belirsizlik cezası parametreleri eklenmiştir.
+DATA_PERIOD_1D = "12mo"            # 1D timeframe için 1 yıllık veri çekilir (en az 250+ bar, SMA 200 için şarttır)
+DATA_PERIOD_1H = "1mo"             # 1H timeframe için 1 aylık veri çekilir
+SOFT_UNCERTAINTY_PENALTY = 0.0     # Eksik teknik veri durumunda verilecek ceza puanı (nötr 50.0 yerine 0.0)
+
 OHLCV_LIMIT = 100              # API'den çekilecek mum sayısı
 API_SLEEP_BIST = 0.1
 API_SLEEP_CRYPTO = 0.1
@@ -476,4 +482,80 @@ CONFLICT_RESOLVER_ENABLED = True
 CONFLICT_RESOLVER_ADX_TREND_LIMIT = 40.0   # Bu ADX üstünde Mean Reversion skip edilir
 CONFLICT_RESOLVER_ADX_RANGING_LIMIT = 20.0 # Bu ADX altında Trend Takip/Breakout skip edilir
 CONFLICT_RESOLVER_BEAR_TREND_PENALTY = 0.6 # 1D Bearish rejimde Long sinyallere uygulanacak ceza katsayısı
+
+# ⚖️ Dinamik Strateji Filtreleri & Teyit Ayarları (V3.4)
+# ────────────────────────────────────────────────────────────────
+
+# --- 1. Dip Avcılığı & Mean Reversion ---
+DIP_RSI_1D_SMA200_ALIGN_ENABLED: bool = True  # BIST: Long için 1D Fiyat > SMA200 filtresi aktif mi
+DIP_RSI_1D_EMA50_ALIGN_ENABLED: bool = True   # Kripto: Long için 1D Fiyat > EMA50 filtresi aktif mi
+DIP_VOLUME_SPIKE_REQUIRED: bool = True        # Düşen bıçağı tutmamak için dönüş anında kurumsal hacim patlaması şartı
+DIP_VOLUME_SPIKE_MULT: float = 1.5            # Dönüş mumundaki hacmin, hacim SMA'sına oranı (min 1.5 katı)
+
+# --- 2. Trend Takibi & Volatilite (ADX & EMA) ---
+TREND_BB_SQUEEZE_BLOCKED: bool = True         # Dar bant squeeze içindeyken trend takibini bloke et
+
+# --- 3. Kırılım Avcılığı (Breakout) & Retest ---
+BREAKOUT_RETEST_REQUIRED: bool = True         # Sahte kırılımları (fakeout) engellemek için retest şartı
+BREAKOUT_RETEST_TOLERANCE_PCT: float = 1.5    # Retest için kırılan direnç seviyesine maksimum uzaklık yüzdesi (%1.5)
+
+# --- 4. Keskin Nişancı (SMC - OTE / FVG) ---
+SMC_FVG_REQUIRED: bool = False                # FVG'yi zorunlu kılmaz (Soft score bonusudur)
+SMC_FVG_BONUS: float = 15.0                   # FVG varlığında verilecek ek puan
+SMC_LTF_MSB_CONFIRM: bool = True              # OTE bölgesi içindeyken 1H grafikte MSB teyidi ara
+
+# --- 5. Volatilite Sıkışması (Squeeze) ---
+SQUEEZE_MOMENTUM_ALIGN_REQUIRED: bool = True  # Momentum histogram yönünün kırılım yönüyle uyumu
+SQUEEZE_TREND_ALIGN_REQUIRED: bool = True     # Squeeze patlama yönünün 1D ana trendiyle uyumu
+
+# --- 6. Relative Strength (RS) ---
+RS_ENTRY_TIMING_RSI_LIMIT: float = 45.0       # RS hissesinde işleme giriş için 1H RSI tavanı
+
+# --- 7. VWAP Mıknatısı (VWAP Bounce) ---
+VWAP_SLOPE_CONFIRMATION: bool = True          # VWAP eğiminin pozitif (long) / negatif (short) olması şartı
+VWAP_SLOPE_LOOKBACK: int = 3                  # Eğim hesaplanacak mum sayısı
+VWAP_BOUNCE_CANDLE_CONFIRM: int = 1           # VWAP üzerinde tutunmayı gösteren mum kapanışı sayısı (Örn: 1 veya 2)
+
+# --- 8. OBV Accumulation ---
+OBV_SMA_ALIGN_REQUIRED: bool = True           # OBV'nin kendi 20 SMA'sı üzerinde olması koşulu
+OBV_SMA_PERIOD: int = 20
+
+# --- 9. Opening Range Breakout (ORB) ---
+ORB_BODY_CLOSE_REQUIRED: bool = True          # ORB kırılımlarında mumun gövdeyle dışarıda kapanması koşulu
+ORB_VOLUME_MULT: float = 1.3                  # ORB kırılım barı hacminin ortalama RVOL'e oranı
+
+# --- 10. Parabolic Reversal Short ---
+SHORT_TREND_ALIGN_REQUIRED: bool = True       # Short için fiyatın 50 EMA / 200 SMA altında olması koşulu
+SHORT_RSI_OVERBOUGHT_LIMIT: float = 80.0      # Parabolic Short için RSI aşırı alım taban limiti
+
+# --- 11. Divergence (Uyumsuzluk) & MACD ---
+DIVERGENCE_MACD_CONFIRMATION_REQUIRED: bool = True  # Uyumsuzluk teyidi için MACD histogram doğrulaması şartı
+
+# --- 12. Swing Failure Pattern (SFP) ---
+SFP_BODY_CLOSE_INSIDE_REQUIRED: bool = True   # Mum gövdesinin eski seviye içinde kalması koşulu (wick grab)
+SFP_VOLUME_CONFIRMATION_MULT: float = 1.3     # SFP barı hacminin 20 SMA hacmine oranı
+SFP_MFE_TIME_FILTER_REQUIRED: bool = True     # SFP sonrası fiyatın hızlıca dönmesini bekleyen zaman/MFE filtresi
+SFP_MFE_TIME_LIMIT_HOURS: int = 12            # SFP işlemi açıldıktan sonra geçen maksimum saat (örn: 3 mum = 12 saat)
+SFP_MFE_MIN_PROFIT_PCT: float = 0.5           # Limit süresi sonunda bu kâr oranına ulaşılmadıysa pozisyon kapatılır
+
+# 99 yapılmıştır
+# --- 13. Zaman Stopu (Time Stop) ---
+TIME_STOP_ENABLED: bool = True                # Zaman stopu mekanizması aktif/pasif
+TIME_STOP_HOURS: int = 4                      # Kırılım işlemlerinde sahte kırılım tespiti için maksimum süre (saat)
+TIME_STOP_MIN_PROFIT_PCT: float = 0.5         # Belirlenen süre sonunda hedeflenen minimum kâr (%)
+TIME_STOP_STRATEGIES: list = [                # Zaman stopu uygulanacak kırılım stratejileri listesi (BIST/Kripto/Emtia)
+    "BIST 3: SQUEEZE KIRILIMI",
+    "BIST 5: HACİMLİ KIRILIM",
+    "BIST 9: AÇILIŞ ARALIĞI KIRILIMI",
+    "KRİPTO 3: SQUEEZE KIRILIMI",
+    "EMTİA 3: KIRILIM",
+    "BEAR 3: YAPI KIRILIMI"
+]
+
+# --- 14. Hibrit Stop Motoru ---
+HYBRID_STOP_ENABLED: bool = True             # Hibrit dinamik trailing stop aktif/pasif
+ANTI_HUNT_OFFSET_PCT: float = 0.00034         # Balinaların stop-avı yapmasını önleyici asimetrik kaydırma oranı (%0.034)
+STRUCTURAL_STOP_ENABLED: bool = True          # EMA-20 yapısal trend desteği alt zemin koruması aktif/pasif
+
+
 

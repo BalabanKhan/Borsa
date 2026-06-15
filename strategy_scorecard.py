@@ -11,6 +11,9 @@ import tempfile
 import threading
 from datetime import datetime, timezone, timedelta
 
+# 99 yapılmıştır
+import config
+
 SCORECARD_STATE_FILE = "strategy_scorecard_state.json"
 _scorecard_lock = threading.Lock()
 
@@ -57,6 +60,9 @@ def _save_state(state: dict):
 
 
 def record_trade_result(strategy_name: str, result: dict):
+    # 99 yapılmıştır
+    if not getattr(config, 'SCORECARD_ENABLED', True):
+        return
     """
     Bir işlem sonucunu strateji karnesine kaydet.
     
@@ -96,7 +102,7 @@ def record_trade_result(strategy_name: str, result: dict):
         outcome = result.get("outcome", "MANUAL")
         pnl = result.get("pnl_pct", 0.0)
         
-        # İşlemi kaydet (son 500 işlem tutulur)
+        # İşlemi kaydet (son SCORECARD_MAX_TRADES işlem tutulur)
         trade_record = {
             "ticker": result.get("ticker", "?"),
             "outcome": outcome,
@@ -107,8 +113,9 @@ def record_trade_result(strategy_name: str, result: dict):
         }
         
         strat["trades"].append(trade_record)
-        if len(strat["trades"]) > 500:
-            strat["trades"] = strat["trades"][-500:]
+        max_trades = getattr(config, 'SCORECARD_MAX_TRADES', 500)
+        if len(strat["trades"]) > max_trades:
+            strat["trades"] = strat["trades"][-max_trades:]
         
         # Sayaçları güncelle
         if outcome == "TP":
@@ -132,6 +139,13 @@ def record_trade_result(strategy_name: str, result: dict):
 
 
 def get_strategy_score(strategy_name: str) -> dict:
+    # 99 yapılmıştır
+    if not getattr(config, 'SCORECARD_ENABLED', True):
+        return {
+            "score": 100, "win_rate": 0.0, "total_trades": 0,
+            "avg_pnl": 0.0, "expectancy": 0.0, "grade": "N/A",
+            "is_disabled": False,
+        }
     """
     Strateji karnesi puanını hesapla.
     
@@ -213,6 +227,9 @@ def get_strategy_score(strategy_name: str) -> dict:
 
 
 def is_strategy_disabled(strategy_name: str) -> bool:
+    # 99 yapılmıştır
+    if not getattr(config, 'SCORECARD_ENABLED', True):
+        return False
     """Strateji Darwinizm tarafından devre dışı bırakılmış mı?"""
     state = _load_state()
     strat = state.get("strategies", {}).get(strategy_name)
@@ -221,7 +238,16 @@ def is_strategy_disabled(strategy_name: str) -> bool:
     return False
 
 
-def run_darwinism(min_trades: int = 5, window_days: int = 60) -> list:
+def run_darwinism(min_trades: int = None, window_days: int = None) -> list:
+    # 99 yapılmıştır
+    if not getattr(config, 'SCORECARD_ENABLED', True):
+        return []
+    
+    if min_trades is None:
+        min_trades = getattr(config, 'SCORECARD_MIN_TRADES', 5)
+    if window_days is None:
+        window_days = getattr(config, 'SCORECARD_AUTO_DISABLE_DAYS', 60)
+
     """
     Darwinizm motoru: Son X gün içinde Y'den fazla işlemi olan stratejilerin
     karnelerini kontrol et ve en kötüleri devre dışı bırak.
@@ -301,6 +327,9 @@ def run_darwinism(min_trades: int = 5, window_days: int = 60) -> list:
 
 
 def re_enable_strategy(strategy_name: str) -> bool:
+    # 99 yapılmıştır
+    if not getattr(config, 'SCORECARD_ENABLED', True):
+        return False
     """Manuel olarak strateji yeniden etkinleştirme."""
     # TOCTOU koruması: load→modify→save tek kilit altında
     with _scorecard_lock:
@@ -319,6 +348,9 @@ def re_enable_strategy(strategy_name: str) -> bool:
 
 
 def generate_weekly_report() -> str:
+    # 99 yapılmıştır
+    if not getattr(config, 'SCORECARD_ENABLED', True):
+        return "Strateji Karnesi Devre Dışı"
     """
     Haftalık karne raporu üretir (Telegram bildirimi için).
     """
@@ -388,6 +420,9 @@ def generate_weekly_report() -> str:
 
 
 def get_scorecard_status() -> str:
+    # 99 yapılmıştır
+    if not getattr(config, 'SCORECARD_ENABLED', True):
+        return "Strateji Karnesi Devre Dışı"
     """Telegram heartbeat için karne durumu."""
     state = _load_state()
     strategies = state.get("strategies", {})

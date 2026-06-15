@@ -430,6 +430,10 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
                 logger.debug(f'[WATCH] {ticker}: WATCH sinyali — bot/chat_id yok, atlanıyor.')
 
             # İşlemi SANAL olarak kaydet (is_watch=True)
+            # İşlemi SANAL olarak kaydet (is_watch=True)
+            # 99 yapılmıştır
+            # V3.4: Sanal izleme işlem kaydına detaylı analiz için tüm conviction parametreleri ve
+            # ham indikatör verileri doğrudan geçilmektedir.
             trade = add_trade(
                 ticker=ticker,
                 signal=decision.get("signal", "AL"),
@@ -440,15 +444,16 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
                 provider="Algorithm",
                 strategy=strategy,
                 indicators=decision.get("indicators", {}),
-                is_watch=True
+                is_watch=True,
+                market=decision.get("market", "KRİPTO"),
+                conviction_score=conv_score,
+                conviction_grade=conv_grade,
+                position_size_pct=pos_size,
+                raw_indicators=decision.get("raw_indicators", {}),
+                conviction_details=decision.get("conviction_details", {})
             )
             
             if trade is not None:
-                # V3.3: Conviction bilgilerini trade kaydına ekle
-                trade["conviction_score"] = conv_score
-                trade["conviction_grade"] = conv_grade
-                trade["position_size_pct"] = pos_size
-                
                 if decision.get("is_day_trade"):
                     trade["is_day_trade"] = True
                     from trade_tracker import load_trades as _lt, save_trades as _st
@@ -464,6 +469,9 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
         print(f"✅ Sistem {ticker} için AL kararı verdi! ({decision.get('strategy')})")
         
         # İşlemi kaydet
+        # 99 yapılmıştır
+        # V3.4: Aktif işlem kaydına detaylı analiz için tüm conviction parametreleri ve
+        # ham indikatör verileri doğrudan geçilmektedir.
         trade = add_trade(
             ticker=ticker,
             signal=decision.get("signal", "AL"),
@@ -473,7 +481,13 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
             reason=decision.get("reason", "Neden belirtilmedi"),
             provider="Algorithm",
             strategy=strategy,
-            indicators=decision.get("indicators", {})
+            indicators=decision.get("indicators", {}),
+            market=decision.get("market", "KRİPTO"),
+            conviction_score=conv_score,
+            conviction_grade=conv_grade,
+            position_size_pct=pos_size,
+            raw_indicators=decision.get("raw_indicators", {}),
+            conviction_details=decision.get("conviction_details", {})
         )
 
         if trade is None:
@@ -495,7 +509,6 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
         # Telegram formatına ek verileri gönderelim
         trade["market"] = decision.get("market", "KRİPTO")
         trade["strategy"] = decision.get("strategy", "BİLİNMİYOR")
-        # V3.3: Conviction bilgilerini trade kaydına ekle
         if conv_score is not None:
             trade["conviction_score"] = conv_score
             trade["conviction_grade"] = conv_grade

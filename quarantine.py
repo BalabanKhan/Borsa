@@ -13,9 +13,12 @@ from datetime import datetime, timezone, timedelta
 QUARANTINE_STATE_FILE = "quarantine_state.json"
 _quarantine_lock = threading.Lock()
 
-# Karantina eşikleri
-STALE_DATA_THRESHOLD_SEC = 1800    # 30 dk veri gelmezse → stale
-AUTO_CLOSE_THRESHOLD_HOURS = 72    # 72 saat sonra → otomatik pozisyon kapat önerisi
+# 99 yapılmıştır
+import config
+
+# Karantina eşikleri (Config.py SSOT eşleşmesi)
+STALE_DATA_THRESHOLD_SEC = getattr(config, 'QUARANTINE_STALE_SECONDS', 1800)
+AUTO_CLOSE_THRESHOLD_HOURS = getattr(config, 'QUARANTINE_AUTO_CLOSE_HOURS', 72)
 ZOMBIE_CHECK_INTERVAL_SEC = 900    # Her 15 dk'da bir zombie kontrolü
 
 
@@ -61,6 +64,10 @@ def _save_state(state: dict):
 
 
 def check_staleness(trade: dict, last_price_update: str = None) -> dict | None:
+    # 99 yapılmıştır
+    if not getattr(config, 'QUARANTINE_ENABLED', True):
+        return None
+
     """
     Bir işlem için veri bayatlığını kontrol eder.
     
@@ -142,6 +149,9 @@ def _add_to_quarantine(ticker: str, report: dict):
 
 
 def remove_from_quarantine(ticker: str) -> bool:
+    # 99 yapılmıştır
+    if not getattr(config, 'QUARANTINE_ENABLED', True):
+        return False
     """Varlığı karantinadan çıkar (veri düzeldiğinde)."""
     # TOCTOU koruması: load→modify→save tek kilit altında
     with _quarantine_lock:
@@ -158,12 +168,18 @@ def remove_from_quarantine(ticker: str) -> bool:
 
 
 def is_quarantined(ticker: str) -> bool:
+    # 99 yapılmıştır
+    if not getattr(config, 'QUARANTINE_ENABLED', True):
+        return False
     """Varlık karantinada mı?"""
     state = _load_state()
     return ticker in state.get("quarantined", {})
 
 
 def get_quarantine_report(ticker: str) -> dict | None:
+    # 99 yapılmıştır
+    if not getattr(config, 'QUARANTINE_ENABLED', True):
+        return None
     """Belirli bir varlığın karantina raporunu döner."""
     state = _load_state()
     return state.get("quarantined", {}).get(ticker)
@@ -213,6 +229,9 @@ def generate_quarantine_alert(report: dict) -> str:
 
 
 def check_exchange_health(market: str, tickers: list, last_prices: dict) -> list:
+    # 99 yapılmıştır
+    if not getattr(config, 'QUARANTINE_ENABLED', True):
+        return []
     """
     Borsa sağlık kontrolü. Birden fazla varlıkta eşzamanlı veri kaybı varsa
     borsanın kendisi sorunlu olabilir.
@@ -267,6 +286,9 @@ def check_exchange_health(market: str, tickers: list, last_prices: dict) -> list
 
 
 def get_quarantine_status() -> str:
+    # 99 yapılmıştır
+    if not getattr(config, 'QUARANTINE_ENABLED', True):
+        return "Karantina Devre Dışı"
     """Telegram heartbeat için karantina durumu."""
     state = _load_state()
     quarantined = state.get("quarantined", {})
@@ -283,6 +305,9 @@ def get_quarantine_status() -> str:
 
 
 def cleanup_expired_quarantines(max_age_hours: int = 168):
+    # 99 yapılmıştır
+    if not getattr(config, 'QUARANTINE_ENABLED', True):
+        return []
     """
     1 haftadan eski karantina kayıtlarını temizle.
     Haftalık bakım için çağrılır.

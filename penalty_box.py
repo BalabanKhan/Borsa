@@ -12,16 +12,19 @@ from datetime import datetime, timezone, timedelta
 PENALTY_STATE_FILE = "penalty_box_state.json"
 _penalty_lock = threading.Lock()
 
-# Ceza seviyeleri
+# 99 yapılmıştır
+import config
+
+# Ceza seviyeleri (Config.py SSOT eşleşmesi)
 PENALTY_LEVELS = {
     1: {"level": "NORMAL", "min_rr": 2.0, "cooldown_hours": 0},
-    2: {"level": "WARNING", "min_rr": 3.0, "cooldown_hours": 0},
-    3: {"level": "PENALTY", "min_rr": 999, "cooldown_hours": 24},
-    5: {"level": "BANNED", "min_rr": 999, "cooldown_hours": 72},
+    getattr(config, 'PENALTY_CONSECUTIVE_WARNING', 2): {"level": "WARNING", "min_rr": 3.0, "cooldown_hours": 0},
+    getattr(config, 'PENALTY_CONSECUTIVE_PENALTY', 3): {"level": "PENALTY", "min_rr": 999, "cooldown_hours": 24},
+    getattr(config, 'PENALTY_CONSECUTIVE_BANNED', 5): {"level": "BANNED", "min_rr": 999, "cooldown_hours": 72},
 }
 
 # Günlük komisyon limiti (sermayenin yüzdesi olarak)
-DAILY_COMMISSION_LIMIT_PCT = 99.0  # DİKKAT: TEST İÇİN 99.0 YAPILDI. (Normal canlı sistem değeri: 1.0)
+DAILY_COMMISSION_LIMIT_PCT = getattr(config, 'PENALTY_DAILY_COMMISSION_LIMIT', 1.0)
 
 
 def _load_state_unlocked() -> dict:
@@ -76,6 +79,9 @@ def _reset_daily_if_needed(state: dict) -> dict:
 
 
 def record_asset_sl(ticker: str) -> str | None:
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return None
     """
     Bir varlıkta SL gerçekleştiğinde çağrılır.
     Varlık bazlı ardışık SL sayacını artırır.
@@ -159,6 +165,9 @@ def record_asset_sl(ticker: str) -> str | None:
 
 
 def record_asset_tp(ticker: str):
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return
     """
     Bir varlıkta TP gerçekleştiğinde çağrılır.
     Ardışık SL sayacını 1 düşürür (tamamen sıfırlamaz — hafıza korunur).
@@ -177,6 +186,9 @@ def record_asset_tp(ticker: str):
 
 
 def is_asset_penalized(ticker: str) -> bool:
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return False
     """
     Varlık şu an cezalı mı? (Cooldown aktif mi?)
 
@@ -213,6 +225,9 @@ def is_asset_penalized(ticker: str) -> bool:
 
 
 def get_min_rr_for_asset(ticker: str) -> float:
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return 0.0
     """
     Bu varlık için minimum R:R gereksinimi.
     Cezalı varlıklarda daha yüksek R:R gerekir.
@@ -235,6 +250,9 @@ def get_min_rr_for_asset(ticker: str) -> float:
 
 
 def is_daily_commission_exceeded() -> bool:
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return False
     """
     Günlük tahmini komisyon limiti aşıldı mı?
     Aşıldıysa TÜM sinyaller durdurulur.
@@ -247,6 +265,9 @@ def is_daily_commission_exceeded() -> bool:
 
 
 def record_trade_commission(ticker: str):
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return
     """
     Her işlem açılışında tahmini komisyonu kaydet.
     """
@@ -260,6 +281,9 @@ def record_trade_commission(ticker: str):
 
 
 def get_penalty_status() -> str:
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return "Ceza Kutusu Devre Dışı"
     """Telegram heartbeat için ceza kutusu durumu."""
     with _penalty_lock:
         state = _load_state_unlocked()
@@ -300,6 +324,9 @@ def get_penalty_status() -> str:
 
 
 def prune_old_assets(max_age_days: int = 90):
+    # 99 yapılmıştır
+    if not getattr(config, 'PENALTY_BOX_ENABLED', True):
+        return 0
     """
     90 gündür SL yaşamamış ve cezası olmayan varlıkları temizle.
     Haftalık Darwinizm ile birlikte çağrılır.

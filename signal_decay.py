@@ -13,17 +13,23 @@ Sinyal Yaşam Döngüsü:
 import logging
 from datetime import datetime, timezone, timedelta
 
-# Sinyal yaşam eşikleri (saniye)
-DECAY_WARM_SECONDS = 1800       # 30 dakika
-DECAY_STALE_SECONDS = 7200      # 2 saat
-DECAY_DEAD_CRYPTO_SECONDS = 21600   # 6 saat
-DECAY_DEAD_BIST_SECONDS = 28800     # 8 saat (bir seans)
+# 99 yapılmıştır
+import config
+
+# Sinyal yaşam eşikleri (saniye) - Config.py SSOT eşleşmesi
+DECAY_WARM_SECONDS = getattr(config, 'SIGNAL_DECAY_WARM_SECONDS', 1800)
+DECAY_STALE_SECONDS = getattr(config, 'SIGNAL_DECAY_STALE_SECONDS', 7200)
+DECAY_DEAD_CRYPTO_SECONDS = getattr(config, 'SIGNAL_DECAY_DEAD_CRYPTO_SECONDS', 21600)
+DECAY_DEAD_BIST_SECONDS = getattr(config, 'SIGNAL_DECAY_DEAD_BIST_SECONDS', 28800)
 
 # Minimum R:R — bu değerin altına düşen sinyaller iptal edilir
-DECAY_MIN_RR = 1.5
+DECAY_MIN_RR = getattr(config, 'SIGNAL_DECAY_MIN_RR', 1.5)
 
 
 def get_signal_age_seconds(trade: dict) -> float:
+    # 99 yapılmıştır
+    if not getattr(config, 'SIGNAL_DECAY_ENABLED', True):
+        return 0.0
     """
     Sinyalin yaşını saniye cinsinden hesaplar.
     entry_time alanı yoksa 0 döner (geriye uyumluluk).
@@ -46,6 +52,9 @@ def get_signal_age_seconds(trade: dict) -> float:
 
 
 def get_decay_status(trade: dict) -> str:
+    # 99 yapılmıştır
+    if not getattr(config, 'SIGNAL_DECAY_ENABLED', True):
+        return "FRESH"
     """
     Sinyalin mevcut erime durumunu döner.
     
@@ -68,6 +77,9 @@ def get_decay_status(trade: dict) -> str:
 
 
 def calculate_current_rr(trade: dict, current_price: float) -> float:
+    # 99 yapılmıştır
+    if not getattr(config, 'SIGNAL_DECAY_ENABLED', True):
+        return float(trade.get("rr_ratio", 2.0))
     """
     Mevcut fiyata göre R:R oranını yeniden hesaplar.
     Sinyal üretildiğindeki fiyattan farklı bir noktada giriş yapılmışsa,
@@ -100,6 +112,15 @@ def calculate_current_rr(trade: dict, current_price: float) -> float:
 
 
 def check_signal_decay(trade: dict, current_price: float) -> dict:
+    # 99 yapılmıştır
+    if not getattr(config, 'SIGNAL_DECAY_ENABLED', True):
+        return {
+            "status": "FRESH",
+            "should_close": False,
+            "current_rr": float(trade.get("rr_ratio", 2.0)),
+            "age_seconds": 0.0,
+            "notification": None
+        }
     """
     Bir aktif işlemin sinyal erime durumunu kontrol eder.
     
@@ -185,6 +206,9 @@ def check_signal_decay(trade: dict, current_price: float) -> dict:
 
 
 def should_block_entry(trade: dict, current_price: float) -> tuple[bool, str]:
+    # 99 yapılmıştır
+    if not getattr(config, 'SIGNAL_DECAY_ENABLED', True):
+        return False, ""
     """
     Yeni bir işlem kaydedilmeden önce, sinyalin hâlâ geçerli olup olmadığını kontrol eder.
     entry_price ile current_price arasındaki fark TTL bandını aştıysa → engelle.

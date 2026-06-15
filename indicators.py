@@ -157,9 +157,9 @@ def sniper_get_htf_bias(df):
     if len(df) < 50:
         return 0
     df = df.copy()
-    if 'EMA_{config.IND_EMA_MID}' not in df.columns:
+    if f'EMA_{config.IND_EMA_MID}' not in df.columns:
         df.ta.ema(length=config.IND_EMA_MID, append=True)
-    if 'EMA_{config.IND_EMA_SLOW}' not in df.columns:
+    if f'EMA_{config.IND_EMA_SLOW}' not in df.columns:
         df.ta.ema(length=config.IND_EMA_SLOW, append=True)
 
     ema20 = df[f'EMA_{config.IND_EMA_MID}'].iloc[-1]
@@ -334,11 +334,28 @@ def detect_sfp(df_4h, neighbors=3):
     last_swing_idx, last_swing_high = swing_highs[-1]
     last_candle = df_4h.iloc[-1]
 
-    if last_candle['high'] > last_swing_high and last_candle['close'] < last_swing_high:
-        if last_candle['close'] < last_candle['open']:
+    if last_candle['high'] > last_swing_high:
+        # SFP_BODY_CLOSE_INSIDE_REQUIRED: Mum gövdesinin eski tepe seviyesinin altında (içeride) kapanması şartı
+        body_close_ok = not config.SFP_BODY_CLOSE_INSIDE_REQUIRED or (last_candle['close'] < last_swing_high)
+        if body_close_ok and last_candle['close'] < last_candle['open']:
             body = abs(last_candle['close'] - last_candle['open'])
             upper_wick = last_candle['high'] - max(last_candle['close'], last_candle['open'])
             if body > 0 and upper_wick > (2 * body):
+                # SFP Hacim Teyidi Kontrolü
+                # SFP barındaki hacmin, son 20 mumun ortalama hacminin config.SFP_VOLUME_CONFIRMATION_MULT katı olmasını şart koşar.
+                if config.SFP_VOLUME_CONFIRMATION_MULT > 0:
+                    vol_sma = df_4h['volume'].rolling(20).mean().iloc[-1]
+                    if not pd.isna(vol_sma) and last_candle['volume'] < vol_sma * config.SFP_VOLUME_CONFIRMATION_MULT:
+                        return False, None, None
+
+                # SFP MFE / Zaman Filtresi: Fiyatın mum kapanışında hızlıca dönmüş olması (mumun alt %40'lık kısmında kapanması)
+                if getattr(config, 'SFP_MFE_TIME_FILTER_REQUIRED', False):
+                    candle_range = last_candle['high'] - last_candle['low']
+                    if candle_range > 0:
+                        close_percentile = (last_candle['close'] - last_candle['low']) / candle_range
+                        if close_percentile > 0.40:
+                            return False, None, None
+
                 return True, last_swing_high, last_candle
 
     return False, None, None
@@ -356,13 +373,13 @@ def detect_premium_rejection(df_4h, df_1d):
     df_1d = df_1d.copy()
     df_4h = df_4h.copy()
 
-    if 'EMA_{config.IND_EMA_MID}' not in df_1d.columns:
+    if f'EMA_{config.IND_EMA_MID}' not in df_1d.columns:
         df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
-    if 'EMA_{config.IND_EMA_SLOW}' not in df_1d.columns:
+    if f'EMA_{config.IND_EMA_SLOW}' not in df_1d.columns:
         df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
     last_1d = df_1d.iloc[-1]
-    ema20_1d = last_1d.get('EMA_{config.IND_EMA_MID}')
-    ema50_1d = last_1d.get('EMA_{config.IND_EMA_SLOW}')
+    ema20_1d = last_1d.get(f'EMA_{config.IND_EMA_MID}')
+    ema50_1d = last_1d.get(f'EMA_{config.IND_EMA_SLOW}')
 
     if ema20_1d is None or ema50_1d is None or pd.isna(ema20_1d) or pd.isna(ema50_1d):
         return False, None, None, None
@@ -407,7 +424,7 @@ def detect_premium_rejection(df_4h, df_1d):
         )
 
         df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
-        ema20_4h = last_4h.get('EMA_{config.IND_EMA_MID}')
+        ema20_4h = last_4h.get(f'EMA_{config.IND_EMA_MID}')
         ema_rejection = False
         if ema20_4h is not None and not pd.isna(ema20_4h):
             ema_rejection = (last_4h['high'] >= ema20_4h and last_4h['close'] < ema20_4h
@@ -461,15 +478,32 @@ def detect_bearish_divergence(df_4h, neighbors=3):
     rsi_2 = float(df_4h.iloc[idx2][rsi_col])
 
     if price_2 > price_1 and rsi_2 < rsi_1 and (rsi_1 - rsi_2) >= 3:
+        # SHORT_RSI_OVERBOUGHT_LIMIT: Uyumsuzluk teyidi için ilk zirvede RSI'ın aşırı alım bölgesinde olmasını şart koşar
+        if rsi_1 < config.SHORT_RSI_OVERBOUGHT_LIMIT:
+            return False, None, None, None, None
+
         # RED-16: Divergence tazelik kontrolü — çok eski swing'ler geçersiz
         if (len(df_4h) - 1 - idx2) > DIVERGENCE_MAX_AGE_CANDLES:
             return False, None, None, None, None
+
+        # MACD Histogram Uyumsuzluk Doğrulaması
+        # DIVERGENCE_MACD_CONFIRMATION_REQUIRED bayrağıyla aktifleşir.
+        # Fiyat ile MACD Histogramı arasında negatif uyumsuzluk (divergence) olmasını şart koşar.
+        if config.DIVERGENCE_MACD_CONFIRMATION_REQUIRED:
+            df_4h.ta.macd(append=True)
+            macdh_cols = [c for c in df_4h.columns if 'MACDh' in c]
+            if macdh_cols:
+                macd_1 = float(df_4h.iloc[idx1][macdh_cols[0]])
+                macd_2 = float(df_4h.iloc[idx2][macdh_cols[0]])
+                if price_2 > price_1 and macd_2 >= macd_1:
+                    return False, None, None, None, None
+
         vol_1 = float(df_4h.iloc[idx1]['volume'])
         vol_2 = float(df_4h.iloc[idx2]['volume'])
         vol_divergence = vol_2 < vol_1
 
         last = df_4h.iloc[-1]
-        ema20 = last.get('EMA_{config.IND_EMA_MID}')
+        ema20 = last.get(f'EMA_{config.IND_EMA_MID}')
         if ema20 is not None and not pd.isna(ema20):
             if float(last['close']) < float(ema20) and vol_divergence:
                 return True, price_1, price_2, rsi_1, rsi_2
@@ -522,12 +556,25 @@ def detect_bullish_divergence(df_4h, neighbors=3):
         # RED-16: Divergence tazelik kontrolü — çok eski swing'ler geçersiz
         if (len(df_4h) - 1 - idx2) > DIVERGENCE_MAX_AGE_CANDLES:
             return False, None, None, None, None
+
+        # MACD Histogram Pozitif Uyumsuzluk Teyidi
+        # DIVERGENCE_MACD_CONFIRMATION_REQUIRED bayrağıyla aktifleşir.
+        # Fiyat ile MACD histogramı arasında pozitif uyumsuzluk (divergence) olmasını şart koşar.
+        if config.DIVERGENCE_MACD_CONFIRMATION_REQUIRED:
+            df_4h.ta.macd(append=True)
+            macdh_cols = [c for c in df_4h.columns if 'MACDh' in c]
+            if macdh_cols:
+                macd_1 = float(df_4h.iloc[idx1][macdh_cols[0]])
+                macd_2 = float(df_4h.iloc[idx2][macdh_cols[0]])
+                if price_2 < price_1 and macd_2 <= macd_1:
+                    return False, None, None, None, None
+
         vol_1 = float(df_4h.iloc[idx1]['volume'])
         vol_2 = float(df_4h.iloc[idx2]['volume'])
         vol_divergence = vol_2 < vol_1
 
         last = df_4h.iloc[-1]
-        ema20 = last.get('EMA_{config.IND_EMA_MID}')
+        ema20 = last.get(f'EMA_{config.IND_EMA_MID}')
         if ema20 is not None and not pd.isna(ema20):
             if float(last['close']) > float(ema20) and vol_divergence:
                 return True, price_1, price_2, rsi_1, rsi_2
@@ -598,6 +645,21 @@ def detect_squeeze(df):
             direction = "down"
     if direction is None:
         return False, None, None
+
+    # Squeeze Momentum Hizalama Kontrolü
+    # SQUEEZE_MOMENTUM_ALIGN_REQUIRED bayrağıyla aktifleşir.
+    # Momentum histogramının (MACD) kırılım yönüyle uyuşmasını şart koşar.
+    if config.SQUEEZE_MOMENTUM_ALIGN_REQUIRED:
+        df.ta.macd(append=True)
+        macdh_cols = [c for c in df.columns if 'MACDh' in c]
+        if macdh_cols:
+            macd_h = df[macdh_cols[0]]
+            if len(macd_h) >= 2:
+                is_rising = macd_h.iloc[-1] > macd_h.iloc[-2]
+                if direction == "up" and not is_rising:
+                    return False, None, None
+                elif direction == "down" and is_rising:
+                    return False, None, None
 
     vol_sma = df['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean()
     if not pd.isna(vol_sma.iloc[-1]) and last['volume'] < vol_sma.iloc[-1] * config.IND_VOL_BREAKOUT_MULTIPLIER:
@@ -691,20 +753,60 @@ def calculate_anchored_vwap(df, anchor_type="weekly"):
 
 
 def detect_vwap_bounce(df, vwap_val):
-    """Son mum VWAP'a değip Pin Bar bıraktı mı? Returns: (bounce_ok, wick_low)"""
-    if vwap_val is None or len(df) < 2:
+    """
+    Son mum VWAP'a değip Pin Bar bıraktı mı ve VWAP üzerinde tutundu mu?
+    VWAP_SLOPE_CONFIRMATION: VWAP eğiminin pozitif olmasını şart koşar.
+    VWAP_BOUNCE_CANDLE_CONFIRM: VWAP üzerinde kapanan ardışık onay mum sayısı.
+    Returns: (bounce_ok, wick_low)
+    """
+    if vwap_val is None or len(df) < max(5, config.VWAP_SLOPE_LOOKBACK, config.VWAP_BOUNCE_CANDLE_CONFIRM):
         return False, None
+
     last = df.iloc[-1]
-    if last['low'] > vwap_val:
+    
+    # 1. VWAP Eğim Kontrolü (VWAP Slope Confirmation)
+    if config.VWAP_SLOPE_CONFIRMATION:
+        # VWAP eğimini ölçmek için geçmiş N mumun Anchored VWAP değerlerini hesaplayıp kıyaslıyoruz.
+        # Bu, VWAP'ın yatay/aşağı yönlü olduğu chop piyasalarda işleme girmeyi engeller.
+        vwap_past = []
+        for offset in range(config.VWAP_SLOPE_LOOKBACK):
+            sub_df = df.iloc[:len(df) - offset]
+            val = calculate_anchored_vwap(sub_df, anchor_type="weekly")
+            if val is not None:
+                vwap_past.append(val)
+        if len(vwap_past) >= config.VWAP_SLOPE_LOOKBACK:
+            # En yeni VWAP, geçmişteki VWAP değerlerinden büyük olmalı (yukarı eğimli trend)
+            if vwap_past[0] <= vwap_past[-1]:
+                return False, None
+
+    # 2. VWAP Değme (Touch) ve İğne Kontrolü (Wick low <= VWAP)
+    # Son (VWAP_BOUNCE_CANDLE_CONFIRM + 1) mumdan en az birinin VWAP altına iğne atmış (veya değmiş) olması gerekir.
+    # Bu, VWAP seviyesinden sektiğini kanıtlar.
+    touched_vwap = False
+    for i in range(1, config.VWAP_BOUNCE_CANDLE_CONFIRM + 2):
+        if i <= len(df):
+            c = df.iloc[-i]
+            if c['low'] <= vwap_val:
+                touched_vwap = True
+                break
+    if not touched_vwap:
         return False, None
+
+    # 3. Çoklu Mum Kapanış Onayı (Gövde Kapanışı - Close > VWAP)
+    # Son N mumun kapanışının VWAP üzerinde olduğunu teyit ediyoruz.
+    # Bu, fiyatın VWAP üzerinde tutunduğunu kanıtlayan 'Gövde Kapanışı' veya 'Çoklu Mum Onayı'dır.
+    for i in range(1, config.VWAP_BOUNCE_CANDLE_CONFIRM + 1):
+        c = df.iloc[-i]
+        if c['close'] <= vwap_val:
+            return False, None
+
     body = abs(last['close'] - last['open'])
     if math.isclose(body, 0.0, abs_tol=1e-10):
         body = last['close'] * 0.0001
     lower_wick = min(last['close'], last['open']) - last['low']
     if lower_wick < body * 2:
         return False, None
-    if last['close'] <= last['open'] or last['close'] <= vwap_val:
-        return False, None
+
     return True, float(last['low'])
 
 
@@ -744,6 +846,13 @@ def detect_obv_accumulation(df, max_change_pct=8.0):
     last = df.iloc[-1]
     if last['close'] <= box_high:
         return False, None, None
+
+    # OBV SMA Hizalama Kontrolü
+    # OBV'nin kendi hareketli ortalamasının (SMA 20) üzerinde olması koşulunu denetler.
+    if config.OBV_SMA_ALIGN_REQUIRED:
+        df['OBV_SMA'] = df['OBV'].rolling(config.OBV_SMA_PERIOD).mean()
+        if not pd.isna(df['OBV_SMA'].iloc[-1]) and df['OBV'].iloc[-1] <= df['OBV_SMA'].iloc[-1]:
+            return False, None, None
 
     vol_sma = df['volume'].rolling(config.IND_OBV_ACC_PERIOD).mean()
     if not pd.isna(vol_sma.iloc[-1]) and last['volume'] < vol_sma.iloc[-1] * config.IND_OBV_ACC_VOL_MULTIPLIER:
