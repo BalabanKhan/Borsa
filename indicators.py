@@ -5,6 +5,7 @@ Public API — leading underscore olmadan.
 """
 import numpy as np
 import pandas as pd
+import config
 import pandas_ta as ta
 import logging
 import math
@@ -156,13 +157,13 @@ def sniper_get_htf_bias(df):
     if len(df) < 50:
         return 0
     df = df.copy()
-    if 'EMA_20' not in df.columns:
-        df.ta.ema(length=20, append=True)
-    if 'EMA_50' not in df.columns:
-        df.ta.ema(length=50, append=True)
+    if 'EMA_{config.IND_EMA_MID}' not in df.columns:
+        df.ta.ema(length=config.IND_EMA_MID, append=True)
+    if 'EMA_{config.IND_EMA_SLOW}' not in df.columns:
+        df.ta.ema(length=config.IND_EMA_SLOW, append=True)
 
-    ema20 = df['EMA_20'].iloc[-1]
-    ema50 = df['EMA_50'].iloc[-1]
+    ema20 = df[f'EMA_{config.IND_EMA_MID}'].iloc[-1]
+    ema50 = df[f'EMA_{config.IND_EMA_SLOW}'].iloc[-1]
     close = df['close'].iloc[-1]
 
     if pd.isna(ema20) or pd.isna(ema50):
@@ -355,13 +356,13 @@ def detect_premium_rejection(df_4h, df_1d):
     df_1d = df_1d.copy()
     df_4h = df_4h.copy()
 
-    if 'EMA_20' not in df_1d.columns:
-        df_1d.ta.ema(length=20, append=True)
-    if 'EMA_50' not in df_1d.columns:
-        df_1d.ta.ema(length=50, append=True)
+    if 'EMA_{config.IND_EMA_MID}' not in df_1d.columns:
+        df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
+    if 'EMA_{config.IND_EMA_SLOW}' not in df_1d.columns:
+        df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
     last_1d = df_1d.iloc[-1]
-    ema20_1d = last_1d.get('EMA_20')
-    ema50_1d = last_1d.get('EMA_50')
+    ema20_1d = last_1d.get('EMA_{config.IND_EMA_MID}')
+    ema50_1d = last_1d.get('EMA_{config.IND_EMA_SLOW}')
 
     if ema20_1d is None or ema50_1d is None or pd.isna(ema20_1d) or pd.isna(ema50_1d):
         return False, None, None, None
@@ -405,8 +406,8 @@ def detect_premium_rejection(df_4h, df_1d):
             last_4h['close'] < df_4h.iloc[-2]['open']
         )
 
-        df_4h.ta.ema(length=20, append=True)
-        ema20_4h = last_4h.get('EMA_20')
+        df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
+        ema20_4h = last_4h.get('EMA_{config.IND_EMA_MID}')
         ema_rejection = False
         if ema20_4h is not None and not pd.isna(ema20_4h):
             ema_rejection = (last_4h['high'] >= ema20_4h and last_4h['close'] < ema20_4h
@@ -427,8 +428,8 @@ def detect_bearish_divergence(df_4h, neighbors=3):
         return False, None, None, None, None
 
     df_4h = df_4h.copy()
-    df_4h.ta.rsi(length=14, append=True)
-    df_4h.ta.ema(length=20, append=True)
+    df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
 
     rsi_col = 'RSI_14'
     if rsi_col not in df_4h.columns:
@@ -468,7 +469,7 @@ def detect_bearish_divergence(df_4h, neighbors=3):
         vol_divergence = vol_2 < vol_1
 
         last = df_4h.iloc[-1]
-        ema20 = last.get('EMA_20')
+        ema20 = last.get('EMA_{config.IND_EMA_MID}')
         if ema20 is not None and not pd.isna(ema20):
             if float(last['close']) < float(ema20) and vol_divergence:
                 return True, price_1, price_2, rsi_1, rsi_2
@@ -485,8 +486,8 @@ def detect_bullish_divergence(df_4h, neighbors=3):
         return False, None, None, None, None
 
     df_4h = df_4h.copy()
-    df_4h.ta.rsi(length=14, append=True)
-    df_4h.ta.ema(length=20, append=True)
+    df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
 
     rsi_col = 'RSI_14'
     if rsi_col not in df_4h.columns:
@@ -526,7 +527,7 @@ def detect_bullish_divergence(df_4h, neighbors=3):
         vol_divergence = vol_2 < vol_1
 
         last = df_4h.iloc[-1]
-        ema20 = last.get('EMA_20')
+        ema20 = last.get('EMA_{config.IND_EMA_MID}')
         if ema20 is not None and not pd.isna(ema20):
             if float(last['close']) > float(ema20) and vol_divergence:
                 return True, price_1, price_2, rsi_1, rsi_2
@@ -550,9 +551,9 @@ def detect_squeeze(df):
     df = df.copy()
 
     if not [c for c in df.columns if 'BBU_20_2' in c]:
-        df.ta.bbands(length=20, std=2, append=True)
+        df.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
     if not [c for c in df.columns if 'KCU_20_1' in c]:
-        df.ta.kc(length=20, scalar=1.5, append=True)
+        df.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=1.5, append=True)
 
     bbu = [c for c in df.columns if 'BBU' in c]
     bbl = [c for c in df.columns if 'BBL' in c]
@@ -598,8 +599,8 @@ def detect_squeeze(df):
     if direction is None:
         return False, None, None
 
-    vol_sma = df['volume'].rolling(20).mean()
-    if not pd.isna(vol_sma.iloc[-1]) and last['volume'] < vol_sma.iloc[-1] * 1.5:
+    vol_sma = df['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean()
+    if not pd.isna(vol_sma.iloc[-1]) and last['volume'] < vol_sma.iloc[-1] * config.IND_VOL_BREAKOUT_MULTIPLIER:
         return False, None, None
 
     return True, direction, last
@@ -622,13 +623,13 @@ def calculate_relative_strength(df_stock, df_index):
     index_c = df_index.loc[common_idx]['close']
 
     rs_line = stock_c / index_c
-    rs_sma_50 = rs_line.rolling(50).mean()
+    rs_sma = rs_line.rolling(config.IND_RS_SMA_LENGTH).mean()
 
-    rs_strong = bool(not pd.isna(rs_sma_50.iloc[-1]) and rs_line.iloc[-1] > rs_sma_50.iloc[-1])
+    rs_strong = bool(not pd.isna(rs_sma.iloc[-1]) and rs_line.iloc[-1] > rs_sma.iloc[-1])
 
     rs_trend_up = False
-    if len(rs_line) >= 15:
-        rs_trend_up = bool(rs_line.iloc[-5:].mean() > rs_line.iloc[-15:-10].mean())
+    if len(rs_line) >= config.IND_RS_MOMENTUM_LONG_START:
+        rs_trend_up = bool(rs_line.iloc[-config.IND_RS_MOMENTUM_SHORT:].mean() > rs_line.iloc[-config.IND_RS_MOMENTUM_LONG_START:-config.IND_RS_MOMENTUM_LONG_END].mean())
 
     index_stressed = False
     if len(index_c) >= 6:
@@ -639,7 +640,7 @@ def calculate_relative_strength(df_stock, df_index):
     if len(df_index) >= 10:
         df_idx = df_index.copy()
         if 'EMA_8' not in df_idx.columns:
-            df_idx.ta.ema(length=8, append=True)
+            df_idx.ta.ema(length=config.IND_EMA_FAST, append=True)
         ema_col = 'EMA_8' if 'EMA_8' in df_idx.columns else None
         if ema_col and not pd.isna(df_idx[ema_col].iloc[-1]):
             index_recovering = bool(df_idx['close'].iloc[-1] > df_idx[ema_col].iloc[-1])
@@ -712,7 +713,7 @@ def detect_obv_accumulation(df, max_change_pct=8.0):
     """Fiyat yatayda + OBV yükseliyor + kutu kırılımı → sinyal.
     Returns: (breakout_confirmed, box_high, box_low)
     """
-    if len(df) < 25:
+    if len(df) < config.IND_OBV_ACC_MIN_LEN:
         return False, None, None
 
     # Pandas Mutability koruması: kaynak DataFrame'i kirletme
@@ -723,7 +724,7 @@ def detect_obv_accumulation(df, max_change_pct=8.0):
     if 'OBV' not in df.columns:
         return False, None, None
 
-    recent = df.iloc[-20:]
+    recent = df.iloc[-config.IND_OBV_ACC_PERIOD:]
     price_chg = abs((recent['close'].iloc[-1] - recent['close'].iloc[0]) / recent['close'].iloc[0]) * 100
     if price_chg > max_change_pct:
         return False, None, None
@@ -731,21 +732,21 @@ def detect_obv_accumulation(df, max_change_pct=8.0):
     box_high = float(recent['close'].max())
     box_low = float(recent['close'].min())
 
-    obv_5 = df['OBV'].iloc[-5:].mean()
-    obv_20 = df['OBV'].iloc[-20:].mean()
-    if obv_5 <= obv_20:
+    obv_short = df['OBV'].iloc[-config.IND_OBV_ACC_SHORT_PERIOD:].mean()
+    obv_long = df['OBV'].iloc[-config.IND_OBV_ACC_PERIOD:].mean()
+    if obv_short <= obv_long:
         return False, None, None
 
-    obv_old_max = df['OBV'].iloc[-20:-5].max()
-    if df['OBV'].iloc[-5:].max() <= obv_old_max:
+    obv_old_max = df['OBV'].iloc[-config.IND_OBV_ACC_PERIOD:-config.IND_OBV_ACC_SHORT_PERIOD].max()
+    if df['OBV'].iloc[-config.IND_OBV_ACC_SHORT_PERIOD:].max() <= obv_old_max:
         return False, None, None
 
     last = df.iloc[-1]
     if last['close'] <= box_high:
         return False, None, None
 
-    vol_sma = df['volume'].rolling(20).mean()
-    if not pd.isna(vol_sma.iloc[-1]) and last['volume'] < vol_sma.iloc[-1] * 1.5:
+    vol_sma = df['volume'].rolling(config.IND_OBV_ACC_PERIOD).mean()
+    if not pd.isna(vol_sma.iloc[-1]) and last['volume'] < vol_sma.iloc[-1] * config.IND_OBV_ACC_VOL_MULTIPLIER:
         return False, None, None
 
     return True, box_high, box_low
@@ -769,10 +770,10 @@ def calculate_orb_cage(df_15m):
         return None, None, None, None  # Yanlış timezone ile devam etme
 
     df_today = df[df.index.date == today]
-    if len(df_today) < 4:
+    if len(df_today) < config.ORB_MIN_BARS:
         return None, None, None, None
 
-    cage_bars = df_today[df_today.index.hour == 10]
+    cage_bars = df_today[df_today.index.hour == config.ORB_CAGE_HOUR]
     if len(cage_bars) < 2:
         return None, None, None, None
 
@@ -786,3 +787,34 @@ def calculate_orb_cage(df_15m):
     today_vwap = float(cum.iloc[-1] / cum_vol.iloc[-1]) if not math.isclose(cum_vol.iloc[-1], 0.0, abs_tol=1e-8) else None
 
     return cage_high, cage_low, cage_mid, today_vwap
+
+def calculate_time_specific_rvol(df_15m, target_hour: int, target_minute: int, period: int = 20) -> float:
+    """
+    Belirli bir saate (örneğin 10:15) ait son N günün ortalama hacmini hesaplar.
+    RVOL (Relative Volume) filtresi için kullanılır.
+    """
+    if df_15m is None or df_15m.empty:
+        return 0.0
+        
+    try:
+        df = df_15m.copy()
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert("Europe/Istanbul")
+        else:
+            df.index = df.index.tz_convert("Europe/Istanbul")
+            
+        # Hedef saat ve dakikayı filtrele
+        mask = (df.index.hour == target_hour) & (df.index.minute == target_minute)
+        specific_bars = df[mask]
+        
+        if specific_bars.empty:
+            return 0.0
+            
+        # Son N günü al
+        recent_bars = specific_bars.tail(period)
+        avg_vol = recent_bars['volume'].mean()
+        return float(avg_vol) if not math.isnan(avg_vol) else 0.0
+        
+    except Exception as e:
+        logging.warning(f"[calculate_time_specific_rvol] Hata: {e}")
+        return 0.0

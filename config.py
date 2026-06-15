@@ -129,6 +129,52 @@ ADX_TREND_THRESHOLD = 25
 ADX_STRONG_TREND = 30
 
 # ════════════════════════════════════════
+# BIST 9 (ORB) Parametreleri
+# ════════════════════════════════════════
+BIST9_MAX_CAGE_WIDTH_PCT = 2.0  # Kafes genişliği maksimum % kaç olabilir
+BIST9_RVOL_MULTIPLIER = 1.5     # Kırılım mumunun hacmi, ortalama hacmin kaç katı olmalı
+BIST9_EMA_LENGTH = 21           # Onay için kullanılacak EMA periyodu
+BIST9_RVOL_PERIOD = 20          # RVOL hesaplaması için geriye dönük bakılacak gün sayısı
+BIST9_TRADE_START_HOUR = 11     # Sinyal arama başlangıç saati
+BIST9_TRADE_END_HOUR = 17       # Sinyal arama bitiş saati
+BIST9_TRADE_END_MINUTE = 30     # Sinyal arama bitiş dakikası
+
+ORB_CAGE_HOUR = 10              # Kafes oluşum saati
+ORB_MIN_BARS = 4                # Kafes hesaplama için minimum gün içi bar sayısı
+
+# ════════════════════════════════════════
+# Indikatör ve Hareketli Ortalama Periyotları
+# ════════════════════════════════════════
+IND_RSI_LENGTH = 14
+IND_ATR_LENGTH = 14
+IND_ADX_LENGTH = 14
+
+IND_EMA_FAST = 8
+IND_EMA_MID = 20
+IND_EMA_21 = 21
+IND_EMA_SLOW = 50
+
+IND_SMA_SLOW = 50
+IND_SMA_TREND = 200
+
+IND_BBANDS_LENGTH = 20
+IND_BBANDS_STD = 2.0
+
+IND_VOL_SMA_LENGTH = 20
+IND_VOL_BREAKOUT_MULTIPLIER = 1.5
+
+IND_RS_SMA_LENGTH = 50
+IND_RS_MOMENTUM_SHORT = 5
+IND_RS_MOMENTUM_LONG_START = 15
+IND_RS_MOMENTUM_LONG_END = 10
+
+IND_OBV_ACC_MIN_LEN = 21
+IND_OBV_ACC_PERIOD = 20
+IND_OBV_ACC_SHORT_PERIOD = 5
+IND_OBV_ACC_MAX_CHANGE_PCT = 2.0
+IND_OBV_ACC_VOL_MULTIPLIER = 1.5
+
+# ════════════════════════════════════════
 # V3.4 Conviction Soft Score Eşikleri (Sıkılaştırılmış)
 # ════════════════════════════════════════
 SOFT_ADX_CENTER = 28.0

@@ -48,12 +48,13 @@ from indicators import (
     detect_sfp, detect_premium_rejection, detect_bearish_divergence,
     detect_bullish_divergence, detect_squeeze, calculate_relative_strength,
     calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation,
-    calculate_orb_cage,
+    calculate_orb_cage, calculate_time_specific_rvol,
     # AM Serisi
     check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
     sniper_calculate_ote_body,
 )
 from data_guard import guard_mtf_bundle, guard_signal_output
+from meta_engine import get_bist100_trend
 from conviction_scorer import (
     check_hard_blocks, calculate_conviction,
     build_trend_scores, build_dip_scores, build_breakout_scores, build_short_scores,
@@ -80,7 +81,7 @@ def _extract_raw_indicators(l_vars):
         if prefix in l_vars and isinstance(l_vars[prefix], pd.Series):
             tf = prefix.split('_')[1].upper()
             s = l_vars[prefix]
-            if not pd.isna(s.get('RSI_14')): res[f'RSI_{tf}'] = round(s['RSI_14'], 2)
+            if not pd.isna(s.get('RSI_14')): res[f'RSI_{tf}'] = round(s[f'RSI_{config.IND_RSI_LENGTH}'], 2)
             if not pd.isna(s.get('ADX_14')): res[f'ADX_{tf}'] = round(s['ADX_14'], 2)
             if not pd.isna(s.get('volume')): res[f'Vol_{tf}'] = round(s.get('volume', 0), 2)
     return res
@@ -378,24 +379,24 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     df_4h = df_4h.copy()
     df_1h = df_1h.copy()
 
-    df_1d.ta.rsi(length=14, append=True)
-    df_1d.ta.ema(length=8, append=True)
-    df_1d.ta.ema(length=21, append=True)
-    df_1d.ta.sma(length=50, append=True)
-    df_1d.ta.sma(length=200, append=True)
-    df_1d.ta.bbands(length=20, std=2, append=True)
-    df_1d.ta.atr(length=14, append=True)
+    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_21, append=True)
+    df_1d.ta.sma(length=config.IND_SMA_SLOW, append=True)
+    df_1d.ta.sma(length=config.IND_SMA_TREND, append=True)
+    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
+    df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
 
     month_high = df_1d['high'].tail(30).max() if len(df_1d) >= 30 else df_1d['high'].max()
 
-    df_4h.ta.adx(length=14, append=True)
-    df_4h.ta.ema(length=8, append=True)
-    df_4h.ta.ema(length=21, append=True)
+    df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_21, append=True)
 
-    df_1h.ta.rsi(length=14, append=True)
-    df_1h.ta.ema(length=8, append=True)
-    df_1h.ta.ema(length=21, append=True)
-    df_1h['vol_sma_20'] = ta.sma(df_1h['volume'], length=20)
+    df_1h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_1h.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_1h.ta.ema(length=config.IND_EMA_21, append=True)
+    df_1h['vol_sma_20'] = ta.sma(df_1h['volume'], length=config.IND_VOL_SMA_LENGTH)
 
     if len(df_1d) < 2 or len(df_4h) < 2 or len(df_1h) < 3:
         return signals
@@ -435,7 +436,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
 
     # BIST 1: DİP AVCILIĞI (Turnaround)
     if not pd.isna(last_1d.get('RSI_14')):
-        if last_1d['RSI_14'] < 35:
+        if last_1d[f'RSI_{config.IND_RSI_LENGTH}'] < 35:
             if not pd.isna(last_1h.get('RSI_14')) and not pd.isna(prev_1h.get('RSI_14')) and not pd.isna(last_1h.get('EMA_8')) and not pd.isna(last_1h.get('vol_sma_20')):
                 if last_1h['close'] > last_1h['EMA_8'] and prev_1h['close'] <= prev_1h['EMA_8'] and last_1h['close'] > last_1h['open']:
                     # AM-01: Engulfing momentum onayı — ölü kedi sıçraması filtresi
@@ -445,12 +446,12 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                         # RED-01: Volume SMA manipülasyon koruması
                         guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
                         if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
-                            if last_1h['RSI_14'] > prev_1h['RSI_14']:
+                            if last_1h[f'RSI_{config.IND_RSI_LENGTH}'] > prev_1h[f'RSI_{config.IND_RSI_LENGTH}']:
                                 sl = current_price - dynamic_sl_dist
                                 tp = last_1d.get('EMA_21', current_price * 1.05)
                                 _rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
                                 _scores = build_dip_scores(
-                                    rsi_daily=last_1d['RSI_14'], rsi_hourly=last_1h['RSI_14'], rsi_prev=prev_1h['RSI_14'],
+                                    rsi_daily=last_1d[f'RSI_{config.IND_RSI_LENGTH}'], rsi_hourly=last_1h[f'RSI_{config.IND_RSI_LENGTH}'], rsi_prev=prev_1h[f'RSI_{config.IND_RSI_LENGTH}'],
                                     price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'),
                                     volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
                                     rr=_rr, has_engulfing=True, regime=bist_regime,
@@ -470,9 +471,9 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     # BIST 2: TREND TAKİBİ
     if not pd.isna(last_4h.get('ADX_14')) and not pd.isna(last_4h.get('EMA_8')) and not pd.isna(last_4h.get('EMA_21')):
         # RED-02: ADX momentum kontrolü — gecikmeli ve olgunlaşmış trend filtresi
-        if _adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h['EMA_21']:
+        if _adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h[f'EMA_{config.IND_EMA_21}']:
             if not pd.isna(last_1h.get('EMA_21')):
-                if last_1h['low'] <= last_1h['EMA_21'] and last_1h['close'] > last_1h['EMA_21'] and last_1h['close'] > last_1h['open']:
+                if last_1h['low'] <= last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h['open']:
                     # AM-01: Engulfing momentum onayı — pullback'te gerçek dönüş mü?
                     if check_bullish_engulfing_momentum(df_1h):
                         sl = current_price - dynamic_sl_dist
@@ -792,7 +793,7 @@ def scan_orb_bist(symbol, df_15m):
     """BIST 9: ZAMAN KAFESİ (ORB) taraması."""
     signals = []
     now = datetime.now(ZoneInfo("Europe/Istanbul"))
-    if now.hour < 11 or (now.hour >= 17 and now.minute > 30):
+    if now.hour < config.BIST9_TRADE_START_HOUR or (now.hour >= config.BIST9_TRADE_END_HOUR and now.minute > config.BIST9_TRADE_END_MINUTE):
         return signals
 
     cage_high, cage_low, cage_mid, today_vwap = calculate_orb_cage(df_15m)
@@ -802,15 +803,39 @@ def scan_orb_bist(symbol, df_15m):
     last = df_15m.iloc[-1]
     current_price = float(last['close'])
     tp_range = cage_high - cage_low
+    
+    # 1. Kafes Genişlik Sınırı
+    cage_width_pct = (tp_range / cage_low) * 100
+    if cage_width_pct > config.BIST9_MAX_CAGE_WIDTH_PCT:
+        return signals  # Hard Block: Kafes çok geniş
 
-    if current_price > cage_high and current_price > today_vwap and last['close'] > last['open']:
+    # 2. Hacim Bilgisi (Yetersiz olsa bile soft-score ile değerlendirilecek, Hard Block kaldırıldı)
+    candle_time = df_15m.index[-1]
+    rvol = calculate_time_specific_rvol(df_15m, target_hour=candle_time.hour, target_minute=candle_time.minute, period=config.BIST9_RVOL_PERIOD)
+    current_vol = last['volume']
+
+    # 3. EMA Hesaplaması (Soft-score içinde değerlendirilecek)
+    df = df_15m.copy()
+    df.ta.ema(length=config.BIST9_EMA_LENGTH, append=True)
+    ema21 = float(df[f'EMA_{config.BIST9_EMA_LENGTH}'].iloc[-1])
+    if math.isnan(ema21):
+        return signals
+
+    # 4. Endeks Korelasyonu
+    bist100_trend = get_bist100_trend()
+
+    # LONG Kırılım (Candle Close > Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
+    if current_price > cage_high and last['close'] > last['open']:
+        if bist100_trend != "BULL":
+             return signals  # Hard Block: Endeks Bullish değil
+             
         _sl9u = cage_mid
         _tp9u = current_price + tp_range
         _rr9u = abs(_tp9u - current_price) / max(abs(current_price - _sl9u), 1e-8)
         _scores9u = build_breakout_scores(
             bb_width=None, price=current_price,
-            ema_fast=None, ema_mid=None, ema_slow=None,
-            volume=last.get('volume', 0), vol_sma=0, dollar_vol=last.get('volume', 0) * current_price,
+            ema_fast=ema21, ema_mid=today_vwap, ema_slow=None,
+            volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
             rr=_rr9u, regime="BULL",
             macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
         )
@@ -819,23 +844,30 @@ def scan_orb_bist(symbol, df_15m):
             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                 "ticker": symbol, "market": "BIST",
                 "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "AL", "is_day_trade": True,
-                "entry_price": current_price, "sl": cage_mid, "tp": current_price + tp_range,
+                "entry_price": current_price, "sl": cage_mid, "tp": _tp9u,
                 "conviction_score": _conv9u.total_score, "conviction_grade": _conv9u.grade, "conviction_details": _conv9u.component_scores,
                 "position_size_pct": _conv9u.position_size_pct,
                 "reason": (
                     f"⏱️ Açılış Kafesi Kırılımı (ORB)\n"
-                    f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f}\n"
-                    f"📍 VWAP: {today_vwap:.2f} (Fiyat üzerinde ✅)\n"
+                    f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f} (Genişlik: %{cage_width_pct:.2f})\n"
+                    f"📍 Fiyat: {current_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
+                    f"📈 Hacim: {current_vol:,.0f} (Ort. RVOL: {rvol:,.0f}, Oran: {current_vol/max(rvol, 1e-8):.2f}x)\n"
                     f"🎯 Hedef: +{tp_range:.2f} TL\n"
                     f"⚠️ DAY TRADE: 17:55'te otomatik kapatılır."
                 ) + _conv9u.to_reason_suffix()
             })
-    elif current_price < cage_low and current_price < today_vwap and last['close'] < last['open']:
+    # SHORT Kırılım (Candle Close < Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
+    elif current_price < cage_low and last['close'] < last['open']:
+        if bist100_trend == "BULL":
+             return signals  # Hard Block: Endeks Bullish iken short açma
+             
+        _sl9d = cage_mid
+        _tp9d = current_price - tp_range
         _rr9d = abs(tp_range) / max(abs(cage_mid - current_price), 1e-8)
         _scores9d = build_breakout_scores(
-            bb_width=None, price=current_price, ema_fast=today_vwap, ema_mid=cage_low, ema_slow=None,
-            volume=last.get('volume', 0), vol_sma=None, dollar_vol=last.get('volume', 0) * current_price,
-            rr=_rr9d, regime="BULL", macro_aligned=True,
+            bb_width=None, price=current_price, ema_fast=today_vwap, ema_mid=ema21, ema_slow=None,
+            volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
+            rr=_rr9d, regime="BEAR", macro_aligned=True,
             consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
         )
         _conv9d = calculate_conviction(_scores9d)
@@ -843,13 +875,14 @@ def scan_orb_bist(symbol, df_15m):
             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                 "ticker": symbol, "market": "BIST",
                 "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "SAT", "is_day_trade": True,
-                "entry_price": current_price, "sl": cage_mid, "tp": current_price - tp_range,
+                "entry_price": current_price, "sl": cage_mid, "tp": _tp9d,
                 "conviction_score": _conv9d.total_score, "conviction_grade": _conv9d.grade, "conviction_details": _conv9d.component_scores,
                 "position_size_pct": _conv9d.position_size_pct,
                 "reason": (
                     f"⏱️ Açılış Kafesi Aşağı Kırılımı (ORB)\n"
-                    f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f}\n"
-                    f"📍 VWAP: {today_vwap:.2f} (Fiyat altında ✅)\n"
+                    f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f} (Genişlik: %{cage_width_pct:.2f})\n"
+                    f"📍 Fiyat: {current_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
+                    f"📈 Hacim: {current_vol:,.0f} (Ort. RVOL: {rvol:,.0f}, Oran: {current_vol/max(rvol, 1e-8):.2f}x)\n"
                     f"🎯 Hedef: -{tp_range:.2f} TL\n"
                     f"⚠️ DAY TRADE: 17:55'te otomatik kapatılır."
                 ) + _conv9d.to_reason_suffix()
@@ -871,16 +904,16 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     df_1d = df_1d.copy()
     df_4h = df_4h.copy()
 
-    df_1d.ta.ema(length=20, append=True)
-    df_1d.ta.ema(length=50, append=True)
-    df_1d.ta.bbands(length=20, std=2, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
+    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
 
-    df_4h.ta.rsi(length=14, append=True)
-    df_4h.ta.ema(length=20, append=True)
-    df_4h.ta.ema(length=50, append=True)
-    df_4h.ta.adx(length=14, append=True)
-    df_4h.ta.atr(length=14, append=True)
-    df_4h['vol_sma_20'] = ta.sma(df_4h['volume'], length=20)
+    df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_SLOW, append=True)
+    df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+    df_4h['vol_sma_20'] = ta.sma(df_4h['volume'], length=config.IND_VOL_SMA_LENGTH)
 
     last_1d = df_1d.iloc[-1]
     last_4h = df_4h.iloc[-1]
@@ -910,7 +943,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 guarded_vol_sma = _apply_volume_sma_guard(df_4h, last_4h['vol_sma_20'])
                 if _is_meaningful_volume(last_4h['volume'], guarded_vol_sma, current_price, "KRIPTO"):
                     if not _is_darth_maul(last_4h):
-                        if current_price > last_4h['EMA_20'] and current_price > last_4h['open']:
+                        if current_price > last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h['open']:
                             oi_crash = fetch_crypto_oi_crash(symbol)
                             if oi_crash:
                                 lowest_wick = last_4h['low']
@@ -939,14 +972,14 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
 
     # KRİPTO 2: MEGA TREND TAKİBİ
     if not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')):
-        if last_1d['EMA_20'] > last_1d['EMA_50'] and last_1d['close'] > last_1d['EMA_20']:
+        if last_1d[f'EMA_{config.IND_EMA_MID}'] > last_1d[f'EMA_{config.IND_EMA_SLOW}'] and last_1d['close'] > last_1d[f'EMA_{config.IND_EMA_MID}']:
             atr_col = 'ATRr_14' if 'ATRr_14' in last_4h.index else 'ATR_14'
             if not pd.isna(last_4h.get('ADX_14')) and not pd.isna(last_4h.get('EMA_20')) and not pd.isna(last_4h.get(atr_col)):
                 if last_4h['ADX_14'] > 25:
                     # RED-02: ADX olgunlaşma kontrolü
                     if last_4h['ADX_14'] > ADX_TOO_LATE:
                         pass  # Trend olgunlaşmış, geç kaldın
-                    elif last_4h['low'] <= last_4h['EMA_20'] and current_price > last_4h['EMA_20'] and current_price > last_4h['open']:
+                    elif last_4h['low'] <= last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h['open']:
                         # RED-06: Darth Maul mum filtresi
                         if not _is_darth_maul(last_4h):
                             # RED-07: Anlamlı hacim kontrolü (tutarlılık: KRİPTO 1/3 ile aynı)
@@ -1033,7 +1066,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
 
     if btc_not_pumping:
         # SHORT 1: FOMO İNFAZI (MSB / Divergence)
-        if not pd.isna(last_4h.get('RSI_14')) and last_4h['RSI_14'] > 85:
+        if not pd.isna(last_4h.get('RSI_14')) and last_4h[f'RSI_{config.IND_RSI_LENGTH}'] > 85:
             funding_rate = get_funding_rate(symbol)
             # AM-04: Fonlama Vampiri Kalkanı — negatif fonlamada short YASAK
             if funding_rate is not None and _is_funding_safe_for_short(funding_rate) and funding_rate >= 0.01:
@@ -1067,9 +1100,9 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
 
         # SHORT 2: KANLI ŞELALE SÖRFÜ
         if not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')):
-            if last_1d['EMA_20'] < last_1d['EMA_50'] and current_price < last_1d['EMA_20']:
+            if last_1d[f'EMA_{config.IND_EMA_MID}'] < last_1d[f'EMA_{config.IND_EMA_SLOW}'] and current_price < last_1d[f'EMA_{config.IND_EMA_MID}']:
                 if not pd.isna(last_4h.get('ADX_14')) and last_4h['ADX_14'] > 30:
-                    if last_4h['high'] >= last_4h['EMA_20'] and current_price < last_4h['EMA_20'] and current_price < last_4h['open']:
+                    if last_4h['high'] >= last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price < last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price < last_4h['open']:
                         btcdom_trend = get_btc_dominance_trend()
                         if btcdom_trend == "UP":
                             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
@@ -1235,7 +1268,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         sq_fired, sq_dir, sq_candle = detect_squeeze(df_4h)
         if sq_fired and sq_dir is not None:
             trend_up = (not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')) and
-                        last_1d['EMA_20'] > last_1d['EMA_50'])
+                        last_1d[f'EMA_{config.IND_EMA_MID}'] > last_1d[f'EMA_{config.IND_EMA_SLOW}'])
             valid_breakout = (sq_dir == "up" and trend_up) or (sq_dir == "down" and not trend_up)
             if valid_breakout:
                 sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
@@ -1363,20 +1396,20 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
     if df_4h is not None:
         df_4h = df_4h.copy()
 
-    df_1d.ta.rsi(length=14, append=True)
-    df_1d.ta.ema(length=8, append=True)
-    df_1d.ta.ema(length=21, append=True)
-    df_1d.ta.ema(length=50, append=True)
-    df_1d.ta.adx(length=14, append=True)
-    df_1d.ta.atr(length=14, append=True)
-    df_1d.ta.bbands(length=20, std=2, append=True)
+    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_21, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
+    df_1d.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
 
     if df_4h is not None and len(df_4h) >= 20:
-        df_4h.ta.ema(length=8, append=True)
-        df_4h.ta.ema(length=21, append=True)
-        df_4h.ta.ema(length=20, append=True)
-        df_4h.ta.adx(length=14, append=True)
-        df_4h.ta.atr(length=14, append=True)
+        df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
+        df_4h.ta.ema(length=config.IND_EMA_21, append=True)
+        df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
+        df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+        df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
         # Emtia vol_sma hesapla (1E fix)
         df_4h['vol_sma_20'] = df_4h['volume'].rolling(20).mean()
 
@@ -1651,12 +1684,12 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     df_1d = df_1d.copy() if df_1d is not None else None
     df_4h = df_4h.copy()
 
-    df_4h.ta.atr(length=14, append=True)
+    df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
     # Bear Hunter: EMA/ADX/RSI/vol_sma hesapla (1F fix — NaN sorunu çözümü)
-    df_4h.ta.ema(length=20, append=True)
-    df_4h.ta.ema(length=50, append=True)
-    df_4h.ta.adx(length=14, append=True)
-    df_4h.ta.rsi(length=14, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_SLOW, append=True)
+    df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
     df_4h['vol_sma_20'] = df_4h['volume'].rolling(20).mean()
     last_4h = df_4h.iloc[-1]
     current_price = float(last_4h['close'])
