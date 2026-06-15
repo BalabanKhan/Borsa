@@ -213,7 +213,7 @@ def _apply_rr_filter(signals, min_rr=None):
         min_rr = RR_MINIMUM
     filtered = []
     for sig in signals:
-        # Conviction-scored sinyaller kendi R:R puanlamasına sahip, atla
+        # Conviction-scored sinyaller kendi R:R puanlamasına sahip, ancak yine de minimum R:R filtresine tabi olmalı (BIST-1 & BIST-2 hariç)
         if sig.get('conviction_score') is not None:
             entry = sig.get("entry_price", 0)
             sl = sig.get("sl", entry)
@@ -227,7 +227,18 @@ def _apply_rr_filter(signals, min_rr=None):
                 reward = entry - tp
             rr = reward / risk if risk > 0 else 0
             sig['rr_ratio'] = round(rr, 2) if rr > 0 else 0
-            filtered.append(sig)
+            
+            strategy = sig.get("strategy", "")
+            if strategy in ["BIST 1: DİP AVCILIĞI", "BIST 2: TREND TAKİBİ"]:
+                filtered.append(sig)
+            elif rr >= min_rr:
+                filtered.append(sig)
+            else:
+                logging.info(
+                    f"[FM-01 RR_VETO (Conviction)] {sig.get('ticker')} ({strategy}) → "
+                    f"R:R={rr:.2f} < {min_rr} → SİNYAL REDDEDİLDİ. "
+                    f"Entry={entry:.4f} SL={sl:.4f} TP={tp:.4f}"
+                )
             continue
 
         entry = sig.get("entry_price", 0)
@@ -568,7 +579,8 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                             has_fvg, fvg_low, fvg_high = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
 
                             sl = sweep_low * 0.995
-                            tp = msb_high * 1.05
+                            sl_dist = max(current_price - sl, 1e-8)
+                            tp = current_price + (sl_dist * 3.0)
                             fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
                             _rr4 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
                             _scores4 = build_breakout_scores(
@@ -1196,7 +1208,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                         funding_rate = get_funding_rate(symbol)
                         if funding_rate <= 0.0:
                             sl = sweep_low * 0.995
-                            tp = msb_high * 1.08
+                            sl_dist = max(current_price - sl, 1e-8)
+                            tp = current_price + (sl_dist * 3.0)
                             fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
                             _rr_c4l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
                             _scores_c4l = build_breakout_scores(
@@ -1239,7 +1252,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                         funding_rate = get_funding_rate(symbol)
                         if funding_rate >= 0.0:
                             sl = sweep_high * 1.005
-                            tp = msb_low * 0.92
+                            sl_dist = max(sl - current_price, 1e-8)
+                            tp = current_price - (sl_dist * 3.0)
                             fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
                             _rr_c4s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                             _adx_prev_c4s = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
@@ -1552,7 +1566,8 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                     if ote_bottom <= current_price <= ote_top:
                         has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
                         sl = sweep_low - (atr_val * 0.5)
-                        tp = msb_high * 1.05
+                        sl_dist = max(current_price - sl, 1e-8)
+                        tp = current_price + (sl_dist * 3.0)
                         fvg_label = " + FVG ✅" if has_fvg else ""
                         dxy_note = "\n🛡️ DXY: Dolar zayıf ✅" if is_dxy_sensitive else ""
                         _rr_e2l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1592,7 +1607,8 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                     if ote_bottom <= current_price <= ote_top:
                         has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bearish")
                         sl = sweep_high + (atr_val * 0.5)
-                        tp = msb_low * 0.95
+                        sl_dist = max(sl - current_price, 1e-8)
+                        tp = current_price - (sl_dist * 3.0)
                         fvg_label = " + FVG ✅" if has_fvg else ""
                         _rr_e2s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                         _scores_e2s = build_breakout_scores(
@@ -1743,8 +1759,8 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     sfp_found, swing_high, sfp_candle = detect_sfp(df_4h)
     if sfp_found and sfp_candle is not None:
         sl = float(sfp_candle['high']) + (atr_val * 0.3)
-        recent_low = float(df_4h.tail(20)['low'].min())
-        tp = recent_low
+        sl_dist = max(sl - current_price, 1e-8)
+        tp = current_price - (sl_dist * 3.0)
         risk = sl - current_price
         reward = current_price - tp
         if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
@@ -1782,8 +1798,8 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     prem_found, fib_618, fib_786, prem_candle = detect_premium_rejection(df_4h, df_1d)
     if prem_found:
         sl = fib_786 + (atr_val * 0.5)
-        recent_low = float(df_4h.tail(30)['low'].min())
-        tp = recent_low * 0.97
+        sl_dist = max(sl - current_price, 1e-8)
+        tp = current_price - (sl_dist * 3.0)
         risk = sl - current_price
         reward = current_price - tp
         if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
@@ -1821,8 +1837,8 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     div_found, sh_1, sh_2, rsi_1, rsi_2 = detect_bearish_divergence(df_4h)
     if div_found:
         sl = sh_2 + (atr_val * 0.5)
-        recent_low = float(df_4h.tail(20)['low'].min())
-        tp = recent_low
+        sl_dist = max(sl - current_price, 1e-8)
+        tp = current_price - (sl_dist * 3.0)
         risk = sl - current_price
         reward = current_price - tp
         if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
