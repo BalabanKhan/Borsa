@@ -16,6 +16,10 @@ from datetime import datetime, time as dt_time, timezone
 from zoneinfo import ZoneInfo
 from typing import NamedTuple, Any, Optional
 
+# 99 yapılmıştır
+# yfinance yedek veri çekimlerinde config.DATA_PERIOD_1D gibi tanımlara erişebilmek için
+# config modülü import edilmiştir.
+import config
 from config import IS_USA_SERVER, CACHE_TTL_SECONDS, OHLCV_LIMIT, OI_CRASH_PCT, API_SLEEP_BIST
 from data_guard import guard_dataframe
 
