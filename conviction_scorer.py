@@ -52,8 +52,10 @@ from config import (
     SOFT_PENALTY_0, SOFT_PENALTY_1, SOFT_PENALTY_2, SOFT_PENALTY_3_PLUS,
     SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_CRYPTO_MAX,
     SOFT_DOLLAR_VOL_EMTIA_MIN, SOFT_DOLLAR_VOL_EMTIA_MAX,
-    SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX
+    SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX,
+    RR_MINIMUM
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -247,16 +249,29 @@ def score_dollar_volume(dollar_vol: float, market: str = "KRIPTO") -> float:
         return round(log_score(dollar_vol, SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX), 1)
 
 
-def score_rr_ratio(rr: float) -> float:
+def score_rr_ratio(rr: float, regime: str = "NEUTRAL", is_short: bool = False) -> float:
     """
-    R:R oranı puanlama — sigmoid ile yumuşak eşik.
+    R:R oranı puanlama — sigmoid ile yumuşak eşik, piyasa rejimine duyarlı.
 
-    Eski: R:R < 2.0 → TAM REDDET
-    Yeni: 1.0→8, 1.5→38, 2.0→73, 2.5→92, 3.0→98
+    Avantajlı rejimde (Long için BULL, Short için BEAR) -> center = 1.5 (esnek)
+    Dezavantajlı rejimde (Long için BEAR, Short için BULL) -> center = 2.5 (seçici)
+    Nötr rejimde -> center = 2.0 (config.SOFT_RR_CENTER)
     """
     if _is_nan(rr) or rr <= 0:
         return 0.0
-    return round(sigmoid_score(rr, center=SOFT_RR_CENTER, k=SOFT_RR_K), 1)
+
+    is_favorable = (regime == "BULL" and not is_short) or (regime == "BEAR" and is_short)
+    is_unfavorable = (regime == "BEAR" and not is_short) or (regime == "BULL" and is_short)
+
+    if is_favorable:
+        center = 1.5
+    elif is_unfavorable:
+        center = 2.5
+    else:
+        center = SOFT_RR_CENTER  # 2.0
+
+    return round(sigmoid_score(rr, center=center, k=SOFT_RR_K), 1)
+
 
 
 def score_ema_alignment(price: float, ema_fast: float, ema_mid: float,
@@ -434,8 +449,9 @@ def check_hard_blocks(
     if not sl_direction_ok:
         return True, "HB-4: SL yönü yanlış — veri bütünlüğü bozuk"
 
-    if rr_ratio is not None and rr_ratio < 1.0:
-        return True, "HB-6: R:R < 1.0 — risk ödülden büyük"
+    if rr_ratio is not None and rr_ratio < RR_MINIMUM:
+        return True, f"HB-6: R:R < {RR_MINIMUM} — risk/ödül yetersiz"
+
 
     if consecutive_sl >= 5:
         return True, "HB-7: 5+ ardışık SL — yapısal sorun"
@@ -675,7 +691,7 @@ def build_trend_scores(
         "rsi_direction": score_rsi_direction(rsi, rsi_prev),
         "volume_ratio":  score_volume_ratio(volume, vol_sma),
         "dollar_volume": score_dollar_volume(dollar_vol, market),
-        "rr_ratio":      score_rr_ratio(rr),
+        "rr_ratio":      score_rr_ratio(rr, regime),
         "engulfing":     score_engulfing(has_engulfing),
         "regime":        score_regime(regime),
         "macro":         score_macro_alignment(macro_aligned),
@@ -702,7 +718,7 @@ def build_dip_scores(
         "rsi_direction": score_rsi_direction(rsi_hourly, rsi_prev),
         "volume_ratio":  score_volume_ratio(volume, vol_sma),
         "dollar_volume": score_dollar_volume(dollar_vol, market),
-        "rr_ratio":      score_rr_ratio(rr),
+        "rr_ratio":      score_rr_ratio(rr, regime),
         "engulfing":     score_engulfing(has_engulfing),
         "regime":        score_regime(regime),
         "macro":         score_macro_alignment(macro_aligned),
@@ -730,7 +746,7 @@ def build_breakout_scores(
         "rsi_direction": 70.0,
         "volume_ratio":  score_volume_ratio(volume, vol_sma),
         "dollar_volume": score_dollar_volume(dollar_vol, market),
-        "rr_ratio":      score_rr_ratio(rr),
+        "rr_ratio":      score_rr_ratio(rr, regime),
         "engulfing":     70.0,
         "regime":        score_regime(regime),
         "macro":         score_macro_alignment(macro_aligned),
@@ -758,7 +774,7 @@ def build_short_scores(
         "rsi_direction": score_rsi_direction(rsi, rsi_prev),
         "volume_ratio":  score_volume_ratio(volume, vol_sma),
         "dollar_volume": score_dollar_volume(dollar_vol, market),
-        "rr_ratio":      score_rr_ratio(rr),
+        "rr_ratio":      score_rr_ratio(rr, regime, is_short=True),
         "engulfing":     score_engulfing(has_engulfing),
         "regime":        score_regime_short(regime),
         "macro":         score_macro_alignment(macro_aligned),
