@@ -9,6 +9,7 @@ import time as _time
 import gc
 import pandas as pd
 import pandas_ta as ta
+import config
 from datetime import datetime, time as dt_time
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
