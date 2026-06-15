@@ -14,6 +14,8 @@ import math
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+import config
+
 
 # ════════════════════════════════════════
 # YAPILANDIRMA SABİTLERİ
@@ -262,7 +264,7 @@ def validate_signal_routing(
 def detect_corporate_action_anomaly(
     df: pd.DataFrame,
     symbol: str,
-    max_single_candle_pct: float = SINGLE_CANDLE_ANOMALY_PCT
+    max_single_candle_pct: Optional[float] = None
 ) -> tuple[bool, str]:
     """
     Tek mumda anlamsız fiyat hareketi tespiti.
@@ -277,8 +279,17 @@ def detect_corporate_action_anomaly(
     """
     tag = f"[DG-04] {symbol}"
 
+    if max_single_candle_pct is None:
+        if symbol.endswith('.IS') or symbol.endswith('.E'):
+            max_single_candle_pct = getattr(config, 'SINGLE_CANDLE_ANOMALY_PCT_BIST', 25.0)
+        elif '/USDT' in symbol or '/' in symbol or symbol.endswith('-USD'):
+            max_single_candle_pct = getattr(config, 'SINGLE_CANDLE_ANOMALY_PCT_CRYPTO', 60.0)
+        else:
+            max_single_candle_pct = getattr(config, 'SINGLE_CANDLE_ANOMALY_PCT_EMTIA', 25.0)
+
     if df is None or len(df) < 3:
         return True, ""  # Veri yetersiz, anomali taraması yapılamaz
+
 
     c_col = next((c for c in df.columns if c.lower() == 'close'), None)
     if c_col is None:

@@ -359,6 +359,12 @@ GAP_THRESHOLD_PCT = 3.0        # %3 üstü gap → sahte kırılım riski
 # RED-06: Darth Maul mum filtresi
 DARTH_MAUL_BODY_RATIO = 0.15   # Gövde/Toplam aralık < %15 → kaos mumu
 
+# DG-04: Tek mum anomali eşikleri (yüzde)
+SINGLE_CANDLE_ANOMALY_PCT_BIST = 25.0
+SINGLE_CANDLE_ANOMALY_PCT_CRYPTO = 60.0
+SINGLE_CANDLE_ANOMALY_PCT_EMTIA = 25.0
+
+
 # RED-03: Swing point minimum amplitude
 SWING_MIN_AMPLITUDE_PCT = 1.5  # %1.5 altı swing → gürültü
 
