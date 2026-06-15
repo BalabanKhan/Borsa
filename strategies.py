@@ -85,6 +85,16 @@ def _extract_raw_indicators(l_vars):
             if not pd.isna(s.get('RSI_14')): res[f'RSI_{tf}'] = round(s[f'RSI_{config.IND_RSI_LENGTH}'], 2)
             if not pd.isna(s.get('ADX_14')): res[f'ADX_{tf}'] = round(s['ADX_14'], 2)
             if not pd.isna(s.get('volume')): res[f'Vol_{tf}'] = round(s.get('volume', 0), 2)
+            
+    # 1D Trend durumunu l_vars üzerinden dinamik olarak çıkar (ConflictResolver için)
+    if 'df_1d' in l_vars and l_vars['df_1d'] is not None and not l_vars['df_1d'].empty:
+        df_1d_val = l_vars['df_1d']
+        last_row = df_1d_val.iloc[-1]
+        if 'EMA_8' in last_row and 'EMA_21' in last_row:
+            res['Trend_1D'] = 'Bullish' if last_row['EMA_8'] > last_row['EMA_21'] else 'Bearish'
+        elif 'EMA_20' in last_row and 'EMA_50' in last_row:
+            res['Trend_1D'] = 'Bullish' if last_row['EMA_20'] > last_row['EMA_50'] else 'Bearish'
+            
     return res
 
 def _get_consecutive_sl(symbol):

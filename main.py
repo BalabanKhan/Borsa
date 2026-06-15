@@ -47,6 +47,7 @@ from strategy_scorecard import (
     is_strategy_disabled, run_darwinism, generate_weekly_report,
     get_scorecard_status
 )
+import config
 from config import SCORECARD_MIN_TRADES, SCORECARD_AUTO_DISABLE_DAYS
 from quarantine import (
     check_staleness, is_quarantined, generate_quarantine_alert,
@@ -287,6 +288,20 @@ async def run_market_scan(bot, chat_ids, watch_bot=None):
     signals, scan_metrics = await loop.run_in_executor(None, scan_all_markets)
     scan_duration = time.time() - scan_start
     print(f"⏱️ Tarama süresi: {scan_duration:.1f}s ({scan_duration/60:.1f} dk)")
+    
+    # ⚖️ Sinyal Çelişki Çözücü (Conflict Resolver)
+    if getattr(config, 'CONFLICT_RESOLVER_ENABLED', False) and signals:
+        try:
+            from conflict_resolver import SignalConflictResolver
+            resolver = SignalConflictResolver()
+            active_trades = load_trades()
+            original_len = len(signals)
+            signals = resolver.resolve_conflicts(signals, active_trades)
+            if len(signals) != original_len:
+                logger.info(f"[ConflictResolver] Çelişki filtrelemesi tamamlandı: {original_len} sinyalden {len(signals)} tanesi onaylandı.")
+        except Exception as cre:
+            logger.error(f"[ConflictResolver] Çelişki çözümü sırasında hata: {cre}", exc_info=True)
+
     
     # 📊 Piyasa Snapshot'ını (Excel) güncel tut (gün sonu gönderilecektir)
     global latest_scan_metrics

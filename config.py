@@ -468,3 +468,12 @@ CONVICTION_THRESHOLDS_EXPERIMENT = {
 MAX_CONSECUTIVE_SL = 3       # Ard arda 3 SL → devre aç (sessiz mod)
 COOLDOWN_HOURS = 24          # Sessiz mod süresi (saat)
 DAILY_MAX_SL = 5             # Günlük toplam SL limiti (ardışık olmasa bile)
+
+# ════════════════════════════════════════
+# ⚖️ Sinyal Çelişki Çözücü (Signal Conflict Resolver)
+# ════════════════════════════════════════
+CONFLICT_RESOLVER_ENABLED = True
+CONFLICT_RESOLVER_ADX_TREND_LIMIT = 40.0   # Bu ADX üstünde Mean Reversion skip edilir
+CONFLICT_RESOLVER_ADX_RANGING_LIMIT = 20.0 # Bu ADX altında Trend Takip/Breakout skip edilir
+CONFLICT_RESOLVER_BEAR_TREND_PENALTY = 0.6 # 1D Bearish rejimde Long sinyallere uygulanacak ceza katsayısı
+
