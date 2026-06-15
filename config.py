@@ -52,7 +52,7 @@ TOP_BIST = list(dict.fromkeys([
     "BUCIM.IS", "ALARK.IS", "TURSG.IS", "AGHOL.IS", "ISDMR.IS",
     "SARKY.IS", "LOGO.IS", "MPARK.IS", "SUNTK.IS", "BASGZ.IS",
     "CEMAS.IS", "INDES.IS", "PAPIL.IS", "PENTA.IS", "YATAS.IS",
-    "IPEKE.IS", "CWENE.IS", "KERVT.IS", "NETAS.IS", "AYGAZ.IS",
+    "CWENE.IS", "NETAS.IS", "AYGAZ.IS",
     "TKFEN.IS", "ECILC.IS", "BERA.IS", "BTCIM.IS", "BRYAT.IS",
     "IEYHO.IS", "KENT.IS", "AVOD.IS", "OBAMS.IS", "QUAGR.IS",
     "BIOEN.IS",
