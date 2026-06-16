@@ -942,8 +942,8 @@ def calculate_orb_cage(df_15m):
     """BIST 10:00-11:00 kafesi + günlük VWAP. Returns: (cage_high, cage_low, cage_mid, vwap)"""
     if df_15m is None or df_15m.empty:
         return None, None, None, None
-    now = datetime.now(ZoneInfo("Europe/Istanbul"))
-    today = now.date()
+    # Bug-fix: use the last candle's date to support backtests/simulations
+    today = df.index[-1].date()
 
     df = df_15m.copy()
     try:

@@ -229,12 +229,18 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
 
     if bb_upper_col and bb_lower_col and bb_mid_col:
-        bbu = last_1d[bb_upper_col[0]]
-        bbl = last_1d[bb_lower_col[0]]
-        bbm = last_1d[bb_mid_col[0]]
-
-        bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
-        if bb_width < 0.15:
+        # HATA DÜZELTME: Sıkışma (Squeeze) durumu kırılım anında (t) bantların aniden genişlemesiyle 
+        # kilitlenmemesi için bir önceki günlük mumda (t-1) sorgulanmalıdır.
+        prev_1d = df_1d.iloc[-2] if len(df_1d) >= 2 else last_1d
+        bbu_prev = prev_1d[bb_upper_col[0]]
+        bbl_prev = prev_1d[bb_lower_col[0]]
+        bbm_prev = prev_1d[bb_mid_col[0]]
+        
+        bb_width_prev = (bbu_prev - bbl_prev) / bbm_prev if not math.isclose(float(bbm_prev), 0.0, abs_tol=1e-8) else 1
+        
+        # Hard limit 0.15'ten 0.25'e genişletildi. 0.15 ile 0.25 arası genişlik Conviction Scorer
+        # içinde soft ceza (puan kırıcı) olarak değerlendirilir.
+        if bb_width_prev < 0.25:
             # BREAKOUT_RETEST_REQUIRED: direnç kırılımı sonrası retest/pullback aralığı teyidi
             retest_ok = True
             if config.BREAKOUT_RETEST_REQUIRED:
@@ -253,12 +259,13 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                         if _has_absolute_hourly_volume(last_1h['volume'], current_price, "BIST"):
                             if not xu100_down:
                                 now = datetime.now(ZoneInfo("Europe/Istanbul"))
-                                if now.time() >= dt_time(10, 30):
+                                # Açılış gap'lerini ve erken kırılımları kaçırmamak için saat kısıtı 10:00'a (açılış anı) çekildi
+                                if now.time() >= dt_time(10, 0):
                                     sl = current_price - dynamic_sl_dist
                                     _tp3 = current_price + (dynamic_sl_dist * 3.0)
                                     _rr3 = abs(_tp3 - current_price) / max(abs(current_price - sl), 1e-8)
                                     _scores3 = build_breakout_scores(
-                                        bb_width=bb_width, price=current_price,
+                                        bb_width=bb_width_prev, price=current_price,
                                         ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
                                         volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
                                         rr=_rr3, regime=bist_regime,
