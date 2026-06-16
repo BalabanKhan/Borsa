@@ -488,7 +488,7 @@ CONVICTION_THRESHOLDS_EXPERIMENT = {
 # ════════════════════════════════════════
 MAX_CONSECUTIVE_SL = 3       # Ard arda 3 SL → devre aç (sessiz mod)
 COOLDOWN_HOURS = 24          # Sessiz mod süresi (saat)
-DAILY_MAX_SL = 5             # Günlük toplam SL limiti (ardışık olmasa bile)
+DAILY_MAX_SL = 99            # Günlük toplam SL limiti (ardışık olmasa bile)
 
 # ════════════════════════════════════════
 # ⚖️ Sinyal Çelişki Çözücü & Data Guard Soft Penalties
