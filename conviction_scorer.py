@@ -507,18 +507,22 @@ def score_penalty_level(consecutive_sl: int) -> float:
 def score_bbw_squeeze(bbw: float, kcw: float) -> float:
     """
     Sniper Kanun 1: Volatilite Patlaması (BBW >= KCW).
-    Sıkılaştırılmış Kural: Tolerans kaldırıldı, ikili (binary) 0 veya 100 puan.
+    Yumuşatılmış Kural: %20 tolerans ile soft geçiş (ara puanlar sağlar).
     """
     if _is_nan(bbw) or _is_nan(kcw) or kcw == 0:
         return 0.0
     if bbw >= kcw:
         return 100.0  # Tam isabet (Patlama gerçekleşti)
+    
+    # %20 tolerans ile lineer yumuşak geçiş
+    if bbw >= kcw * 0.80:
+        return (bbw - kcw * 0.80) / (kcw * 0.20) * 100.0
     return 0.0
 
 def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> float:
     """
-    Sniper Kanun 2: %B Pullback sınırları (0.0 - 1.0 arası optimum).
-    Sınır dışına taşmalarda lineer soft ceza.
+    Sniper Kanun 2: %B Pullback sınırları.
+    Sınır dışına taşmalarda lineer soft ceza. Tolerans %15'e çıkarıldı.
     """
     if _is_nan(pb):
         return 0.0
@@ -526,8 +530,8 @@ def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> floa
     if pb_min <= pb <= pb_max:
         return 100.0
     
-    # Sınırın %5 (0.05) dışına kadar tolerans. 0.05'ten fazla saparsa 0 puan.
-    tolerance = 0.05
+    # Sınırın %15 (0.15) dışına kadar tolerans.
+    tolerance = 0.15
     if pb < pb_min:
         dist = pb_min - pb
         if dist < tolerance:
@@ -542,11 +546,11 @@ def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> floa
 def score_fvg_sfp(fvg_present: bool, sfp_present: bool) -> float:
     """
     Sniper Kanun 3: Mıknatıs/Tuzak (FVG veya SFP).
-    Biri varsa 100 puan. Yoksa soft penalty (kısmi puan).
+    Biri varsa 100 puan. Yoksa soft geçiş için baseline 30 puan verilir.
     """
     if fvg_present or sfp_present:
         return 100.0
-    return 0.0  # Formasyon yoksa puan da yok (Sıkılaştırıldı)
+    return 30.0  # Tamamen reddetmek yerine ara puan üretmesi için baseline 30.0 yapıldı.
 
 
 # ════════════════════════════════════════
@@ -1246,10 +1250,10 @@ def build_sniper_scores(
         pb_max = 0.85
 
     # Formasyon Kontrolü: FVG, SFP veya Sıkışma (Squeeze) Kırılımından en az biri olmalı
-    # Hiçbiri yoksa ağır ceza puanı uygulayarak puanı düşür
-    has_squeeze_breakout = bbw >= kcw
+    # Hiçbiri yoksa yumuşak ceza puanı uygulayarak puanı düşür (-10 puan)
+    has_squeeze_breakout = bbw >= (kcw * 0.80)
     if not fvg_present and not sfp_present and not has_squeeze_breakout:
-        conflict_penalty += 30.0
+        conflict_penalty += 10.0
 
     return {
         "bbw_squeeze":   score_bbw_squeeze(bbw, kcw),

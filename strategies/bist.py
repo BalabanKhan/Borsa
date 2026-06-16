@@ -590,7 +590,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
             market="BIST"
         )
         _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS)
-        if _conv_sn.grade == CONVICTION_STRONG:
+        if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                 "ticker": symbol, "market": "BIST",
                 "strategy": "BIST 10: KESKİN NİŞANCI (SNIPER)", "signal": "AL",
