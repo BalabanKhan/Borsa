@@ -34,7 +34,7 @@ class TestHybridStops(unittest.TestCase):
         config.TIME_STOP_ENABLED = True
         config.TIME_STOP_HOURS = 4
         config.TIME_STOP_MIN_PROFIT_PCT = 0.5
-        config.TIME_STOP_STRATEGIES = ["BIST 3: SQUEEZE KIRILIMI", "KRİPTO 3: SQUEEZE KIRILIMI"]
+        config.TIME_STOP_STRATEGIES = ["BIST 3: SQUEEZE KIRILIMI", "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)"]
         config.HYBRID_STOP_ENABLED = True
         config.ANTI_HUNT_OFFSET_PCT = 0.00034
         config.STRUCTURAL_STOP_ENABLED = True
@@ -55,7 +55,7 @@ class TestHybridStops(unittest.TestCase):
         entry_time = (datetime.now(timezone.utc) - timedelta(hours=5)).strftime('%Y-%m-%d %H:%M:%S+00:00')
         t = {
             "ticker": "BTC/USDT",
-            "strategy": "KRİPTO 3: SQUEEZE KIRILIMI",
+            "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
             "entry_time": entry_time,
             "status": "ACTIVE",
             "entry_price": 50000.0,
@@ -79,7 +79,7 @@ class TestHybridStops(unittest.TestCase):
         entry_time = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S+00:00')
         t = {
             "ticker": "BTC/USDT",
-            "strategy": "KRİPTO 3: SQUEEZE KIRILIMI",
+            "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
             "entry_time": entry_time,
             "status": "ACTIVE",
             "entry_price": 50000.0,
@@ -101,7 +101,7 @@ class TestHybridStops(unittest.TestCase):
         entry_time = (datetime.now(timezone.utc) - timedelta(hours=5)).strftime('%Y-%m-%d %H:%M:%S+00:00')
         t = {
             "ticker": "BTC/USDT",
-            "strategy": "KRİPTO 3: SQUEEZE KIRILIMI",
+            "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
             "entry_time": entry_time,
             "status": "ACTIVE",
             "entry_price": 50000.0,
@@ -124,7 +124,7 @@ class TestHybridStops(unittest.TestCase):
         entry_time = (datetime.now(timezone.utc) - timedelta(hours=5)).strftime('%Y-%m-%d %H:%M:%S+00:00')
         t = {
             "ticker": "BTC/USDT",
-            "strategy": "KRİPTO 3: SQUEEZE KIRILIMI",
+            "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
             "entry_time": entry_time,
             "status": "ACTIVE",
             "entry_price": 50000.0,
@@ -147,7 +147,7 @@ class TestHybridStops(unittest.TestCase):
         ticker = "BTC/USDT"
         t = {
             "ticker": ticker,
-            "strategy": "KRİPTO 3: SQUEEZE KIRILIMI",
+            "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
             "entry_price": 50000.0,
             "sl": 48000.0,
             "highest_high": 50000.0,
@@ -159,7 +159,7 @@ class TestHybridStops(unittest.TestCase):
         current_price = 51000.0
         profit_pct = 2.0
         
-        t_updated, notifications = trade_tracker._update_trailing_stop(t, current_price, profit_pct, "AL", "KRİPTO 3: SQUEEZE KIRILIMI")
+        t_updated, notifications = trade_tracker._update_trailing_stop(t, current_price, profit_pct, "AL", "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)")
         
         # En yüksek fiyat 51000 oldu. new_sl = 51000 - 2000 = 49000.
         # Ticker gürültüsü:

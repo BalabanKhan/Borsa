@@ -268,7 +268,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                                     _conv3 = calculate_conviction(_scores3)
                                     if _conv3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                         signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                            "ticker": symbol, "market": "BIST", "strategy": "BIST 3: KIRILIM AVCILIĞI", "signal": "AL",
+                                            "ticker": symbol, "market": "BIST", "strategy": "BIST 3: SQUEEZE KIRILIMI", "signal": "AL",
                                             "entry_price": current_price, "sl": sl, "tp": _tp3,
                                             "conviction_score": _conv3.total_score, "conviction_grade": _conv3.grade, "conviction_details": _conv3.component_scores,
                                             "position_size_pct": _conv3.position_size_pct,
@@ -338,23 +338,58 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                                         ) + _conv4.to_reason_suffix()
                                     })
 
-    # BIST 5: VOLATİLİTE SIKIŞMASI (Squeeze)
-    squeeze_fired, sq_dir, sq_candle = detect_squeeze(df_1d)
-    if squeeze_fired and sq_dir == "up" and not xu100_down:
-        # SQUEEZE_TREND_ALIGN_REQUIRED: squeeze patlama yönünün günlük ana trendle uyumu
-        trend_aligned = True
-        if config.SQUEEZE_TREND_ALIGN_REQUIRED:
-            sma_200 = last_1d.get('SMA_200')
-            if sma_200 is not None and not pd.isna(sma_200):
-                trend_aligned = current_price > sma_200
+    # BIST 5: HACİMLİ KIRILIM (Volatility Squeeze Breakout)
+    daily_squeeze_setup = False
+    prev_bbu_1d = None
+    prev_bbl_1d = None
+    
+    # Calculate KC on daily chart
+    df_1d.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=1.5, append=True)
+    
+    bbu_cols_1d = [c for c in df_1d.columns if 'BBU' in c]
+    bbl_cols_1d = [c for c in df_1d.columns if 'BBL' in c]
+    kcu_cols_1d = [c for c in df_1d.columns if 'KCU' in c]
+    kcl_cols_1d = [c for c in df_1d.columns if 'KCL' in c]
+    
+    if bbu_cols_1d and bbl_cols_1d and kcu_cols_1d and kcl_cols_1d:
+        bbu_c = bbu_cols_1d[0]
+        bbl_c = bbl_cols_1d[0]
+        kcu_c = kcu_cols_1d[0]
+        kcl_c = kcl_cols_1d[0]
+        
+        if len(df_1d) >= 2:
+            prev_bbu_1d = df_1d.iloc[-2][bbu_c]
+            prev_bbl_1d = df_1d.iloc[-2][bbl_c]
+            
+            squeeze_count = 0
+            for idx in range(-7, -1):
+                if abs(idx) <= len(df_1d):
+                    row = df_1d.iloc[idx]
+                    if (not pd.isna(row.get(bbu_c)) and not pd.isna(row.get(kcu_c)) and
+                        row[bbu_c] < row[kcu_c] and row[bbl_c] > row[kcl_c]):
+                        squeeze_count += 1
+            
+            if squeeze_count >= 3:
+                daily_squeeze_setup = True
 
-        # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-        if trend_aligned and not pd.isna(last_1h.get('vol_sma_20')):
-            guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
-            if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
-                sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
-                ema_fallback = last_1d.get('EMA_21', last_1d.get('EMA_8', current_price * 0.95))
-                sl = min(sq_mid, ema_fallback) if not pd.isna(ema_fallback) else sq_mid
+    if daily_squeeze_setup and not pd.isna(last_1h.get('vol_sma_20')):
+        guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+        
+        # LONG (AL)
+        if (prev_bbu_1d is not None and current_price > prev_bbu_1d and 
+            last_1h['close'] > last_1h['open'] and 
+            _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST")):
+            
+            trend_aligned = True
+            if config.SQUEEZE_TREND_ALIGN_REQUIRED:
+                ema_21_1d = last_1d.get('EMA_21')
+                if ema_21_1d is not None and not pd.isna(ema_21_1d):
+                    trend_aligned = current_price > ema_21_1d
+
+            if trend_aligned and not xu100_down:
+                sq_mid = (last_1h['high'] + last_1h['low']) / 2
+                ema21_1h = last_1h.get('EMA_21', current_price * 0.95)
+                sl = min(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid
                 _tp5u = current_price + (dynamic_sl_dist * 3.0)
                 _rr5u = abs(_tp5u - current_price) / max(abs(current_price - sl), 1e-8)
                 _scores5u = build_breakout_scores(
@@ -368,32 +403,33 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 if _conv5u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "BIST",
-                        "strategy": "BIST 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "AL",
+                        "strategy": "BIST 5: HACİMLİ KIRILIM", "signal": "AL",
                         "entry_price": current_price, "sl": sl, "tp": _tp5u,
                         "conviction_score": _conv5u.total_score, "conviction_grade": _conv5u.grade, "conviction_details": _conv5u.component_scores,
                         "position_size_pct": _conv5u.position_size_pct,
                         "reason": (
-                            f"🗜️ Squeeze Patlaması!\n"
-                            f"BB(20,2) Keltner(20,1.5) içinden yukarı kırıldı.\n"
-                            f"Hacimli yeşil mum ile BB üst bandı aşıldı.\n"
-                            f"SL: Kırılım mumunun %50'si ({sl:.2f})"
+                            f"🗜️ Günlük Squeeze Hacimli Yukarı Kırıldı!\n"
+                            f"1G BB Keltner içindeydi (Daralma). 1S Fiyat Günlük BBU ({prev_bbu_1d:.2f}) üzerine çıktı.\n"
+                            f"Hacimli yeşil mum ile 1S EMA21 üzerinde breakout.\n"
+                            f"SL: 1S Kırılım barının %50'si veya 1S EMA21 ({sl:.2f})"
                         ) + _conv5u.to_reason_suffix()
                     })
-    elif squeeze_fired and sq_dir == "down":
-        # SQUEEZE_TREND_ALIGN_REQUIRED: squeeze patlama yönünün günlük ana trendle uyumu
-        trend_aligned = True
-        if config.SQUEEZE_TREND_ALIGN_REQUIRED:
-            sma_200 = last_1d.get('SMA_200')
-            if sma_200 is not None and not pd.isna(sma_200):
-                trend_aligned = current_price < sma_200
 
-        # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-        if trend_aligned and not pd.isna(last_1h.get('vol_sma_20')):
-            guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
-            if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
-                sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
-                ema_fallback = last_1d.get('EMA_21', last_1d.get('EMA_8', current_price * 1.05))
-                sl = max(sq_mid, ema_fallback) if not pd.isna(ema_fallback) else sq_mid
+        # SHORT (SAT)
+        elif (prev_bbl_1d is not None and current_price < prev_bbl_1d and 
+              last_1h['close'] < last_1h['open'] and 
+              _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST")):
+              
+            trend_aligned = True
+            if config.SQUEEZE_TREND_ALIGN_REQUIRED:
+                ema_21_1d = last_1d.get('EMA_21')
+                if ema_21_1d is not None and not pd.isna(ema_21_1d):
+                    trend_aligned = current_price < ema_21_1d
+
+            if trend_aligned:
+                sq_mid = (last_1h['high'] + last_1h['low']) / 2
+                ema21_1h = last_1h.get('EMA_21', current_price * 1.05)
+                sl = max(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid
                 _tp5d = current_price - (dynamic_sl_dist * 3.0)
                 _rr5d = abs(current_price - _tp5d) / max(abs(sl - current_price), 1e-8)
                 _scores5d = build_breakout_scores(
@@ -407,25 +443,30 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 if _conv5d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "BIST",
-                        "strategy": "BIST 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "SAT",
+                        "strategy": "BIST 5: HACİMLİ KIRILIM", "signal": "SAT",
                         "entry_price": current_price, "sl": sl, "tp": _tp5d,
                         "conviction_score": _conv5d.total_score, "conviction_grade": _conv5d.grade, "conviction_details": _conv5d.component_scores,
                         "position_size_pct": _conv5d.position_size_pct,
                         "reason": (
-                            f"🗜️ Squeeze Aşağı Patlaması!\n"
-                            f"BB(20,2) Keltner(20,1.5) içinden aşağı kırıldı.\n"
-                            f"Hacimli kırmızı mum ile BB alt bandı kırıldı.\n"
-                            f"SL: Kırılım mumunun %50'si ({sl:.2f})"
+                            f"🗜️ Günlük Squeeze Hacimli Aşağı Kırıldı!\n"
+                            f"1G BB Keltner içindeydi (Daralma). 1S Fiyat Günlük BBL ({prev_bbl_1d:.2f}) altına indi.\n"
+                            f"Hacimli kırmızı mum ile 1S EMA21 altında breakout.\n"
+                            f"SL: 1S Kırılım barının %50'si veya 1S EMA21 ({sl:.2f})"
                         ) + _conv5d.to_reason_suffix()
                     })
 
     # BIST 6: GÖRECELİ GÜÇ RADARI (RS)
     if xu100_daily is not None:
         rs_strong, rs_trend_up, idx_stressed, idx_recovering = calculate_relative_strength(df_1d, xu100_daily)
-        # RED-14: İmkansız AND gevşetmesi — endeks stres dışındaysa da kabul et
         if rs_strong and rs_trend_up and (idx_recovering or not idx_stressed):
+            # RS_ENTRY_TIMING_RSI_LIMIT: timing teyidi (RSI çok aşırı alımda olmamalı)
+            rsi_timing_ok = True
+            if not pd.isna(last_1h.get('RSI_14')):
+                if last_1h['RSI_14'] > config.RS_ENTRY_TIMING_RSI_LIMIT:
+                    rsi_timing_ok = False
+
             # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-            if not pd.isna(last_1h.get('vol_sma_20')):
+            if rsi_timing_ok and not pd.isna(last_1h.get('vol_sma_20')):
                 guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
                 if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
                     # Swing Low yerine dinamik ATR bazlı stop

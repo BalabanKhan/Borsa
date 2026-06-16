@@ -531,7 +531,7 @@ SQUEEZE_MOMENTUM_ALIGN_REQUIRED: bool = True  # Momentum histogram yönünün k�
 SQUEEZE_TREND_ALIGN_REQUIRED: bool = True     # Squeeze patlama yönünün 1D ana trendiyle uyumu
 
 # --- 6. Relative Strength (RS) ---
-RS_ENTRY_TIMING_RSI_LIMIT: float = 45.0       # RS hissesinde işleme giriş için 1H RSI tavanı
+RS_ENTRY_TIMING_RSI_LIMIT: float = 75.0       # RS hissesinde işleme giriş için 1H RSI tavanı
 
 # --- 7. VWAP Mıknatısı (VWAP Bounce) ---
 VWAP_SLOPE_CONFIRMATION: bool = True          # VWAP eğiminin pozitif (long) / negatif (short) olması şartı
@@ -568,9 +568,9 @@ TIME_STOP_MIN_PROFIT_PCT: float = 0.5         # Belirlenen süre sonunda hedefle
 TIME_STOP_STRATEGIES: list = [                # Zaman stopu uygulanacak kırılım stratejileri listesi (BIST/Kripto/Emtia)
     "BIST 3: SQUEEZE KIRILIMI",
     "BIST 5: HACİMLİ KIRILIM",
-    "BIST 9: AÇILIŞ ARALIĞI KIRILIMI",
-    "KRİPTO 3: SQUEEZE KIRILIMI",
-    "EMTİA 3: KIRILIM",
+    "BIST 9: ZAMAN KAFESİ (ORB)",
+    "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
+    "EMTİA 3: VOLATİLİTE SIKIŞMASI (SQUEEZE)",
     "BEAR 3: YAPI KIRILIMI"
 ]
 
