@@ -295,17 +295,16 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                     fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
                     
                     if fvg_ok:
-                        # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
-                        ltf_confirm = True
-                        if config.SMC_LTF_MSB_CONFIRM:
-                            swing_highs_1h = sniper_find_swing_points(df_1h, point_type="high", neighbors=2)
-                            ltf_msb_ok, _, _ = sniper_detect_msb(df_1h, swing_highs_1h, point_type="high")
-                            if not ltf_msb_ok:
-                                ltf_confirm = False
-                        
-                        if ltf_confirm and not pd.isna(last_1h.get('vol_sma_20')):
+                        # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır) - BIST 4 için devre dışı bırakıldı!
+                        # OTE bölgesine doğrudan temas anında işleme girmek için 1H MSB aranmaz.
+                        # Çekilme hacim kuralı: Kırılım hacmi yerine düşük/ortalama pullback hacmi aranır.
+                        if not pd.isna(last_1h.get('vol_sma_20')):
                             guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
-                            if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                            
+                            # Mutlak TL hacmi yeterliyse ve aşırı yüksek bir satış (dump) hacmi yoksa giriş yapılır
+                            if (_has_absolute_hourly_volume(last_1h['volume'], current_price, "BIST") and 
+                                last_1h['volume'] <= guarded_vol_sma * 1.5): # Çekilme Hacim Kuralı (Düşük Hacim)
+                                
                                 sl = sweep_low * 0.995
                                 sl_dist = max(current_price - sl, 1e-8)
                                 tp = current_price + (sl_dist * 3.0)
@@ -333,7 +332,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                                             f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
                                             f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
                                             f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
-                                            f"🎣 OTE Bölgesi (Gövde): {ote_bottom:.2f} - {ote_top:.2f}\n"
+                                            f"🎣 OTE Bölgesi (Gövde): {ote_bottom:.2f} - {ote_top:.2f} (Temas anında & Düşük Hacim)\n"
                                             f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
                                         ) + _conv4.to_reason_suffix()
                                     })
