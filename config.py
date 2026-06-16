@@ -533,7 +533,7 @@ SQUEEZE_MOMENTUM_ALIGN_REQUIRED: bool = True  # Momentum histogram yönünün k�
 SQUEEZE_TREND_ALIGN_REQUIRED: bool = True     # Squeeze patlama yönünün 1D ana trendiyle uyumu
 
 # --- 6. Relative Strength (RS) ---
-RS_ENTRY_TIMING_RSI_LIMIT: float = 75.0       # RS hissesinde işleme giriş için 1H RSI tavanı
+RS_ENTRY_TIMING_RSI_LIMIT: float = 90.0       # RS hissesinde işleme giriş için 1H RSI tavanı
 
 # --- 7. VWAP Mıknatısı (VWAP Bounce) ---
 VWAP_SLOPE_CONFIRMATION: bool = True          # VWAP eğiminin pozitif (long) / negatif (short) olması şartı
