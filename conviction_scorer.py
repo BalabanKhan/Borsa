@@ -514,9 +514,9 @@ def score_bbw_squeeze(bbw: float, kcw: float) -> float:
     if bbw >= kcw:
         return 100.0  # Tam isabet (Patlama gerçekleşti)
     
-    # Ne kadar geride? %30 tolerans.
+    # Ne kadar geride? %10 tolerans.
     deficit = kcw - bbw
-    max_tolerance = kcw * 0.3
+    max_tolerance = kcw * 0.10
     if deficit < max_tolerance:
         penalty_pct = deficit / max_tolerance
         return 100.0 * (1.0 - penalty_pct)
@@ -533,8 +533,8 @@ def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> floa
     if pb_min <= pb <= pb_max:
         return 100.0
     
-    # Sınırın %20 (0.20) dışına kadar tolerans. 0.20'den fazla saparsa 0 puan.
-    tolerance = 0.20
+    # Sınırın %5 (0.05) dışına kadar tolerans. 0.05'ten fazla saparsa 0 puan.
+    tolerance = 0.05
     if pb < pb_min:
         dist = pb_min - pb
         if dist < tolerance:
@@ -553,7 +553,7 @@ def score_fvg_sfp(fvg_present: bool, sfp_present: bool) -> float:
     """
     if fvg_present or sfp_present:
         return 100.0
-    return 20.0  # Kısmi tolerans
+    return 0.0  # Formasyon yoksa puan da yok (Sıkılaştırıldı)
 
 
 # ════════════════════════════════════════
@@ -1247,8 +1247,10 @@ def build_sniper_scores(
         pb_min = getattr(config, "SHORT4_BBP_MIN_PULLBACK", 0.0)
         pb_max = getattr(config, "SHORT4_BBP_MAX_PULLBACK", 1.0)
     else:
+        # Sniper Long (BIST & KRIPTO) için %B daraltması
+        # Aşırı şişmiş seviyelerden (üst bandın çok yakını) giriş yapılmasını önlemek için max 0.85 yapıldı.
         pb_min = 0.0
-        pb_max = 1.0
+        pb_max = 0.85
 
     return {
         "bbw_squeeze":   score_bbw_squeeze(bbw, kcw),
