@@ -666,7 +666,9 @@ def scan_orb_bist(symbol, df_15m):
     """BIST 9: ZAMAN KAFESİ (ORB) taraması."""
     signals = []
     now = datetime.now(ZoneInfo("Europe/Istanbul"))
-    if now.hour < config.BIST9_TRADE_START_HOUR or (now.hour >= config.BIST9_TRADE_END_HOUR and now.minute > config.BIST9_TRADE_END_MINUTE):
+    start_time = now.replace(hour=config.BIST9_TRADE_START_HOUR, minute=config.BIST9_TRADE_START_MINUTE, second=0, microsecond=0)
+    end_time = now.replace(hour=config.BIST9_TRADE_END_HOUR, minute=config.BIST9_TRADE_END_MINUTE, second=0, microsecond=0)
+    if not (start_time <= now <= end_time):
         return signals
 
     cage_high, cage_low, cage_mid, today_vwap = calculate_orb_cage(df_15m)

@@ -166,7 +166,7 @@ def scan_all_markets():
 
         # ORB (Zaman Kafesi) — Batch 15m
         now_ist = datetime.now(ZoneInfo("Europe/Istanbul"))
-        if now_ist.hour == 11 and now_ist.minute <= 30:
+        if now_ist.hour == 11 and 15 <= now_ist.minute <= 30:
             orb_data = get_bist_15m_batch(TOP_BIST, batch_size=25)
 
             for sym in TOP_BIST:

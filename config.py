@@ -143,6 +143,7 @@ BIST9_RVOL_MULTIPLIER = 1.5     # Kırılım mumunun hacmi, ortalama hacmin kaç
 BIST9_EMA_LENGTH = 21           # Onay için kullanılacak EMA periyodu
 BIST9_RVOL_PERIOD = 20          # RVOL hesaplaması için geriye dönük bakılacak gün sayısı
 BIST9_TRADE_START_HOUR = 11     # Sinyal arama başlangıç saati
+BIST9_TRADE_START_MINUTE = 15   # Sinyal arama başlangıç dakikası
 BIST9_TRADE_END_HOUR = 11       # Sinyal arama bitiş saati
 BIST9_TRADE_END_MINUTE = 30     # Sinyal arama bitiş dakikası
 
