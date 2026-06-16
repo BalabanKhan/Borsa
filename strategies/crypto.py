@@ -685,6 +685,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         df_1h_sniper.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
         df_1h_sniper.ta.ema(length=config.IND_EMA_FAST, append=True)
         df_1h_sniper.ta.ema(length=config.IND_EMA_21, append=True)
+        df_1h_sniper.ta.cmf(length=20, append=True)
         df_1h_sniper['vol_sma_20'] = ta.sma(df_1h_sniper['volume'], length=config.IND_VOL_SMA_LENGTH)
         
         kc_upper_col = [c for c in df_1h_sniper.columns if 'KCU' in c]
@@ -745,16 +746,38 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 })
 
             # 🎯 SHORT Keskin Nişancı (SHORT-4 in implementation_plan.md)
-            if not btc_ok:
+            # Ekstra Güvenlik Önlemleri:
+            # 1. Altcoin kendi 1G EMA_50'sinin altında olmalı (düşüş trendi onayı).
+            # 2. 1S RSI aşırı satım (oversold) bölgesinde olmamalı (RSI >= 45) -> tepki yükselişi koruması.
+            # 3. Funding rate aşırı negatif olmamalı (funding_rate >= -0.0005) -> short-squeeze koruması.
+            # 4. 1S CMF < 0.0 olmalı (para çıkışı / kurumsal dağıtım onayı).
+            # 5. Fiyat 1S EMA_21'in altında olmalı (saatlik düşüş ivmesi teyidi).
+            rsi_1h_val = last_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}')
+            rsi_1h_ok = rsi_1h_val is None or math.isnan(rsi_1h_val) or rsi_1h_val >= 45.0
+            
+            ema_slow_1d = last_1d.get('EMA_50', 0)
+            trend_ok = current_price < ema_slow_1d if ema_slow_1d > 0 else True
+            
+            funding_rate = get_funding_rate(symbol)
+            funding_ok = funding_rate is None or funding_rate >= -0.0005
+            
+            cmf_1h = last_1h_s.get('CMF_20')
+            cmf_ok = cmf_1h is None or math.isnan(cmf_1h) or cmf_1h < 0.0
+            
+            ema21_1h = last_1h_s.get(f'EMA_{config.IND_EMA_21}')
+            ema_ok = ema21_1h is None or math.isnan(ema21_1h) or current_price < ema21_1h
+            
+            if not btc_ok and trend_ok and rsi_1h_ok and funding_ok and cmf_ok and ema_ok:
                 has_fvg_short, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bearish")
                 swing_highs_s = sniper_find_swing_points(df_1h_sniper, point_type="high")
                 sweep_ok_short, _ = sniper_detect_sweep(df_1h_sniper, swing_highs_s, point_type="high")
                 has_sfp_short = sweep_ok_short
                 
-                sl_short = current_price * 1.05
-                _tp_sn_short = current_price * 0.90
+                # Dinamik Stop Loss: Bollinger Üst Bandının %1 üstü veya en az %7 genişlik
+                sl_short = max(bbu * 1.01, current_price * 1.07)
+                # Minimum 2:1 Risk/Ödül oranı ile kâr al hedefi
+                _tp_sn_short = current_price - 2.0 * (sl_short - current_price)
                 _rr_sn_short = abs(_tp_sn_short - current_price) / max(abs(sl_short - current_price), 1e-8)
-                funding_rate = get_funding_rate(symbol)
                 
                 _scores_sn_short = build_sniper_scores(
                     price=current_price, ema_fast=last_1h_s.get(f'EMA_{config.IND_EMA_FAST}'), ema_mid=last_1h_s.get(f'EMA_{config.IND_EMA_21}'), ema_slow=None,
@@ -766,7 +789,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     market="KRIPTO", is_long=False, funding_rate=funding_rate
                 )
                 _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS)
-                if _conv_sn_short.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
+                # Kripto SHORT sinyallerinde kaliteyi artırmak için sadece 80+ skorlu en güçlü sinyaller kabul edilir.
+                if _conv_sn_short.total_score >= 80.0:
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
                         "strategy": "KRİPTO SHORT 5: KESKİN NİŞANCI (SNIPER)", "signal": "SAT",

@@ -507,22 +507,22 @@ def score_penalty_level(consecutive_sl: int) -> float:
 def score_bbw_squeeze(bbw: float, kcw: float) -> float:
     """
     Sniper Kanun 1: Volatilite Patlaması (BBW >= KCW).
-    Yumuşatılmış Kural: %20 tolerans ile soft geçiş (ara puanlar sağlar).
+    Yumuşatılmış Kural: %10 tolerans ile soft geçiş (aşırı sinyal fışkırmasını önler).
     """
     if _is_nan(bbw) or _is_nan(kcw) or kcw == 0:
         return 0.0
     if bbw >= kcw:
         return 100.0  # Tam isabet (Patlama gerçekleşti)
     
-    # %20 tolerans ile lineer yumuşak geçiş
-    if bbw >= kcw * 0.80:
-        return (bbw - kcw * 0.80) / (kcw * 0.20) * 100.0
+    # %10 tolerans ile lineer yumuşak geçiş
+    if bbw >= kcw * 0.90:
+        return (bbw - kcw * 0.90) / (kcw * 0.10) * 100.0
     return 0.0
 
 def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> float:
     """
     Sniper Kanun 2: %B Pullback sınırları.
-    Sınır dışına taşmalarda lineer soft ceza. Tolerans %15'e çıkarıldı.
+    Sınır dışına taşmalarda lineer soft ceza. Tolerans %8'e çekilerek dengelendi.
     """
     if _is_nan(pb):
         return 0.0
@@ -530,8 +530,8 @@ def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> floa
     if pb_min <= pb <= pb_max:
         return 100.0
     
-    # Sınırın %15 (0.15) dışına kadar tolerans.
-    tolerance = 0.15
+    # Sınırın %8 (0.08) dışına kadar tolerans.
+    tolerance = 0.08
     if pb < pb_min:
         dist = pb_min - pb
         if dist < tolerance:
@@ -546,11 +546,11 @@ def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> floa
 def score_fvg_sfp(fvg_present: bool, sfp_present: bool) -> float:
     """
     Sniper Kanun 3: Mıknatıs/Tuzak (FVG veya SFP).
-    Biri varsa 100 puan. Yoksa soft geçiş için baseline 30 puan verilir.
+    Biri varsa 100 puan. Yoksa soft geçiş için baseline 15 puan verilerek filtrelendi.
     """
     if fvg_present or sfp_present:
         return 100.0
-    return 30.0  # Tamamen reddetmek yerine ara puan üretmesi için baseline 30.0 yapıldı.
+    return 15.0  # 30'dan 15'e düşürülerek sinyal kalitesi artırıldı.
 
 
 # ════════════════════════════════════════
@@ -1250,10 +1250,10 @@ def build_sniper_scores(
         pb_max = 0.85
 
     # Formasyon Kontrolü: FVG, SFP veya Sıkışma (Squeeze) Kırılımından en az biri olmalı
-    # Hiçbiri yoksa yumuşak ceza puanı uygulayarak puanı düşür (-10 puan)
-    has_squeeze_breakout = bbw >= (kcw * 0.80)
+    # Hiçbiri yoksa yumuşak ceza puanı uygulayarak puanı düşür (-12 puan)
+    has_squeeze_breakout = bbw >= (kcw * 0.90)
     if not fvg_present and not sfp_present and not has_squeeze_breakout:
-        conflict_penalty += 10.0
+        conflict_penalty += 12.0
 
     return {
         "bbw_squeeze":   score_bbw_squeeze(bbw, kcw),
