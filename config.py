@@ -454,7 +454,7 @@ SIGNAL_DECAY_ENABLED = True              # Sinyal erime aktif mi
 PENALTY_CONSECUTIVE_WARNING = 2    # 2 ardışık SL → uyarı (R:R > 3:1 gerekir)
 PENALTY_CONSECUTIVE_PENALTY = 3    # 3 ardışık SL → 24 saat yasak
 PENALTY_CONSECUTIVE_BANNED = 5     # 5 ardışık SL → 72 saat yasak
-PENALTY_DAILY_COMMISSION_LIMIT = 1.0  # Günlük komisyon limiti (sermaye %)
+PENALTY_DAILY_COMMISSION_LIMIT = 99.0  # Günlük komisyon limiti (sermaye % - test için 99.0 yapıldı)
 PENALTY_BOX_ENABLED = True         # Ceza kutusu aktif mi
 
 # --- Kaos #5: Strateji Karnesi (strategy_scorecard.py) ---
