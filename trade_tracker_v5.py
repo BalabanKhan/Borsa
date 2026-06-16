@@ -46,13 +46,43 @@ def _load_trades_unlocked():
     return []
 
 
+def _sanitize_for_json(obj):
+    """Recursively converts numpy and pandas types to standard Python types."""
+    try:
+        import numpy as np
+        if isinstance(obj, (np.int64, np.int32, np.int16, np.int8, np.integer)):
+            return int(obj)
+        if isinstance(obj, (np.float64, np.float32, np.float16, np.floating)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return [_sanitize_for_json(x) for x in obj.tolist()]
+    except ImportError:
+        pass
+
+    try:
+        import pandas as pd
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+    except ImportError:
+        pass
+
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(x) for x in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_sanitize_for_json(x) for x in obj)
+    return obj
+
+
 def _save_trades_unlocked(trades):
     """Lock TUTULMADAN çağrılır — caller'ın _trade_file_lock tutması gerekir."""
     tmp_path = None
     try:
         tmp = tempfile.NamedTemporaryFile(mode='w', dir='.', suffix='.tmp', delete=False, encoding='utf-8')
         tmp_path = tmp.name
-        json.dump(trades, tmp, indent=4, ensure_ascii=False)
+        sanitized = _sanitize_for_json(trades)
+        json.dump(sanitized, tmp, indent=4, ensure_ascii=False)
         tmp.close()
         os.replace(tmp_path, TRACKER_FILE)
     except Exception as e:
