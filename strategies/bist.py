@@ -575,8 +575,10 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
         sweep_ok, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
         has_sfp = sweep_ok
         
-        sl = current_price * 0.95
-        _tp_sn = current_price * 1.10
+        # Dinamik Stop Loss: Alt Bollinger Bandının %1.5 altı veya en fazla %5 genişlik (çok uzaklaşmayı önlemek için)
+        sl = max(bbl * 0.985, current_price * 0.95)
+        # Dinamik Take Profit: En az 2:1 risk/ödül oranı ile
+        _tp_sn = current_price + 2.0 * (current_price - sl)
         _rr_sn = abs(_tp_sn - current_price) / max(abs(current_price - sl), 1e-8)
         guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h.get('vol_sma_20', 0))
         
@@ -600,7 +602,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 "reason": (
                     f"🎯 Keskin Nişancı!\n"
                     f"Kanunlar: Squeeze: {_scores_sn['bbw_squeeze']:.1f}, %B: {_scores_sn['percent_b']:.1f}, FVG/SFP: {_scores_sn['fvg_sfp']:.1f}\n"
-                    f"SL: %5 Dar Stop ({sl:.2f})"
+                    f"SL: Bollinger Alt Band Altı ({sl:.2f})"
                 ) + _conv_sn.to_reason_suffix()
             })
 
