@@ -92,8 +92,48 @@ def scan_all_markets():
     clear_cycle_cache()
     purge_expired_cache()
 
+    # ════ HİBRİT PİYASA ZAMANLAYICI (Market Routing) ════
+    # Hafta içi 09:30 - 18:30 -> SADECE BIST 100
+    # Hafta içi 18:30 - 09:30 -> SADECE Kripto
+    # Hafta sonu (Cuma 18:30'dan Pazartesi 09:30'a) -> SADECE Kripto
+    bypass_time_routing = getattr(config, 'BYPASS_TIME_ROUTING', False)
+    
+    if bypass_time_routing:
+        scan_bist = True
+        scan_crypto = True
+        logging.info("[ZAMANLAYICI] Zamanlayıcı bypass edildi (BYPASS_TIME_ROUTING=True). Hem BIST hem Kripto taranıyor.")
+    else:
+        now_ist = datetime.now(ZoneInfo("Europe/Istanbul"))
+        weekday = now_ist.weekday()  # 0=Pazartesi, 6=Pazar
+        time_of_day = now_ist.time()
+
+        # Hafta sonu bloğu: Cuma 18:30'dan Pazartesi 09:30'a kadar olan süre
+        is_weekend_block = False
+        if weekday == 4:  # Cuma
+            if time_of_day >= dt_time(18, 30):
+                is_weekend_block = True
+        elif weekday in (5, 6):  # Cumartesi, Pazar
+            is_weekend_block = True
+        elif weekday == 0:  # Pazartesi
+            if time_of_day < dt_time(9, 30):
+                is_weekend_block = True
+
+        if is_weekend_block:
+            scan_bist = False
+            scan_crypto = True
+        else:
+            # Hafta içi
+            if dt_time(9, 30) <= time_of_day < dt_time(18, 30):
+                scan_bist = True
+                scan_crypto = False
+            else:
+                scan_bist = False
+                scan_crypto = True
+        
+        logging.info(f"[ZAMANLAYICI] Gün/Saat: {weekday} / {time_of_day} | Aktif Tarama -> BIST: {scan_bist}, Kripto: {scan_crypto}")
+
     # 1. BIST TARAMALARI (Batch Download)
-    if is_bist_open():
+    if scan_bist and is_bist_open():
         t0 = _time.time()
         xu100_down = check_xu100_wind()
         xu100_daily = _get_xu100_daily_data()
@@ -142,25 +182,26 @@ def scan_all_markets():
         logging.info(f"[scan_all_markets] BIST tarama: {_time.time()-t0:.1f}s")
 
     # 2. KRİPTO TARAMALARI (Cycle Cache aktif)
-    t0 = _time.time()
-    btc_ok = get_btc_status()
-    btc_sniper_bias = _get_btc_htf_bias()
+    if scan_crypto:
+        t0 = _time.time()
+        btc_ok = get_btc_status()
+        btc_sniper_bias = _get_btc_htf_bias()
 
-    for sym in TOP_CRYPTO:
-        try:
-            # get_crypto_data_cached → hem burada hem Ayı Avcısı'nda kullanılır
-            df_1d, df_4h = get_crypto_data_cached(sym)
-            if df_1d is not None:
-                # DG-05: MTF hizalama kontrolü
-                if not guard_mtf_bundle(sym, df_1d, df_4h):
-                    continue
-                sigs = analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias, metrics_collector=scan_metrics)
-                all_signals.extend(sigs)
-        except Exception as e:
-            logging.warning(f"[scan_all_markets] KRİPTO {sym}: {e}")
-        _time.sleep(API_SLEEP_CRYPTO)
+        for sym in TOP_CRYPTO:
+            try:
+                # get_crypto_data_cached → hem burada hem Ayı Avcısı'nda kullanılır
+                df_1d, df_4h = get_crypto_data_cached(sym)
+                if df_1d is not None:
+                    # DG-05: MTF hizalama kontrolü
+                    if not guard_mtf_bundle(sym, df_1d, df_4h):
+                        continue
+                    sigs = analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias, metrics_collector=scan_metrics)
+                    all_signals.extend(sigs)
+            except Exception as e:
+                logging.warning(f"[scan_all_markets] KRİPTO {sym}: {e}")
+            _time.sleep(API_SLEEP_CRYPTO)
 
-    logging.info(f"[scan_all_markets] Kripto tarama: {_time.time()-t0:.1f}s")
+        logging.info(f"[scan_all_markets] Kripto tarama: {_time.time()-t0:.1f}s")
 
     # 3. EMTİA TARAMALARI
     # --- [GEÇİCİ BYPASS] Kullanıcı talebi üzerine Emtia taramaları geçici olarak kapatıldı ---

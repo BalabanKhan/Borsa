@@ -589,3 +589,7 @@ SHORT4_BBP_MIN_PULLBACK = 0.0
 VBT_COMMISSION: float = 0.001                 # Binde 1 komisyon varsayımı
 VBT_SLIPPAGE: float = 0.001                   # Binde 1 slippage (kayma) varsayımı
 VBT_INITIAL_CASH: float = 10000.0             # Başlangıç portföy büyüklüğü
+
+# --- 16. Hibrit Piyasa Zamanlayıcı (Test Modu) ---
+BYPASS_TIME_ROUTING: bool = False             # Zamanlayıcıyı tamamen devre dışı bırakıp her şeyi aynı anda taratmak için True yapın
+
