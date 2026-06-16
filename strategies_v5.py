@@ -43,16 +43,15 @@ from data_sources import (
     _is_macro_news_hour, _is_btc_bullish_for_shorts, _get_xu100_daily_data,
     get_current_prices,
 )
-from indicators import (
+from indicators_v5 import (
     sniper_get_htf_bias, sniper_find_swing_points, sniper_detect_sweep,
     sniper_detect_msb, sniper_calculate_ote, sniper_detect_fvg,
     detect_sfp, detect_premium_rejection, detect_bearish_divergence,
     detect_bullish_divergence, detect_squeeze, calculate_relative_strength,
     calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation,
-    calculate_orb_cage, calculate_time_specific_rvol,
-    # AM Serisi
-    check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
-    sniper_calculate_ote_body,
+    calculate_orb_cage, calculate_time_specific_rvol, calculate_cmf,
+    is_cmf_wash_trade, check_bullish_engulfing_momentum,
+    inject_smart_indicators, sniper_calculate_ote_body,
 )
 from data_guard import guard_mtf_bundle, guard_signal_output
 from meta_engine import get_bist100_trend
@@ -65,6 +64,7 @@ from conviction_scorer import (
     score_regime, score_regime_short, score_engulfing,
     score_macro_alignment, score_penalty_level,
     CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH,
+    CRYPTO_WEIGHTS,
 )
 
 
@@ -1002,18 +1002,11 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     df_1d = df_1d.copy()
     df_4h = df_4h.copy()
 
-    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
-    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
-    if len(df_1d) >= 200:
-        df_1d.ta.sma(length=200, append=True)
-
-    df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
-    df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
-    df_4h.ta.ema(length=config.IND_EMA_SLOW, append=True)
-    df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
-    df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+    # V5.0 Smart Indicators
+    df_1d = inject_smart_indicators(df_1d)
+    df_4h = inject_smart_indicators(df_4h)
+    
+    # Hacim SMA özel olduğu için ayrıca eklendi
     df_4h['vol_sma_20'] = ta.sma(df_4h['volume'], length=config.IND_VOL_SMA_LENGTH)
 
     last_1d = df_1d.iloc[-1]
@@ -1068,9 +1061,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'),
                                         volume=last_4h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_4h['volume'] * current_price,
                                         rr=_rr_c1, has_engulfing=False, regime="BULL",
-                                        macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                                        macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                        oi_crash=oi_crash, funding_rate=get_funding_rate(symbol)
                                     )
-                                    _conv_c1 = calculate_conviction(_scores_c1)
+                                    _conv_c1 = calculate_conviction(_scores_c1, weights=CRYPTO_WEIGHTS)
                                     if _conv_c1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                         signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                             "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI", "signal": "AL",
@@ -1132,9 +1126,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                             rsi=last_4h.get('RSI_14'), rsi_prev=_prev_4h_c2.get('RSI_14'),
                                             volume=last_4h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_4h['volume'] * current_price,
                                             rr=_rr_c2, has_engulfing=False, regime="BULL",
-                                            macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                                            macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                            oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=get_funding_rate(symbol)
                                         )
-                                        _conv_c2 = calculate_conviction(_scores_c2)
+                                        _conv_c2 = calculate_conviction(_scores_c2, weights=CRYPTO_WEIGHTS)
                                         if _conv_c2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                                 "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 2: MEGA TREND TAKİBİ", "signal": "AL",
@@ -1183,9 +1178,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                             ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
                                             volume=last_4h['volume'], vol_sma=last_4h['vol_sma_20'], dollar_vol=last_4h['volume'] * current_price,
                                             rr=_rr_c3, regime="BULL",
-                                            macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                                            macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                            oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=funding_rate
                                         )
-                                        _conv_c3 = calculate_conviction(_scores_c3)
+                                        _conv_c3 = calculate_conviction(_scores_c3, weights=CRYPTO_WEIGHTS)
                                         if _conv_c3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                                 "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)", "signal": "AL",
@@ -1233,8 +1229,9 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             dollar_vol=last_4h['volume'] * current_price,
                             rr=_rr_s1, has_engulfing=False, regime="BEAR", macro_aligned=True,
                             consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                            oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=funding_rate
                         )
-                        _conv_s1 = calculate_conviction(_scores_s1)
+                        _conv_s1 = calculate_conviction(_scores_s1, weights=CRYPTO_WEIGHTS)
                         if _conv_s1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                             signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                 "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 1: FOMO İNFAZI", "signal": "SAT",
@@ -1269,8 +1266,9 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                 dollar_vol=last_4h['volume'] * current_price,
                                 rr=_rr_s2, has_engulfing=False, regime="BEAR",
                                 macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=get_funding_rate(symbol)
                             )
-                            _conv_s2 = calculate_conviction(_scores_s2)
+                            _conv_s2 = calculate_conviction(_scores_s2, weights=CRYPTO_WEIGHTS)
                             if _conv_s2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                     "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 2: KANLI ŞELALE SÖRFÜ", "signal": "SAT",
@@ -1309,8 +1307,9 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                     dollar_vol=last_4h['volume'] * current_price,
                                     rr=_rr_s3, has_engulfing=False, regime="BEAR", macro_aligned=True,
                                     consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                    oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=funding_rate
                                 )
-                                _conv_s3 = calculate_conviction(_scores_s3)
+                                _conv_s3 = calculate_conviction(_scores_s3, weights=CRYPTO_WEIGHTS)
                                 if _conv_s3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                         "ticker": symbol, "market": "KRIPTO", "strategy": "SHORT 3: UÇURUM ÇÖKÜŞÜ", "signal": "SAT",
@@ -1379,11 +1378,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         dollar_vol=last_4h['volume'] * current_price,
                                         rr=_rr_c4l, regime="BULL", macro_aligned=True,
                                         consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                        oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=funding_rate
                                     )
                                     if has_fvg:
                                         _scores_c4l["engulfing"] = min(100.0, _scores_c4l["engulfing"] + config.SMC_FVG_BONUS)
                                         
-                                    _conv_c4l = calculate_conviction(_scores_c4l)
+                                    _conv_c4l = calculate_conviction(_scores_c4l, weights=CRYPTO_WEIGHTS)
                                     if _conv_c4l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                         signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                             "ticker": symbol, "market": "KRIPTO",
@@ -1459,11 +1459,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         dollar_vol=last_4h['volume'] * current_price,
                                         rr=_rr_c4s, has_engulfing=False, regime="BEAR", macro_aligned=True,
                                         consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                                        oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=funding_rate
                                     )
                                     if has_fvg:
                                         _scores_c4s["engulfing"] = min(100.0, _scores_c4s["engulfing"] + config.SMC_FVG_BONUS)
                                         
-                                    _conv_c4s = calculate_conviction(_scores_c4s)
+                                    _conv_c4s = calculate_conviction(_scores_c4s, weights=CRYPTO_WEIGHTS)
                                     if _conv_c4s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                                         signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                                             "ticker": symbol, "market": "KRIPTO",
@@ -1506,9 +1507,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     bb_width=None, price=current_price, ema_fast=ema20_4h, ema_mid=None, ema_slow=None,
                     volume=last_4h.get('volume', 0), vol_sma=None, dollar_vol=last_4h.get('volume', 0) * current_price,
                     rr=_rr_c5, regime="BULL" if sq_dir == "up" else "BEAR", macro_aligned=btc_ok,
-                    consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                    consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                    oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=get_funding_rate(symbol)
                 )
-                _conv_c5 = calculate_conviction(_scores_c5)
+                _conv_c5 = calculate_conviction(_scores_c5, weights=CRYPTO_WEIGHTS)
                 if _conv_c5.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
@@ -1539,9 +1541,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
                     volume=last_4h.get('volume', 0), vol_sma=None, dollar_vol=last_4h.get('volume', 0) * current_price,
                     rr=_rr_c6, has_engulfing=True, regime="BULL", macro_aligned=btc_ok,
-                    consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                    consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                    oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=get_funding_rate(symbol)
                 )
-                _conv_c6 = calculate_conviction(_scores_c6)
+                _conv_c6 = calculate_conviction(_scores_c6, weights=CRYPTO_WEIGHTS)
                 if _conv_c6.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
@@ -1577,9 +1580,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     price=current_price, ema_fast=last_1d.get('EMA_8'), ema_mid=last_1d.get('EMA_21'),
                     volume=last_1d.get('volume', 0), vol_sma=None, dollar_vol=last_1d.get('volume', 0) * current_price,
                     rr=_rr_c7, has_engulfing=False, regime="BULL",
-                    macro_aligned=(btcdom_trend != 'UP'), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                    macro_aligned=(btcdom_trend != 'UP'), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                    oi_crash=fetch_crypto_oi_crash(symbol), funding_rate=get_funding_rate(symbol)
                 )
-                _conv_c7 = calculate_conviction(_scores_c7)
+                _conv_c7 = calculate_conviction(_scores_c7, weights=CRYPTO_WEIGHTS)
                 if _conv_c7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
@@ -1615,28 +1619,15 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
         return signals
 
     # Pandas Mutability koruması: kaynak DataFrame'leri kirletme
-    df_1d = df_1d.copy()
+    df_1d = df_1d.copy() if df_1d is not None else None
+    df_4h = df_4h.copy() if df_4h is not None else None
+    
+    if df_1d is not None:
+        df_1d = inject_smart_indicators(df_1d)
+
     if df_4h is not None:
-        df_4h = df_4h.copy()
-
-    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_FAST, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_21, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
-    df_1d.ta.adx(length=config.IND_ADX_LENGTH, append=True)
-    df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
-    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
-    if len(df_1d) >= 200:
-        df_1d.ta.sma(length=200, append=True)
-
-    if df_4h is not None and len(df_4h) >= 20:
-        df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
-        df_4h.ta.ema(length=config.IND_EMA_21, append=True)
-        df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
-        df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
-        df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
-        # Emtia vol_sma hesapla (1E fix)
-        df_4h['vol_sma_20'] = df_4h['volume'].rolling(20).mean()
+        df_4h = inject_smart_indicators(df_4h)
+        df_4h['vol_sma_20'] = ta.sma(df_4h['volume'], length=config.IND_VOL_SMA_LENGTH)
 
     last_1d = df_1d.iloc[-1]
     current_price = float(last_1d['close'])

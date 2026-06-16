@@ -1,11 +1,12 @@
 """
-circuit_breaker.py — Psikolojik Devre Kesici (Drawdown / Tilt Shield)
+circuit_breaker_v5.py — Psikolojik Devre Kesici (Drawdown / Tilt Shield) - V5.0
 
 Amaç: Piyasa testere modundayken botu sessiz moda alıp
 trader'ın intikam işlemine (revenge trading) girmesini engellemek.
 
 Strateji ve Market bazlı devre kesici ile sadece zarar eden stratejiler susturulur.
 OOM ve I/O darboğazını önlemek için in-memory cache mekanizması (Lazy Write) kullanılır.
+Bu versiyon, saf bir Event-Driven (Observer) desenine sıkı sıkıya bağlıdır.
 """
 import json
 import logging
@@ -18,7 +19,8 @@ from config import MAX_CONSECUTIVE_SL, COOLDOWN_HOURS, DAILY_MAX_SL
 # V3.3.4 Hibrit Şalter: Global günlük limit
 GLOBAL_DAILY_MAX_SL = 15
 
-CB_STATE_FILE = "circuit_breaker_state.json"
+# V5 State File
+CB_STATE_FILE = "circuit_breaker_state_v5.json"
 _cb_lock = threading.RLock()
 
 _STATE_CACHE = None
@@ -64,7 +66,7 @@ def _load_state() -> dict:
                     _STATE_CACHE = state
                     _LAST_MTIME = mtime
             except Exception as e:
-                logging.warning(f"[CircuitBreaker] State okunamadı, cache kullanılıyor: {e}")
+                logging.warning(f"[CircuitBreaker V5] State okunamadı, cache kullanılıyor: {e}")
                 if _STATE_CACHE is None:
                     _STATE_CACHE = _default_state()
         return _STATE_CACHE
@@ -82,7 +84,7 @@ def _save_state(state: dict):
             os.replace(tmp_path, CB_STATE_FILE)
             _LAST_MTIME = os.path.getmtime(CB_STATE_FILE)
         except Exception as e:
-            logging.warning(f"[CircuitBreaker] State kaydedilemedi: {e}")
+            logging.warning(f"[CircuitBreaker V5] State kaydedilemedi: {e}")
             if tmp_path and os.path.exists(tmp_path):
                 try:
                     os.remove(tmp_path)
@@ -110,7 +112,7 @@ def _reset_daily_if_needed(state: dict) -> dict:
                     strat["silent_mode"] = False
                     strat["silent_until"] = None
                     strat["consecutive_sl"] = 0
-                    logging.info(f"[CircuitBreaker] ✅ {strat_name} sessiz mod süresi doldu.")
+                    logging.info(f"[CircuitBreaker V5] ✅ {strat_name} sessiz mod süresi doldu.")
             except Exception:
                 strat["silent_mode"] = False
 
@@ -139,7 +141,7 @@ def record_sl(ticker: str, strategy: str = "UNKNOWN") -> str | None:
         notification = None
 
         if state["total_daily_sl"] >= GLOBAL_DAILY_MAX_SL:
-            logging.critical(f"[CircuitBreaker] 🚨 HİBRİT ŞALTER ATTI! Sistem geneli {GLOBAL_DAILY_MAX_SL} SL limitine ulaşıldı.")
+            logging.critical(f"[CircuitBreaker V5] 🚨 HİBRİT ŞALTER ATTI! Sistem geneli {GLOBAL_DAILY_MAX_SL} SL limitine ulaşıldı.")
             if state["total_daily_sl"] == GLOBAL_DAILY_MAX_SL:
                 notification = (
                     f"🚨🚨 <b>HİBRİT ŞALTER ATTI (MASTER SWITCH)</b> 🚨🚨\n"
@@ -151,7 +153,7 @@ def record_sl(ticker: str, strategy: str = "UNKNOWN") -> str | None:
             until = datetime.now(timezone.utc) + timedelta(hours=COOLDOWN_HOURS)
             strat_state["silent_mode"] = True
             strat_state["silent_until"] = until.isoformat()
-            logging.warning(f"[CircuitBreaker] 🔴 {strat_key} GÜNLÜK SL LİMİTİ AŞILDI! Bugün {strat_state['daily_sl_count']} SL.")
+            logging.warning(f"[CircuitBreaker V5] 🔴 {strat_key} GÜNLÜK SL LİMİTİ AŞILDI! Bugün {strat_state['daily_sl_count']} SL.")
             notification = (
                 f"🔴 <b>GÜNLÜK SL LİMİTİ AŞILDI — {strat_key}</b>\n"
                 f"Bugün toplam <b>{strat_state['daily_sl_count']}</b> işlem Stop-Loss oldu.\n"
@@ -163,7 +165,7 @@ def record_sl(ticker: str, strategy: str = "UNKNOWN") -> str | None:
             until = datetime.now(timezone.utc) + timedelta(hours=COOLDOWN_HOURS)
             strat_state["silent_mode"] = True
             strat_state["silent_until"] = until.isoformat()
-            logging.warning(f"[CircuitBreaker] 🔴 STRATEJİ DEVRESİ AÇILDI ({strat_key})! Ardışık {strat_state['consecutive_sl']} SL.")
+            logging.warning(f"[CircuitBreaker V5] 🔴 STRATEJİ DEVRESİ AÇILDI ({strat_key})! Ardışık {strat_state['consecutive_sl']} SL.")
             notification = (
                 f"🔴🔴🔴 <b>DEVRE KESİCİ AKTİF — {strat_key}</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -222,7 +224,7 @@ def get_status_message() -> str:
                 if cons_sl > 0 or daily_sl > 0:
                     active_strats.append(f"{strat_name}(A:{cons_sl}/{MAX_CONSECUTIVE_SL} G:{daily_sl}/{DAILY_MAX_SL})")
 
-        lines = ["🟢 Devre Kesici: Aktif (Strateji Bazlı)"]
+        lines = ["🟢 Devre Kesici V5: Aktif (Strateji Bazlı)"]
         lines.append(f"📊 Global SL Sayacı: {state.get('total_daily_sl', 0)}/{GLOBAL_DAILY_MAX_SL}")
         
         if closed_strats:
@@ -239,18 +241,27 @@ def force_reset():
     with _cb_lock:
         state = _default_state()
         _save_state(state)
-        logging.info("[CircuitBreaker] ✅ Manuel sıfırlama yapıldı.")
+        logging.info("[CircuitBreaker V5] ✅ Manuel sıfırlama yapıldı.")
         return "✅ Tüm Devre Kesiciler ve Global Sayaç sıfırlandı. Sessiz modlar kapatıldı."
 
-# --- Observer (Event-Driven) Pattern Implementation ---
-class CircuitBreakerObserver:
+# --- V5 Observer (Event-Driven) Pattern Implementation ---
+class CircuitBreakerObserverV5:
     """
     Backtrader mimarisinden esinlenilmiş, olay güdümlü (event-driven) Devre Kesici Gözlemcisi.
     Trade kapandığında PnL değerine göre otomatik olarak SL veya TP kaydeder ve
     ilgili uyarıları abonelere (listeners) iletir.
+    
+    Bu sınıf Singleton pattern ile çalışır, memory sızıntısını önler.
     """
-    def __init__(self):
-        self._listeners = []
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(CircuitBreakerObserverV5, cls).__new__(cls)
+                cls._instance._listeners = []
+            return cls._instance
 
     def subscribe(self, listener_func):
         """
@@ -295,7 +306,7 @@ class CircuitBreakerObserver:
             try:
                 listener(msg)
             except Exception as e:
-                logging.error(f"[CircuitBreakerObserver] Listener hatası: {e}")
+                logging.error(f"[CircuitBreakerObserver V5] Listener hatası: {e}")
 
-# Global Observer Instance
-cb_observer = CircuitBreakerObserver()
+# Global Observer Instance for V5
+cb_observer_v5 = CircuitBreakerObserverV5()

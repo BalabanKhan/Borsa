@@ -104,6 +104,25 @@ WEIGHTS = {
 assert abs(sum(WEIGHTS.values()) - 1.0) < 0.001, \
     f"WEIGHTS toplamı 1.0 olmalı, şu an: {sum(WEIGHTS.values())}"
 
+CRYPTO_WEIGHTS = {
+    "adx":              0.10,
+    "ema_alignment":    0.05,
+    "rsi":              0.08,
+    "rsi_direction":    0.02,
+    "volume_ratio":     0.15,
+    "dollar_volume":    0.08,
+    "rr_ratio":         0.12,
+    "engulfing":        0.05,
+    "regime":           0.08,
+    "macro":            0.07,
+    "penalty":          0.05,
+    "oi_crash":         0.05,
+    "funding_rate":     0.10,
+}
+assert abs(sum(CRYPTO_WEIGHTS.values()) - 1.0) < 0.001, \
+    f"CRYPTO_WEIGHTS toplamı 1.0 olmalı, şu an: {sum(CRYPTO_WEIGHTS.values())}"
+
+
 
 # ════════════════════════════════════════
 # Sigmoid / Fuzzy Puanlama Fonksiyonları
@@ -249,6 +268,42 @@ def score_dollar_volume(dollar_vol: float, market: str = "KRIPTO") -> float:
         return round(log_score(dollar_vol, SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX), 1)
 
 
+def score_oi_crash(oi_crashed: bool) -> float:
+    """OI çöküşü (Açık Pozisyon sıfırlaması) puanlama. Varsa bonus (100), yoksa nötr (50)."""
+    if oi_crashed:
+        return 100.0
+    return 50.0
+
+
+def score_funding_rate(funding_rate: float, direction: str = "long") -> float:
+    """
+    Fonlama Oranı puanlama.
+    Long yönü için: negatif fonlama çok iyi (100), aşırı pozitif fonlama kötü (0).
+    Short yönü için: aşırı pozitif fonlama çok iyi (100), negatif fonlama kötü (0).
+    """
+    if funding_rate is None or _is_nan(funding_rate):
+        return 50.0
+
+    if direction == "long":
+        if funding_rate <= -0.01:
+            return 100.0
+        elif funding_rate <= 0.0:
+            return 80.0
+        elif funding_rate <= 0.01:
+            return 50.0
+        else:
+            return max(0.0, 50.0 - (funding_rate * 1000))
+    else:
+        if funding_rate >= 0.01:
+            return 100.0
+        elif funding_rate >= 0.0:
+            return 80.0
+        elif funding_rate >= -0.01:
+            return 50.0
+        else:
+            return max(0.0, 50.0 + (funding_rate * 1000))
+
+
 def score_rr_ratio(rr: float, regime: str = "NEUTRAL", is_short: bool = False) -> float:
     """
     R:R oranı puanlama — sigmoid ile yumuşak eşik, piyasa rejimine duyarlı.
@@ -367,12 +422,12 @@ def score_ema_short(price: float, ema_fast: float, ema_mid: float,
 
 def score_regime(regime: str) -> float:
     """Piyasa rejimi puanlama — LONG stratejiler (BULL/NEUTRAL/BEAR)."""
-    return {"BULL": SOFT_REGIME_BULL, "NEUTRAL": SOFT_REGIME_NEUTRAL, "BEAR": SOFT_REGIME_BEAR}.get(regime, 50.0)
+    return {"BULL": SOFT_REGIME_BULL, "NEUTRAL": SOFT_REGIME_NEUTRAL, "BEAR": SOFT_REGIME_BEAR}.get(regime, SOFT_UNCERTAINTY_PENALTY)
 
 
 def score_regime_short(regime: str) -> float:
     """SHORT stratejileri için piyasa rejimi (BEAR = iyi, BULL = kötü)."""
-    return {"BEAR": SOFT_REGIME_BULL, "NEUTRAL": SOFT_REGIME_NEUTRAL, "BULL": SOFT_REGIME_BEAR}.get(regime, 50.0)
+    return {"BEAR": SOFT_REGIME_BULL, "NEUTRAL": SOFT_REGIME_NEUTRAL, "BULL": SOFT_REGIME_BEAR}.get(regime, SOFT_UNCERTAINTY_PENALTY)
 
 
 def score_engulfing(has_engulfing: bool) -> float:
@@ -644,7 +699,7 @@ def calculate_conviction(
     result.total_score = round(total, 1)
 
     # Rejim-adaptif eşikler: config tabanlı sıkılaştırılmış limitler
-    regime_score = scores.get("regime", 50.0)
+    regime_score = scores.get("regime", SOFT_UNCERTAINTY_PENALTY)
     if regime_score >= 80:       # BULL (veya SHORT'ta BEAR → iyi)
         t_strong = REGIME_THRESHOLDS_BULL["STRONG"]
         t_medium = REGIME_THRESHOLDS_BULL["MEDIUM"]
@@ -704,6 +759,8 @@ def build_trend_scores(
     macro_aligned,
     consecutive_sl,
     market="BIST",
+    oi_crash=False,
+    funding_rate=None,
 ):
     """Trend stratejileri (BIST 2, KRİPTO 2) için skor paketi."""
     return {
@@ -718,6 +775,8 @@ def build_trend_scores(
         "regime":        score_regime(regime),
         "macro":         score_macro_alignment(macro_aligned),
         "penalty":       score_penalty_level(consecutive_sl),
+        "oi_crash":      score_oi_crash(oi_crash),
+        "funding_rate":  score_funding_rate(funding_rate, direction="long"),
     }
 
 
@@ -731,6 +790,8 @@ def build_dip_scores(
     macro_aligned,
     consecutive_sl,
     market="BIST",
+    oi_crash=False,
+    funding_rate=None,
 ):
     """Dip avcılığı stratejileri (BIST 1, KRİPTO 1) için skor paketi."""
     return {
@@ -745,6 +806,8 @@ def build_dip_scores(
         "regime":        score_regime(regime),
         "macro":         score_macro_alignment(macro_aligned),
         "penalty":       score_penalty_level(consecutive_sl),
+        "oi_crash":      score_oi_crash(oi_crash),
+        "funding_rate":  score_funding_rate(funding_rate, direction="long"),
     }
 
 
@@ -757,9 +820,11 @@ def build_breakout_scores(
     macro_aligned,
     consecutive_sl,
     market="BIST",
+    oi_crash=False,
+    funding_rate=None,
 ):
     """Kırılım/Squeeze stratejileri (BIST 3/5, KRİPTO 3) için skor paketi."""
-    squeeze_score = inverse_linear_score(bb_width, SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX) if bb_width else 50.0
+    squeeze_score = inverse_linear_score(bb_width, SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX) if bb_width else SOFT_UNCERTAINTY_PENALTY
 
     return {
         "adx":           squeeze_score,
@@ -773,6 +838,8 @@ def build_breakout_scores(
         "regime":        score_regime(regime),
         "macro":         score_macro_alignment(macro_aligned),
         "penalty":       score_penalty_level(consecutive_sl),
+        "oi_crash":      score_oi_crash(oi_crash),
+        "funding_rate":  score_funding_rate(funding_rate, direction="long"),
     }
 
 
@@ -787,6 +854,8 @@ def build_short_scores(
     macro_aligned,
     consecutive_sl,
     market="KRIPTO",
+    oi_crash=False,
+    funding_rate=None,
 ):
     """SHORT stratejileri (SHORT 1-4, Bear Hunter) için skor paketi."""
     return {
@@ -801,4 +870,6 @@ def build_short_scores(
         "regime":        score_regime_short(regime),
         "macro":         score_macro_alignment(macro_aligned),
         "penalty":       score_penalty_level(consecutive_sl),
+        "oi_crash":      score_oi_crash(oi_crash),
+        "funding_rate":  score_funding_rate(funding_rate, direction="short"),
     }

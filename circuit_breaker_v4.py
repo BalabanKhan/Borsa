@@ -24,6 +24,31 @@ _cb_lock = threading.RLock()
 _STATE_CACHE = None
 _LAST_MTIME = 0
 
+# --- EVENT-DRIVEN OBSERVER PATTERN ---
+class CircuitBreakerObserver:
+    def on_circuit_breaker_triggered(self, ticker: str, strategy: str, reason: str):
+        pass
+
+class CircuitBreakerObservable:
+    def __init__(self):
+        self._observers = []
+        
+    def attach(self, observer: CircuitBreakerObserver):
+        if observer not in self._observers:
+            self._observers.append(observer)
+            
+    def detach(self, observer: CircuitBreakerObserver):
+        if observer in self._observers:
+            self._observers.remove(observer)
+            
+    def notify_triggered(self, ticker: str, strategy: str, reason: str):
+        for observer in self._observers:
+            observer.on_circuit_breaker_triggered(ticker, strategy, reason)
+
+# Global observable instance
+cb_events = CircuitBreakerObservable()
+# ------------------------------------
+
 def _get_namespace(ticker: str, strategy: str) -> str:
     market = "CRYPTO" if "USDT" in ticker else "BIST"
     return f"{market}_{strategy}"
@@ -152,6 +177,7 @@ def record_sl(ticker: str, strategy: str = "UNKNOWN") -> str | None:
             strat_state["silent_mode"] = True
             strat_state["silent_until"] = until.isoformat()
             logging.warning(f"[CircuitBreaker] 🔴 {strat_key} GÜNLÜK SL LİMİTİ AŞILDI! Bugün {strat_state['daily_sl_count']} SL.")
+            cb_events.notify_triggered(ticker, strategy, "DAILY_SL_LIMIT")
             notification = (
                 f"🔴 <b>GÜNLÜK SL LİMİTİ AŞILDI — {strat_key}</b>\n"
                 f"Bugün toplam <b>{strat_state['daily_sl_count']}</b> işlem Stop-Loss oldu.\n"
@@ -164,6 +190,7 @@ def record_sl(ticker: str, strategy: str = "UNKNOWN") -> str | None:
             strat_state["silent_mode"] = True
             strat_state["silent_until"] = until.isoformat()
             logging.warning(f"[CircuitBreaker] 🔴 STRATEJİ DEVRESİ AÇILDI ({strat_key})! Ardışık {strat_state['consecutive_sl']} SL.")
+            cb_events.notify_triggered(ticker, strategy, "CONSECUTIVE_SL_LIMIT")
             notification = (
                 f"🔴🔴🔴 <b>DEVRE KESİCİ AKTİF — {strat_key}</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"

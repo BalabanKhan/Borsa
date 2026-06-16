@@ -22,8 +22,38 @@ from typing import NamedTuple, Any, Optional
 import config
 from config import IS_USA_SERVER, CACHE_TTL_SECONDS, OHLCV_LIMIT, OI_CRASH_PCT, API_SLEEP_BIST
 from data_guard import guard_dataframe
+import random
 
 warnings.filterwarnings('ignore')
+
+# ════════════════════════════════════════
+# yfinance Rate Limiting & Backoff Wrapper
+# ════════════════════════════════════════
+def safe_yf_download(*args, **kwargs):
+    """
+    yfinance IP ban önlemleri: Rate Limiting ve Exponential Backoff.
+    Maksimum 5 deneme yapar, her hatada bekleme süresini katlayarak artırır.
+    """
+    max_retries = 5
+    base_sleep = 2.0
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(*args, **kwargs)
+            # Başarılı çağrılarda da ufak bir rastgele bekleme süresi (Rate limit dostu)
+            _time.sleep(random.uniform(0.3, 0.8))
+            return df
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "rate limit" in err_str or "too many requests" in err_str or "connection" in err_str:
+                sleep_time = base_sleep * (2 ** attempt) + random.uniform(0, 1)
+                logging.warning(f"[safe_yf_download] Rate limit/Bağlantı Hatası ({err_str}). Deneme {attempt+1}/{max_retries}. {sleep_time:.2f} saniye bekleniyor...")
+                _time.sleep(sleep_time)
+            else:
+                logging.warning(f"[safe_yf_download] yf.download hatası: {e}. Deneme {attempt+1}/{max_retries}")
+                _time.sleep(base_sleep + random.uniform(0, 1))
+    
+    logging.error(f"[safe_yf_download] {max_retries} deneme sonrasında başarısız oldu. Args: {args}")
+    return pd.DataFrame()
 
 # ════════════════════════════════════════
 # Exchange Instances
@@ -121,7 +151,7 @@ def is_bist_open():
 
 def check_xu100_wind():
     try:
-        df = yf.download("XU100.IS", period="5d", interval="1d", progress=False)
+        df = safe_yf_download("XU100.IS", period="5d", interval="1d", progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         if len(df) >= 2:
@@ -227,10 +257,10 @@ def check_token_unlocks(symbol):
 # BIST günlük ve saatlik veri periyotları config.DATA_PERIOD_1D ve DATA_PERIOD_1H'a bağlanmıştır.
 def get_bist_data(symbol):
     try:
-        df_1d = yf.download(symbol, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
+        df_1d = safe_yf_download(symbol, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
         df_1d = clean_yf_df(df_1d)
 
-        df_1h = yf.download(symbol, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+        df_1h = safe_yf_download(symbol, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
         df_1h = clean_yf_df(df_1h)
 
         if df_1h.empty or df_1d.empty: return None, None, None
@@ -264,9 +294,9 @@ def get_bist_data_batch(symbols, batch_size=25):
         try:
             # 99 yapılmıştır
             # Toplu veri çekiminde period parametreleri config.DATA_PERIOD_1D ve DATA_PERIOD_1H'dan alınmaktadır.
-            raw_1d = yf.download(tickers_str, period=config.DATA_PERIOD_1D, interval="1d",
+            raw_1d = safe_yf_download(tickers_str, period=config.DATA_PERIOD_1D, interval="1d",
                                   group_by="ticker", threads=True, progress=False)
-            raw_1h = yf.download(tickers_str, period=config.DATA_PERIOD_1H, interval="1h",
+            raw_1h = safe_yf_download(tickers_str, period=config.DATA_PERIOD_1H, interval="1h",
                                   group_by="ticker", threads=True, progress=False)
         except Exception as e:
             logging.warning(f"[get_bist_data_batch] Batch download hata: {e}, tekli fallback...")
@@ -328,7 +358,7 @@ def get_bist_15m_batch(symbols, batch_size=25):
         batch = symbols[i:i + batch_size]
         tickers_str = " ".join(batch)
         try:
-            raw = yf.download(tickers_str, period="5d", interval="15m",
+            raw = safe_yf_download(tickers_str, period="5d", interval="15m",
                               group_by="ticker", threads=True, progress=False)
             for sym in batch:
                 try:
@@ -412,10 +442,10 @@ def get_crypto_data(symbol):
             yf_ticker = symbol.replace("/USDT", "-USD")
             # 99 yapılmıştır
             # Kripto yfinance yedek veri çekiminde periyotlar config.DATA_PERIOD_1D ve DATA_PERIOD_1H'a bağlanmıştır.
-            df_1d = yf.download(yf_ticker, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
+            df_1d = safe_yf_download(yf_ticker, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
             df_1d = clean_yf_df(df_1d)
 
-            df_1h = yf.download(yf_ticker, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+            df_1h = safe_yf_download(yf_ticker, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
             df_1h = clean_yf_df(df_1h)
 
             if df_1h.empty or df_1d.empty: return None, None
@@ -439,11 +469,11 @@ def get_crypto_data(symbol):
 def get_emtia_data(symbol):
     """Emtia vadeli kontrat için 1D ve 4H verisini yfinance üzerinden çeker."""
     try:
-        df_1d = yf.download(symbol, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
+        df_1d = safe_yf_download(symbol, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
         df_1d = clean_yf_df(df_1d)
         if df_1d.empty:
             return None, None
-        df_1h_raw = yf.download(symbol, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+        df_1h_raw = safe_yf_download(symbol, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
         df_1h_raw = clean_yf_df(df_1h_raw)
         df_4h = None
         if not df_1h_raw.empty:
@@ -467,7 +497,7 @@ def get_emtia_data(symbol):
 def get_bist_15m_data(symbol):
     """BIST hissesi için 15 dakikalık veri çeker (ORB stratejisi için)."""
     try:
-        df = yf.download(symbol, period="5d", interval="15m", progress=False)
+        df = safe_yf_download(symbol, period="5d", interval="15m", progress=False)
         df = clean_yf_df(df)
         if df.empty:
             return None
@@ -503,7 +533,7 @@ def get_btc_status():
             df = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         except Exception as ekr:
             try:
-                df = yf.download("BTC-USD", period="3mo", interval="1d", progress=False)
+                df = safe_yf_download("BTC-USD", period="3mo", interval="1d", progress=False)
                 df = clean_yf_df(df)
             except Exception as eyf:
                 logging.warning(f"[get_btc_status] Veri çekilemedi: {eyf}")
@@ -548,7 +578,7 @@ def check_btc_not_pumping():
             try:
                 # 99 yapılmıştır
                 # BTC 1H veri periyodu config.DATA_PERIOD_1H ile dinamik hale getirilmiştir.
-                df_1h = yf.download("BTC-USD", period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+                df_1h = safe_yf_download("BTC-USD", period=config.DATA_PERIOD_1H, interval="1h", progress=False)
                 df_1h = clean_yf_df(df_1h)
                 df = df_1h.resample('4h').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna()
             except Exception as eyf:
@@ -599,7 +629,7 @@ def _get_btc_htf_bias():
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         except Exception as ekr:
             try:
-                df = yf.download("BTC-USD", period="3mo", interval="1d", progress=False)
+                df = safe_yf_download("BTC-USD", period="3mo", interval="1d", progress=False)
                 df = clean_yf_df(df)
             except Exception as eyf:
                 logging.warning(f"[_get_btc_htf_bias] Veri çekilemedi: {eyf}")
@@ -622,7 +652,7 @@ def _check_dxy_shield():
     try:
         # 99 yapılmıştır
         # DXY veri periyodu config.DATA_PERIOD_1D ile dinamik hale getirilmiştir.
-        df = yf.download("DX-Y.NYB", period=config.DATA_PERIOD_1D, interval="1d", progress=False)
+        df = safe_yf_download("DX-Y.NYB", period=config.DATA_PERIOD_1D, interval="1d", progress=False)
         df = clean_yf_df(df)
         if df.empty:
             return False
@@ -663,7 +693,7 @@ def _is_btc_bullish_for_shorts():
                 logging.warning(f"[_is_btc_bullish_for_shorts] Kraken hatası: {e_kr}")
                 # 99 yapılmıştır
                 # BTC 1H yedek veri periyodu config.DATA_PERIOD_1H ile dinamik hale getirilmiştir.
-                df_1h = yf.download("BTC-USD", period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+                df_1h = safe_yf_download("BTC-USD", period=config.DATA_PERIOD_1H, interval="1h", progress=False)
                 df_1h = clean_yf_df(df_1h)
                 df = df_1h.resample('4h').agg({
                     'open': 'first', 'high': 'max', 'low': 'min',
@@ -696,7 +726,7 @@ def _get_xu100_daily_data():
     try:
         # 99 yapılmıştır
         # XU100 endeks veri periyodu config.DATA_PERIOD_1D ile dinamik hale getirilmiştir.
-        df = yf.download("XU100.IS", period=config.DATA_PERIOD_1D, interval="1d", progress=False)
+        df = safe_yf_download("XU100.IS", period=config.DATA_PERIOD_1D, interval="1d", progress=False)
         df = clean_yf_df(df)
         if not df.empty:
             _set_cached('xu100_daily', df)
@@ -857,7 +887,7 @@ def get_crypto_1h_data(symbol):
             yf_ticker = symbol.replace("/USDT", "-USD")
             # 99 yapılmıştır
             # Kripto 1H yedek veri çekim periyodu config.DATA_PERIOD_1H ile dinamik hale getirilmiştir.
-            df_1h = yf.download(yf_ticker, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+            df_1h = safe_yf_download(yf_ticker, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
             df_1h = clean_yf_df(df_1h)
             df_1h = guard_dataframe(df_1h, symbol, '1h')
             return df_1h
@@ -871,7 +901,7 @@ def get_crypto_1h_data(symbol):
 def get_emtia_1h_data(symbol):
     """SMC LTF MSB onayı için 1H emtia verisini yfinance üzerinden çeker ve doğrular."""
     try:
-        df_1h = yf.download(symbol, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+        df_1h = safe_yf_download(symbol, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
         df_1h = clean_yf_df(df_1h)
         df_1h = guard_dataframe(df_1h, symbol, '1h')
         return df_1h

@@ -13,7 +13,7 @@ import threading
 from datetime import datetime, timezone
 from data_sources import get_funding_rate
 from data_guard import validate_signal_output
-from circuit_breaker_v5 import cb_observer_v5
+from circuit_breaker import record_sl, record_tp
 
 # V3.2 Kaos Çözümleri
 from penalty_box import record_asset_sl, record_asset_tp
@@ -1092,14 +1092,7 @@ def check_active_trades(current_prices_dict):
         # sistemin geri kalanı veya diğer hisseler/stratejiler çalışmaya devam eder.
         # Bu yapı "cascading failure" (zincirleme çöküş) riskini önler.
         cb_notifications = []
-        
-        def _cb_listener(msg):
-            if msg:
-                cb_notifications.append(msg)
-                
-        cb_observer_v5.subscribe(_cb_listener)
-        try:
-            for ct in closed_trades:
+        for ct in closed_trades:
             status = ct.get("status", "")
             ticker_ct = ct.get("ticker", "?")
             strategy_ct = ct.get("strategy", "")
@@ -1137,11 +1130,9 @@ def check_active_trades(current_prices_dict):
                 rr_achieved = -rr_achieved
             
             if "SL" in status or "BLACK_SWAN" in status:
-                cb_observer_v5.on_trade_closed({
-                    "ticker": ticker_ct,
-                    "strategy": strategy_ct,
-                    "pnl_percent": -abs(pnl_pct) if pnl_pct != 0 else -0.01
-                })
+                cb_msg = record_sl(ticker_ct, strategy_ct)
+                if cb_msg:
+                    cb_notifications.append(cb_msg)
                 
                 # V3.2 Kaos #4: Ceza Kutusu — SL kaydı
                 penalty_msg = record_asset_sl(ticker_ct)
@@ -1161,11 +1152,7 @@ def check_active_trades(current_prices_dict):
                     })
                 
             elif "TP" in status:
-                cb_observer_v5.on_trade_closed({
-                    "ticker": ticker_ct,
-                    "strategy": strategy_ct,
-                    "pnl_percent": abs(pnl_pct) if pnl_pct != 0 else 0.01
-                })
+                record_tp(ticker_ct, strategy_ct)
                 
                 # V3.2 Kaos #4: Ceza Kutusu — TP kaydı (SL sayacı düşer)
                 record_asset_tp(ticker_ct)
@@ -1193,8 +1180,6 @@ def check_active_trades(current_prices_dict):
                         "exit_time": ct.get("exit_time", ""),
                         "rr_achieved": round(rr_achieved, 2),
                     })
-        finally:
-            cb_observer_v5.unsubscribe(_cb_listener)
                 
         notifications.extend(cb_notifications)
 

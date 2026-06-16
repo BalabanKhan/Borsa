@@ -1,0 +1,40 @@
+
+--- _extract_raw_indicators ---
+
+--- _get_consecutive_sl ---
+
+--- _is_darth_maul ---
+
+--- _is_meaningful_volume ---
+
+--- _adx_momentum_ok ---
+
+--- _apply_volume_sma_guard ---
+
+--- _is_unclosed_candle ---
+
+--- _resolve_dual_signals ---
+
+--- _apply_rr_filter ---
+
+--- _get_bist_regime ---
+
+--- _apply_regime_filter ---
+
+--- _has_absolute_hourly_volume ---
+
+--- _is_funding_safe_for_short ---
+
+--- _is_in_liquidity_window ---
+
+--- analyze_strategies_bist ---
+
+--- scan_orb_bist ---
+
+--- analyze_strategies_crypto ---
+
+--- analyze_strategies_emtia ---
+
+--- analyze_bear_hunter ---
+
+--- scan_all_markets ---

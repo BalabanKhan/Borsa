@@ -12,6 +12,8 @@ load_dotenv()
 # Sunucu / Altyapı
 # ════════════════════════════════════════
 IS_USA_SERVER: bool = os.getenv("IS_USA_SERVER", "true").lower() == "true"
+CCXT_EXCHANGE: str = os.getenv("CCXT_EXCHANGE", "binance")  # CCXT borsa seçimi
+CCXT_FETCH_FUTURES_DATA: bool = True  # OI ve Funding rate çekilsin mi?
 
 # ════════════════════════════════════════
 # Varlık Listeleri
@@ -104,6 +106,8 @@ MIN_SL_PCT = 0.03          # Minimum SL yüzdesi
 TRAILING_ATR_FLOOR_RATIO = 0.3
 TRAILING_TIGHT_PCT = 0.005   # %15+ kâr → sıkı trailing
 TRAILING_MEDIUM_PCT = 0.015  # %10+ kâr → orta trailing
+TRAILING_STOP_ACTIVATION_RR = 1.5  # Freqtrade stili: R:R bu değeri geçince trailing başla
+TRAILING_STOP_DISTANCE_PCT = 0.02  # Freqtrade stili: Aktif olunca %2 takip mesafesi
 
 # ════════════════════════════════════════
 # Scale-Out & Kâr Eşikleri
@@ -153,6 +157,7 @@ IND_EMA_FAST = 8
 IND_EMA_MID = 20
 IND_EMA_21 = 21
 IND_EMA_SLOW = 50
+IND_EMA_55 = 55
 
 IND_SMA_SLOW = 50
 IND_SMA_TREND = 200
@@ -557,5 +562,9 @@ HYBRID_STOP_ENABLED: bool = True             # Hibrit dinamik trailing stop akti
 ANTI_HUNT_OFFSET_PCT: float = 0.00034         # Balinaların stop-avı yapmasını önleyici asimetrik kaydırma oranı (%0.034)
 STRUCTURAL_STOP_ENABLED: bool = True          # EMA-20 yapısal trend desteği alt zemin koruması aktif/pasif
 
-
-
+# ════════════════════════════════════════
+# 🚀 Vectorbt Yüksek Hızlı Backtest Motoru (V4.0)
+# ════════════════════════════════════════
+VBT_COMMISSION: float = 0.001                 # Binde 1 komisyon varsayımı
+VBT_SLIPPAGE: float = 0.001                   # Binde 1 slippage (kayma) varsayımı
+VBT_INITIAL_CASH: float = 10000.0             # Başlangıç portföy büyüklüğü

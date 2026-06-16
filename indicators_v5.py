@@ -20,13 +20,7 @@ from config import (
 # ==========================================
 # 🧠 SMART INDICATOR WRAPPER (TA-LIB / PANDAS-TA)
 # ==========================================
-try:
-    import talib
-    TA_LIB_AVAILABLE = True
-    logging.info("TA-Lib tespit edildi, hizlandirilmis motor kullanilacak.")
-except ImportError:
-    TA_LIB_AVAILABLE = False
-    logging.info("TA-Lib bulunamadi, Pandas-TA fallback modunda çalisiliyor.")
+from indicator_engine_v5 import IndicatorEngine
 
 def inject_smart_indicators(df):
     """
@@ -36,69 +30,42 @@ def inject_smart_indicators(df):
     df_copy = df.copy()
     
     # EMA
-    if TA_LIB_AVAILABLE:
-        df_copy[f'EMA_{config.IND_EMA_FAST}'] = talib.EMA(df_copy['close'].values, timeperiod=config.IND_EMA_FAST)
-        df_copy[f'EMA_{config.IND_EMA_MID}'] = talib.EMA(df_copy['close'].values, timeperiod=config.IND_EMA_MID)
-        df_copy[f'EMA_{config.IND_EMA_SLOW}'] = talib.EMA(df_copy['close'].values, timeperiod=config.IND_EMA_SLOW)
-        df_copy[f'EMA_{config.IND_EMA_21}'] = talib.EMA(df_copy['close'].values, timeperiod=config.IND_EMA_21)
-        df_copy[f'EMA_{config.IND_EMA_55}'] = talib.EMA(df_copy['close'].values, timeperiod=config.IND_EMA_55)
-        df_copy[f'EMA_20'] = talib.EMA(df_copy['close'].values, timeperiod=20)
-    else:
-        df_copy.ta.ema(length=config.IND_EMA_FAST, append=True)
-        df_copy.ta.ema(length=config.IND_EMA_MID, append=True)
-        df_copy.ta.ema(length=config.IND_EMA_SLOW, append=True)
-        df_copy.ta.ema(length=config.IND_EMA_21, append=True)
-        df_copy.ta.ema(length=config.IND_EMA_55, append=True)
-        df_copy.ta.ema(length=20, append=True)
-        
+    df_copy[f'EMA_{config.IND_EMA_FAST}'] = IndicatorEngine.ema(df_copy['close'], config.IND_EMA_FAST)
+    df_copy[f'EMA_{config.IND_EMA_MID}'] = IndicatorEngine.ema(df_copy['close'], config.IND_EMA_MID)
+    df_copy[f'EMA_{config.IND_EMA_SLOW}'] = IndicatorEngine.ema(df_copy['close'], config.IND_EMA_SLOW)
+    df_copy[f'EMA_{config.IND_EMA_21}'] = IndicatorEngine.ema(df_copy['close'], config.IND_EMA_21)
+    df_copy[f'EMA_{config.IND_EMA_55}'] = IndicatorEngine.ema(df_copy['close'], config.IND_EMA_55)
+    df_copy['EMA_20'] = IndicatorEngine.ema(df_copy['close'], 20)
+    
     # SMA
-    if TA_LIB_AVAILABLE:
-        df_copy[f'SMA_{config.IND_SMA_SLOW}'] = talib.SMA(df_copy['close'].values, timeperiod=config.IND_SMA_SLOW)
-        df_copy[f'SMA_{config.IND_SMA_TREND}'] = talib.SMA(df_copy['close'].values, timeperiod=config.IND_SMA_TREND)
-        df_copy[f'SMA_200'] = talib.SMA(df_copy['close'].values, timeperiod=200)
-    else:
-        df_copy.ta.sma(length=config.IND_SMA_SLOW, append=True)
-        df_copy.ta.sma(length=config.IND_SMA_TREND, append=True)
-        df_copy.ta.sma(length=200, append=True)
-        
+    df_copy[f'SMA_{config.IND_SMA_SLOW}'] = IndicatorEngine.sma(df_copy['close'], config.IND_SMA_SLOW)
+    df_copy[f'SMA_{config.IND_SMA_TREND}'] = IndicatorEngine.sma(df_copy['close'], config.IND_SMA_TREND)
+    df_copy['SMA_200'] = IndicatorEngine.sma(df_copy['close'], 200)
+    
     # RSI
-    if TA_LIB_AVAILABLE:
-        df_copy[f'RSI_{config.IND_RSI_LENGTH}'] = talib.RSI(df_copy['close'].values, timeperiod=config.IND_RSI_LENGTH)
-    else:
-        df_copy.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_copy[f'RSI_{config.IND_RSI_LENGTH}'] = IndicatorEngine.rsi(df_copy['close'], config.IND_RSI_LENGTH)
 
-    # ADX
-    if TA_LIB_AVAILABLE:
-        df_copy[f'ADX_{config.IND_ADX_LENGTH}'] = talib.ADX(df_copy['high'].values, df_copy['low'].values, df_copy['close'].values, timeperiod=config.IND_ADX_LENGTH)
-    else:
-        df_copy.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    # ADX (IndicatorEngine.adx returns ADX, DMP, DMN)
+    adx_df = IndicatorEngine.adx(df_copy['high'], df_copy['low'], df_copy['close'], config.IND_ADX_LENGTH)
+    for col in adx_df.columns:
+        df_copy[col] = adx_df[col]
         
     # ATR
-    if TA_LIB_AVAILABLE:
-        df_copy[f'ATRr_{config.IND_ATR_LENGTH}'] = talib.ATR(df_copy['high'].values, df_copy['low'].values, df_copy['close'].values, timeperiod=config.IND_ATR_LENGTH)
-    else:
-        df_copy.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+    df_copy[f'ATRr_{config.IND_ATR_LENGTH}'] = IndicatorEngine.atr(df_copy['high'], df_copy['low'], df_copy['close'], config.IND_ATR_LENGTH)
         
     # MACD
-    if TA_LIB_AVAILABLE:
-        macd, macdsignal, macdhist = talib.MACD(df_copy['close'].values, fastperiod=12, slowperiod=26, signalperiod=9)
-        df_copy['MACD_12_26_9'] = macd
-        df_copy['MACDh_12_26_9'] = macdhist
-        df_copy['MACDs_12_26_9'] = macdsignal
-    else:
-        df_copy.ta.macd(fast=12, slow=26, signal=9, append=True)
+    macd_df = IndicatorEngine.macd(df_copy['close'], fast=12, slow=26, signal=9)
+    df_copy['MACD_12_26_9'] = macd_df['MACD']
+    df_copy['MACDh_12_26_9'] = macd_df['MACDh']
+    df_copy['MACDs_12_26_9'] = macd_df['MACDs']
         
     # BBANDS
-    if TA_LIB_AVAILABLE:
-        upper, middle, lower = talib.BBANDS(df_copy['close'].values, timeperiod=config.IND_BBANDS_LENGTH, nbdevup=config.IND_BBANDS_STD, nbdevdn=config.IND_BBANDS_STD, matype=0)
-        df_copy[f'BBL_{config.IND_BBANDS_LENGTH}_{config.IND_BBANDS_STD}'] = lower
-        df_copy[f'BBM_{config.IND_BBANDS_LENGTH}_{config.IND_BBANDS_STD}'] = middle
-        df_copy[f'BBU_{config.IND_BBANDS_LENGTH}_{config.IND_BBANDS_STD}'] = upper
-    else:
-        df_copy.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
+    bb_df = IndicatorEngine.bbands(df_copy['close'], length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD)
+    for col in bb_df.columns:
+        df_copy[col] = bb_df[col]
         
-    # Keltner Channels
-    df_copy.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=1.5, append=True) # TA-Lib has no native KC, use pandas-ta
+    # Keltner Channels (using pandas-ta natively, but squeeze will handle it directly)
+    df_copy.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=1.5, append=True)
     
     return df_copy
 
@@ -683,9 +650,12 @@ def detect_squeeze(df):
     # Pandas Mutability koruması: kaynak DataFrame'i kirletme
     df = df.copy()
 
-    if not [c for c in df.columns if 'BBU_20_2' in c]:
-        df.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
-    if not [c for c in df.columns if 'KCU_20_1' in c]:
+    if not [c for c in df.columns if 'BBU' in c]:
+        bb_df = IndicatorEngine.bbands(df['close'], length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD)
+        for col in bb_df.columns:
+            df[col] = bb_df[col]
+            
+    if not [c for c in df.columns if 'KCU' in c]:
         df.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=1.5, append=True)
 
     bbu = [c for c in df.columns if 'BBU' in c]
@@ -698,15 +668,13 @@ def detect_squeeze(df):
 
     bbu_c, bbl_c, kcu_c, kcl_c = bbu[0], bbl[0], kcu[0], kcl[0]
 
-    squeeze_count = 0
-    for i in range(-6, -1):
-        if abs(i) > len(df):
-            continue
-        r = df.iloc[i]
-        if (not pd.isna(r.get(bbu_c)) and not pd.isna(r.get(kcu_c)) and
-                r[bbu_c] < r[kcu_c] and r[bbl_c] > r[kcl_c]):
-            squeeze_count += 1
-    if squeeze_count < 3:
+    # Vektörel Squeeze Hesaplaması
+    sqz_on = (df[bbu_c] < df[kcu_c]) & (df[bbl_c] > df[kcl_c])
+    
+    # Son 6 mumun (güncel hariç) içinde en az 3 squeeze var mı?
+    # [-7:-1] dilimi (son -1 dahil değil)
+    sqz_count = sqz_on.iloc[-7:-1].sum()
+    if sqz_count < 3:
         return False, None, None
 
     last = df.iloc[-1]
@@ -716,6 +684,7 @@ def detect_squeeze(df):
     # RED-04: 2 mum onayı — tek mum sahte patlama engelleyici
     direction = None
     prev = df.iloc[-2] if len(df) >= 2 else None
+    
     if last['close'] > last[bbu_c] and last['close'] > last['open']:
         # 2. mum teyidi: önceki mum da BB üzerinde veya yakınında mı?
         if prev is not None and not pd.isna(prev.get(bbu_c)):
@@ -729,25 +698,22 @@ def detect_squeeze(df):
                 direction = "down"
         else:
             direction = "down"
+            
     if direction is None:
         return False, None, None
 
     # Squeeze Momentum Hizalama Kontrolü
-    # SQUEEZE_MOMENTUM_ALIGN_REQUIRED bayrağıyla aktifleşir.
-    # Momentum histogramının (MACD) kırılım yönüyle uyuşmasını şart koşar.
     if config.SQUEEZE_MOMENTUM_ALIGN_REQUIRED:
-        df.ta.macd(append=True)
-        macdh_cols = [c for c in df.columns if 'MACDh' in c]
-        if macdh_cols:
-            macd_h = df[macdh_cols[0]]
-            if len(macd_h) >= 2:
-                is_rising = macd_h.iloc[-1] > macd_h.iloc[-2]
-                if direction == "up" and not is_rising:
-                    return False, None, None
-                elif direction == "down" and is_rising:
-                    return False, None, None
+        macd_df = IndicatorEngine.macd(df['close'], fast=12, slow=26, signal=9)
+        macd_h = macd_df['MACDh']
+        if len(macd_h) >= 2:
+            is_rising = macd_h.iloc[-1] > macd_h.iloc[-2]
+            if direction == "up" and not is_rising:
+                return False, None, None
+            elif direction == "down" and is_rising:
+                return False, None, None
 
-    vol_sma = df['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean()
+    vol_sma = IndicatorEngine.sma(df['volume'], config.IND_VOL_SMA_LENGTH)
     if not pd.isna(vol_sma.iloc[-1]) and last['volume'] < vol_sma.iloc[-1] * config.IND_VOL_BREAKOUT_MULTIPLIER:
         return False, None, None
 

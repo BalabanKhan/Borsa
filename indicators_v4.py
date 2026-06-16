@@ -270,31 +270,39 @@ def sniper_find_swing_points(df, point_type="low", neighbors=3, min_amplitude_pc
     if min_amplitude_pct is None:
         min_amplitude_pct = SWING_MIN_AMPLITUDE_PCT
     col = 'low' if point_type == "low" else 'high'
-    values = df[col].values
-    n = len(values)
+    
+    n = len(df)
     swings = []
-
-    if n < 2 * neighbors + 1:
+    window_size = 2 * neighbors + 1
+    
+    if n < window_size:
         return swings
 
-    for i in range(neighbors, n - neighbors):
+    # Vectorized local extremum detection using Pandas rolling window
+    if point_type == "low":
+        is_swing = df[col].rolling(window=window_size, center=True).min() == df[col]
+    else:
+        is_swing = df[col].rolling(window=window_size, center=True).max() == df[col]
+        
+    # Get numeric integer indices where is_swing is True
+    swing_indices = np.where(is_swing)[0]
+    values = df[col].values
+
+    for i in swing_indices:
+        # Ignore endpoints that rolling center might catch if not strictly valid
+        if i < neighbors or i >= n - neighbors:
+            continue
+            
         val = values[i]
-        if point_type == "low":
-            is_swing = all(val <= values[i - j] for j in range(1, neighbors + 1))
-            is_swing = is_swing and all(val < values[i + j] for j in range(1, neighbors + 1))
+        # RED-03: Amplitude filtresi - gercek swing mi yoksa gurultu mu?
+        window = values[i - neighbors : i + neighbors + 1]
+        local_range = window.max() - window.min()
+        if val > 0:
+            amplitude_pct = (local_range / val) * 100
+            if amplitude_pct >= min_amplitude_pct:
+                swings.append((int(i), float(val)))
         else:
-            is_swing = all(val >= values[i - j] for j in range(1, neighbors + 1))
-            is_swing = is_swing and all(val > values[i + j] for j in range(1, neighbors + 1))
-        if is_swing:
-            # RED-03: Amplitude filtresi — gerçek swing mi yoksa gürültü mü?
-            window = values[max(0, i - neighbors):i + neighbors + 1]
-            local_range = window.max() - window.min()
-            if val > 0:
-                amplitude_pct = (local_range / val) * 100
-                if amplitude_pct >= min_amplitude_pct:
-                    swings.append((i, val))
-            else:
-                swings.append((i, val))
+            swings.append((int(i), float(val)))
     return swings
 
 
