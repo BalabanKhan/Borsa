@@ -107,12 +107,15 @@ def fetch_multi_timeframe_data(symbol, market):
     df_4h = pd.DataFrame()
     df_1h = pd.DataFrame()
     
+    import time
+    time.sleep(0.5) # Yahoo Finance rate limit block prevention
+    
     try:
         if market in ["BIST", "EMTIA", "MACRO"]:
-            df_1d = yf.download(symbol, period="6mo", interval="1d", progress=False)
+            df_1d = yf.download(symbol, period="6mo", interval="1d", progress=False, timeout=15)
             df_1d = clean_yf_df(df_1d)
             
-            df_1h = yf.download(symbol, period="2mo", interval="1h", progress=False)
+            df_1h = yf.download(symbol, period="2mo", interval="1h", progress=False, timeout=15)
             df_1h = clean_yf_df(df_1h)
             
             if not df_1h.empty:
@@ -120,10 +123,10 @@ def fetch_multi_timeframe_data(symbol, market):
                 
         elif "CRYPTO" in market:
             yf_ticker = symbol.replace("/USDT", "-USD")
-            df_1d = yf.download(yf_ticker, period="6mo", interval="1d", progress=False)
+            df_1d = yf.download(yf_ticker, period="6mo", interval="1d", progress=False, timeout=15)
             df_1d = clean_yf_df(df_1d)
             
-            df_1h = yf.download(yf_ticker, period="2mo", interval="1h", progress=False)
+            df_1h = yf.download(yf_ticker, period="2mo", interval="1h", progress=False, timeout=15)
             df_1h = clean_yf_df(df_1h)
             
             if not df_1h.empty:

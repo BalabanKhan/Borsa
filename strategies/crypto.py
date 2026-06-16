@@ -730,7 +730,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 market="KRIPTO", is_long=True
             )
             _conv_sn_long = calculate_conviction(_scores_sn_long, weights=SNIPER_CRYPTO_WEIGHTS)
-            if _conv_sn_long.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+            if _conv_sn_long.grade == CONVICTION_STRONG:
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "KRIPTO",
                     "strategy": "KRİPTO 6: KESKİN NİŞANCI (SNIPER)", "signal": "AL",
@@ -765,7 +765,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 market="KRIPTO", is_long=False, funding_rate=funding_rate
             )
             _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS)
-            if _conv_sn_short.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+            if _conv_sn_short.grade == CONVICTION_STRONG:
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "KRIPTO",
                     "strategy": "KRİPTO SHORT 5: KESKİN NİŞANCI (SNIPER)", "signal": "SAT",

@@ -507,19 +507,12 @@ def score_penalty_level(consecutive_sl: int) -> float:
 def score_bbw_squeeze(bbw: float, kcw: float) -> float:
     """
     Sniper Kanun 1: Volatilite Patlaması (BBW >= KCW).
-    Sert 'if' yerine lineer soft skorlama.
+    Sıkılaştırılmış Kural: Tolerans kaldırıldı, ikili (binary) 0 veya 100 puan.
     """
     if _is_nan(bbw) or _is_nan(kcw) or kcw == 0:
         return 0.0
     if bbw >= kcw:
         return 100.0  # Tam isabet (Patlama gerçekleşti)
-    
-    # Ne kadar geride? %10 tolerans.
-    deficit = kcw - bbw
-    max_tolerance = kcw * 0.10
-    if deficit < max_tolerance:
-        penalty_pct = deficit / max_tolerance
-        return 100.0 * (1.0 - penalty_pct)
     return 0.0
 
 def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> float:
@@ -1251,6 +1244,12 @@ def build_sniper_scores(
         # Aşırı şişmiş seviyelerden (üst bandın çok yakını) giriş yapılmasını önlemek için max 0.85 yapıldı.
         pb_min = 0.0
         pb_max = 0.85
+
+    # Formasyon Kontrolü: FVG, SFP veya Sıkışma (Squeeze) Kırılımından en az biri olmalı
+    # Hiçbiri yoksa ağır ceza puanı uygulayarak puanı düşür
+    has_squeeze_breakout = bbw >= kcw
+    if not fvg_present and not sfp_present and not has_squeeze_breakout:
+        conflict_penalty += 30.0
 
     return {
         "bbw_squeeze":   score_bbw_squeeze(bbw, kcw),
