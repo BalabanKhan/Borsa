@@ -551,37 +551,39 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
 
     obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation(df_1d, max_change_pct=7.0)
     if obv_ok and obv_box_high is not None:
-        # RED-12: SL kutu ortasına indir — tepeden retest'te patlamayı engelle
-        sl = (obv_box_high + obv_box_low) / 2
         cmf_val = calculate_cmf(df_1d)
-        cmf_label = f"CMF: {cmf_val:.3f}" if cmf_val is not None else "CMF: N/A"
-        _tp8 = current_price + (dynamic_sl_dist * 3.0)
-        _rr8 = abs(_tp8 - current_price) / max(abs(current_price - sl), 1e-8)
-        _scores8 = build_dip_scores(
-            rsi_daily=last_1d.get('RSI_14', 50), rsi_hourly=last_1h.get('RSI_14', 50),
-            rsi_prev=prev_1h.get('RSI_14', 50) if len(df_1h) >= 2 else 50,
-            price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'),
-            volume=last_1h.get('volume', 0), vol_sma=last_1h.get('vol_sma_20', 0),
-            dollar_vol=last_1h.get('volume', 0) * current_price,
-            rr=_rr8, has_engulfing=False, regime=bist_regime,
-            macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
-            cmf=cmf_val if cmf_val is not None else 0.0
-        )
-        _conv8 = calculate_conviction(_scores8)
-        if _conv8.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                "ticker": symbol, "market": "BIST",
-                "strategy": "BIST 8: SESSİZ BİRİKİM RADARI (OBV)", "signal": "AL",
-                "entry_price": current_price, "sl": sl, "tp": _tp8,
-                "conviction_score": _conv8.total_score, "conviction_grade": _conv8.grade, "conviction_details": _conv8.component_scores,
-                "position_size_pct": _conv8.position_size_pct,
-                "reason": (
-                    f"🕵️ Sessiz Birikim + CMF Onaylı!\n"
-                    f"20 gün yatay kutu: {obv_box_low:.2f} - {obv_box_high:.2f}\n"
-                    f"OBV sürekli yeni tepeler yapıyor + {cmf_label}\n"
-                    f"Kutu direnci hacimli kırıldı → Ralli başlıyor."
-                ) + _conv8.to_reason_suffix()
-            })
+        # Wash trade / blok virman engellemesi için CMF >= 0.05 şartı
+        if cmf_val is not None and not pd.isna(cmf_val) and cmf_val >= 0.05:
+            # RED-12: SL kutu ortasına indir — tepeden retest'te patlamayı engelle
+            sl = (obv_box_high + obv_box_low) / 2
+            cmf_label = f"CMF: {cmf_val:.3f}"
+            _tp8 = current_price + (dynamic_sl_dist * 3.0)
+            _rr8 = abs(_tp8 - current_price) / max(abs(current_price - sl), 1e-8)
+            _scores8 = build_dip_scores(
+                rsi_daily=last_1d.get('RSI_14', 50), rsi_hourly=last_1h.get('RSI_14', 50),
+                rsi_prev=prev_1h.get('RSI_14', 50) if len(df_1h) >= 2 else 50,
+                price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'),
+                volume=last_1h.get('volume', 0), vol_sma=last_1h.get('vol_sma_20', 0),
+                dollar_vol=last_1h.get('volume', 0) * current_price,
+                rr=_rr8, has_engulfing=False, regime=bist_regime,
+                macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+                cmf=cmf_val
+            )
+            _conv8 = calculate_conviction(_scores8)
+            if _conv8.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                    "ticker": symbol, "market": "BIST",
+                    "strategy": "BIST 8: SESSİZ BİRİKİM RADARI (OBV)", "signal": "AL",
+                    "entry_price": current_price, "sl": sl, "tp": _tp8,
+                    "conviction_score": _conv8.total_score, "conviction_grade": _conv8.grade, "conviction_details": _conv8.component_scores,
+                    "position_size_pct": _conv8.position_size_pct,
+                    "reason": (
+                        f"🕵️ Sessiz Birikim + CMF Onaylı!\n"
+                        f"20 gün yatay kutu: {obv_box_low:.2f} - {obv_box_high:.2f}\n"
+                        f"OBV sürekli yeni tepeler yapıyor + {cmf_label}\n"
+                        f"Kutu direnci hacimli kırıldı → Ralli başlıyor."
+                    ) + _conv8.to_reason_suffix()
+                })
 
     # ════════════════════════════════════════
     # BIST 10: KESKİN NİŞANCI (SNIPER)

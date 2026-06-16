@@ -899,13 +899,17 @@ def detect_obv_accumulation(df, max_change_pct=8.0):
     if 'OBV' not in df.columns:
         return False, None, None
 
-    recent = df.iloc[-config.IND_OBV_ACC_PERIOD:]
-    price_chg = abs((recent['close'].iloc[-1] - recent['close'].iloc[0]) / recent['close'].iloc[0]) * 100
+    # HATA DÜZELTME: Kutu sınırları (box_high, box_low) hesaplanırken 
+    # son kırılım mumu (index -1) hariç tutulmalıdır. Aksi halde box_high en son kapanışa
+    # eşit olacağı için 'last['close'] <= box_high' kontrolü her zaman True döner ve sinyal bloke olur.
+    recent_box = df.iloc[-config.IND_OBV_ACC_PERIOD - 1 : -1]
+    
+    price_chg = abs((recent_box['close'].iloc[-1] - recent_box['close'].iloc[0]) / recent_box['close'].iloc[0]) * 100
     if price_chg > max_change_pct:
         return False, None, None
 
-    box_high = float(recent['close'].max())
-    box_low = float(recent['close'].min())
+    box_high = float(recent_box['close'].max())
+    box_low = float(recent_box['close'].min())
 
     obv_short = df['OBV'].iloc[-config.IND_OBV_ACC_SHORT_PERIOD:].mean()
     obv_long = df['OBV'].iloc[-config.IND_OBV_ACC_PERIOD:].mean()
