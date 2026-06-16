@@ -254,8 +254,13 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                             if not has_unlocks and funding_rate <= 0.0:
                                 # AM-03: Mutlak saatlik hacim eşiği
                                 if _has_absolute_hourly_volume(last_4h['volume'], current_price, "KRIPTO"):
-                                    sl = current_price * 0.95
-                                    sl_dist = abs(current_price - sl)
+                                    # Dinamik ATR tabanlı stop: ATR * Çarpan (Kripto için 2.2), min %4, max %7 genişlik
+                                    atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
+                                    if atr_val is None or pd.isna(atr_val): 
+                                        atr_val = current_price * 0.02
+                                    raw_atr_sl = config.ATR_MULTIPLIER_CRYPTO * atr_val
+                                    sl_dist = min(max(raw_atr_sl, current_price * 0.04), current_price * 0.07)
+                                    sl = current_price - sl_dist
                                     _tp_c3 = current_price + (sl_dist * 3.0)
                                     _rr_c3 = abs(_tp_c3 - current_price) / max(abs(current_price - sl), 1e-8)
                                     dm_ratio = _get_darth_maul_ratio(last_4h)
@@ -727,8 +732,10 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
             sweep_ok_long, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
             has_sfp_long = sweep_ok_long
             
-            sl_long = current_price * 0.95
-            _tp_sn_long = current_price * 1.10
+            # Dinamik Stop Loss: Alt Bollinger Bandının %2.0 altı veya en fazla %7 genişlik (çok uzaklaşmayı önlemek için)
+            sl_long = max(bbl * 0.98, current_price * 0.93)
+            # Dinamik Take Profit: 2:1 risk/ödül oranı ile
+            _tp_sn_long = current_price + 2.0 * (current_price - sl_long)
             _rr_sn_long = abs(_tp_sn_long - current_price) / max(abs(current_price - sl_long), 1e-8)
             
             _scores_sn_long = build_sniper_scores(
@@ -751,7 +758,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     "reason": (
                         f"🎯 Keskin Nişancı LONG!\n"
                         f"Kanunlar: Squeeze: {_scores_sn_long['bbw_squeeze']:.1f}, %B: {_scores_sn_long['percent_b']:.1f}, FVG/SFP: {_scores_sn_long['fvg_sfp']:.1f}\n"
-                        f"SL: %5 Dar Stop ({sl_long:.2f})"
+                        f"SL: Bollinger Alt Band Altı ({sl_long:.2f})"
                     ) + _conv_sn_long.to_reason_suffix()
                 })
 
