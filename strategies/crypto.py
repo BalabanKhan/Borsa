@@ -745,39 +745,40 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 })
 
             # 🎯 SHORT Keskin Nişancı (SHORT-4 in implementation_plan.md)
-            has_fvg_short, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bearish")
-            swing_highs_s = sniper_find_swing_points(df_1h_sniper, point_type="high")
-            sweep_ok_short, _ = sniper_detect_sweep(df_1h_sniper, swing_highs_s, point_type="high")
-            has_sfp_short = sweep_ok_short
-            
-            sl_short = current_price * 1.05
-            _tp_sn_short = current_price * 0.90
-            _rr_sn_short = abs(_tp_sn_short - current_price) / max(abs(sl_short - current_price), 1e-8)
-            funding_rate = get_funding_rate(symbol)
-            
-            _scores_sn_short = build_sniper_scores(
-                price=current_price, ema_fast=last_1h_s.get(f'EMA_{config.IND_EMA_FAST}'), ema_mid=last_1h_s.get(f'EMA_{config.IND_EMA_21}'), ema_slow=None,
-                rsi=last_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=prev_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'),
-                volume=last_1h_s.get('volume', 0), vol_sma=guarded_vol_sma, dollar_vol=last_1h_s.get('volume', 0) * current_price,
-                rr=_rr_sn_short, regime="BEAR" if not btc_ok else "BULL",
-                macro_aligned=not btc_ok, consecutive_sl=_get_consecutive_sl(symbol),
-                bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg_short, sfp_present=has_sfp_short,
-                market="KRIPTO", is_long=False, funding_rate=funding_rate
-            )
-            _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS)
-            if _conv_sn_short.grade == CONVICTION_STRONG:
-                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                    "ticker": symbol, "market": "KRIPTO",
-                    "strategy": "KRİPTO SHORT 5: KESKİN NİŞANCI (SNIPER)", "signal": "SAT",
-                    "entry_price": current_price, "sl": sl_short, "tp": _tp_sn_short,
-                    "conviction_score": _conv_sn_short.total_score, "conviction_grade": _conv_sn_short.grade, "conviction_details": _conv_sn_short.component_scores,
-                    "position_size_pct": _conv_sn_short.position_size_pct,
-                    "reason": (
-                        f"🎯 Keskin Nişancı SHORT!\n"
-                        f"Kanunlar: Squeeze: {_scores_sn_short['bbw_squeeze']:.1f}, %B: {_scores_sn_short['percent_b']:.1f}, FVG/SFP: {_scores_sn_short['fvg_sfp']:.1f}\n"
-                        f"SL: %5 Dar Stop ({sl_short:.2f})"
-                    ) + _conv_sn_short.to_reason_suffix()
-                })
+            if not btc_ok:
+                has_fvg_short, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bearish")
+                swing_highs_s = sniper_find_swing_points(df_1h_sniper, point_type="high")
+                sweep_ok_short, _ = sniper_detect_sweep(df_1h_sniper, swing_highs_s, point_type="high")
+                has_sfp_short = sweep_ok_short
+                
+                sl_short = current_price * 1.05
+                _tp_sn_short = current_price * 0.90
+                _rr_sn_short = abs(_tp_sn_short - current_price) / max(abs(sl_short - current_price), 1e-8)
+                funding_rate = get_funding_rate(symbol)
+                
+                _scores_sn_short = build_sniper_scores(
+                    price=current_price, ema_fast=last_1h_s.get(f'EMA_{config.IND_EMA_FAST}'), ema_mid=last_1h_s.get(f'EMA_{config.IND_EMA_21}'), ema_slow=None,
+                    rsi=last_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=prev_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'),
+                    volume=last_1h_s.get('volume', 0), vol_sma=guarded_vol_sma, dollar_vol=last_1h_s.get('volume', 0) * current_price,
+                    rr=_rr_sn_short, regime="BEAR" if not btc_ok else "BULL",
+                    macro_aligned=not btc_ok, consecutive_sl=_get_consecutive_sl(symbol),
+                    bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg_short, sfp_present=has_sfp_short,
+                    market="KRIPTO", is_long=False, funding_rate=funding_rate
+                )
+                _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS)
+                if _conv_sn_short.grade == CONVICTION_STRONG:
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                        "ticker": symbol, "market": "KRIPTO",
+                        "strategy": "KRİPTO SHORT 5: KESKİN NİŞANCI (SNIPER)", "signal": "SAT",
+                        "entry_price": current_price, "sl": sl_short, "tp": _tp_sn_short,
+                        "conviction_score": _conv_sn_short.total_score, "conviction_grade": _conv_sn_short.grade, "conviction_details": _conv_sn_short.component_scores,
+                        "position_size_pct": _conv_sn_short.position_size_pct,
+                        "reason": (
+                            f"🎯 Keskin Nişancı SHORT!\n"
+                            f"Kanunlar: Squeeze: {_scores_sn_short['bbw_squeeze']:.1f}, %B: {_scores_sn_short['percent_b']:.1f}, FVG/SFP: {_scores_sn_short['fvg_sfp']:.1f}\n"
+                            f"SL: %5 Dar Stop ({sl_short:.2f})"
+                        ) + _conv_sn_short.to_reason_suffix()
+                    })
 
     return signals
 

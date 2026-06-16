@@ -112,7 +112,7 @@ def fetch_multi_timeframe_data(symbol, market):
     
     try:
         if market in ["BIST", "EMTIA", "MACRO"]:
-            df_1d = yf.download(symbol, period="6mo", interval="1d", progress=False, timeout=15)
+            df_1d = yf.download(symbol, period="1y", interval="1d", progress=False, timeout=15)
             df_1d = clean_yf_df(df_1d)
             
             df_1h = yf.download(symbol, period="2mo", interval="1h", progress=False, timeout=15)
@@ -123,7 +123,7 @@ def fetch_multi_timeframe_data(symbol, market):
                 
         elif "CRYPTO" in market:
             yf_ticker = symbol.replace("/USDT", "-USD")
-            df_1d = yf.download(yf_ticker, period="6mo", interval="1d", progress=False, timeout=15)
+            df_1d = yf.download(yf_ticker, period="1y", interval="1d", progress=False, timeout=15)
             df_1d = clean_yf_df(df_1d)
             
             df_1h = yf.download(yf_ticker, period="2mo", interval="1h", progress=False, timeout=15)
