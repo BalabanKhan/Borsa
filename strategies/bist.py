@@ -109,6 +109,14 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     prev_1h = df_1h.iloc[-2]
     current_price = last_1h['close']
 
+    # 1. HARD BLOCK - Likidite ve Fiyat Filtreleri (Sistemik Yük Düşürme)
+    volume_ma20_tl = (df_1d['close'] * df_1d['volume']).rolling(20).mean()
+    if volume_ma20_tl.empty or pd.isna(volume_ma20_tl.iloc[-1]) or volume_ma20_tl.iloc[-1] < 20_000_000:
+        return signals
+    if current_price < 3.0:
+        return signals
+
+
     atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val): atr_val = current_price * 0.02
     # RED-08: ATR Cap — flash crash'te devasa stop mesafesini engelle
@@ -606,55 +614,63 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     bb_upper_col = [c for c in df_1h_sniper.columns if 'BBU' in c]
     bb_lower_col = [c for c in df_1h_sniper.columns if 'BBL' in c]
     bb_mid_col = [c for c in df_1h_sniper.columns if 'BBM' in c]
-    bb_pct_col = [c for c in df_1h_sniper.columns if 'BBP' in c]
     
-    if kc_upper_col and kc_lower_col and bb_upper_col and bb_lower_col and bb_mid_col and bb_pct_col:
-        last_1h_s = df_1h_sniper.iloc[-1]
-        kcu = last_1h_s[kc_upper_col[0]]
-        kcl = last_1h_s[kc_lower_col[0]]
-        bbu = last_1h_s[bb_upper_col[0]]
-        bbl = last_1h_s[bb_lower_col[0]]
-        bbm = last_1h_s[bb_mid_col[0]]
-        bb_pct = last_1h_s[bb_pct_col[0]]
+    if kc_upper_col and kc_lower_col and bb_upper_col and bb_lower_col and bb_mid_col:
+        bbu_s = df_1h_sniper[bb_upper_col[0]]
+        bbl_s = df_1h_sniper[bb_lower_col[0]]
+        bbm_s = df_1h_sniper[bb_mid_col[0]]
         
-        bbw = (bbu - bbl) / bbm if bbm != 0 else 0
-        kcw = (kcu - kcl) / bbm if bbm != 0 else 0
+        bbw_series = (bbu_s - bbl_s) / bbm_s
+        bbw_lowest_30 = bbw_series.rolling(10).quantile(0.3)
+        is_squeeze = bbw_series.iloc[-1] <= bbw_lowest_30.iloc[-1]
         
-        has_fvg, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bullish")
-        swing_lows_s = sniper_find_swing_points(df_1h_sniper, point_type="low")
-        sweep_ok, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
-        has_sfp = sweep_ok
+        bb_pct_series = (df_1h_sniper['close'] - bbl_s) / (bbu_s - bbl_s)
+        has_bb_pct_touch = (bb_pct_series.iloc[-3:] <= 0.1).any()
         
-        # Dinamik Stop Loss: Alt Bollinger Bandının %1.5 altı veya en fazla %5 genişlik (çok uzaklaşmayı önlemek için)
-        sl = max(bbl * 0.985, current_price * 0.95)
-        # Dinamik Take Profit: En az 2:1 risk/ödül oranı ile
-        _tp_sn = current_price + 2.0 * (current_price - sl)
-        _rr_sn = abs(_tp_sn - current_price) / max(abs(current_price - sl), 1e-8)
-        guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h.get('vol_sma_20', 0))
-        
-        _scores_sn = build_sniper_scores(
-            price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
-            rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
-            volume=last_1h.get('volume', 0), vol_sma=guarded_vol_sma, dollar_vol=last_1h.get('volume', 0) * current_price,
-            rr=_rr_sn, regime=bist_regime,
-            macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol),
-            bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg, sfp_present=has_sfp,
-            market="BIST"
-        )
-        _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS)
-        if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
-            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                "ticker": symbol, "market": "BIST",
-                "strategy": "BIST 10: KESKİN NİŞANCI (SNIPER)", "signal": "AL",
-                "entry_price": current_price, "sl": sl, "tp": _tp_sn,
-                "conviction_score": _conv_sn.total_score, "conviction_grade": _conv_sn.grade, "conviction_details": _conv_sn.component_scores,
-                "position_size_pct": _conv_sn.position_size_pct,
-                "reason": (
-                    f"🎯 Keskin Nişancı!\n"
-                    f"Kanunlar: Squeeze: {_scores_sn['bbw_squeeze']:.1f}, %B: {_scores_sn['percent_b']:.1f}, FVG/SFP: {_scores_sn['fvg_sfp']:.1f}\n"
-                    f"SL: Bollinger Alt Band Altı ({sl:.2f})"
-                ) + _conv_sn.to_reason_suffix()
-            })
+        # GATEKEEPER: Bollinger Sıkışması veya son 3 barda Alt Band Teması yoksa devam etme
+        if is_squeeze or has_bb_pct_touch:
+            bbw = bbw_series.iloc[-1]
+            kcu = df_1h_sniper[kc_upper_col[0]].iloc[-1]
+            kcl = df_1h_sniper[kc_lower_col[0]].iloc[-1]
+            kcw = (kcu - kcl) / bbm_s.iloc[-1] if bbm_s.iloc[-1] != 0 else 0
+            bb_pct = bb_pct_series.iloc[-1]
+            
+            has_fvg, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bullish")
+            swing_lows_s = sniper_find_swing_points(df_1h_sniper, point_type="low")
+            sweep_ok, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
+            has_sfp = sweep_ok
+            
+            # Dinamik Stop Loss: Alt Bollinger Bandının %1.5 altı veya en fazla %5 genişlik
+            sl = max(bbl_s.iloc[-1] * 0.985, current_price * 0.95)
+            # Dinamik Take Profit: En az 2:1 risk/ödül oranı ile
+            _tp_sn = current_price + 2.0 * (current_price - sl)
+            _rr_sn = abs(_tp_sn - current_price) / max(abs(current_price - sl), 1e-8)
+            guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h.get('vol_sma_20', 0))
+            
+            _scores_sn = build_sniper_scores(
+                price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
+                volume=last_1h.get('volume', 0), vol_sma=guarded_vol_sma, dollar_vol=last_1h.get('volume', 0) * current_price,
+                rr=_rr_sn, regime=bist_regime,
+                macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol),
+                bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg, sfp_present=has_sfp,
+                market="BIST", is_squeeze=is_squeeze
+            )
+            _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS)
+            if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
+                signals.append({
+                    "raw_indicators": _extract_raw_indicators(locals()),
+                    "ticker": symbol, "market": "BIST",
+                    "strategy": "BIST 10: KESKİN NİŞANCI (SNIPER)", "signal": "AL",
+                    "entry_price": current_price, "sl": sl, "tp": _tp_sn,
+                    "conviction_score": _conv_sn.total_score, "conviction_grade": _conv_sn.grade, "conviction_details": _conv_sn.component_scores,
+                    "position_size_pct": _conv_sn.position_size_pct,
+                    "reason": (
+                        f"🎯 Keskin Nişancı!\n"
+                        f"Kanunlar: Squeeze: {_scores_sn['bbw_squeeze']:.1f}, %B: {_scores_sn['percent_b']:.1f}, FVG/SFP: {_scores_sn['fvg_sfp']:.1f}\n"
+                        f"SL: Bollinger Alt Band Altı ({sl:.2f})"
+                    ) + _conv_sn.to_reason_suffix()
+                })
 
     return signals
 

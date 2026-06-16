@@ -1214,6 +1214,7 @@ def build_sniper_scores(
     is_liquidity_window=True,
     strategy_type="TREND_BREAKOUT",
     is_long=True,
+    is_squeeze=None,
 ):
     """Keskin Nişancı stratejisi (BIST Sniper, KRIPTO Sniper) için skor paketi."""
     from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
@@ -1283,10 +1284,33 @@ def build_sniper_scores(
         if dist_ema21 <= 0.015:
             conflict_penalty += 5.0
 
+    # BIST 10 Sniper Puanlama Hiyerarşisi ve Çarpanı
+    if market == "BIST":
+        sfp_val = 40.0 if sfp_present else 0.0
+        fvg_val = 30.0 if fvg_present else 0.0
+        is_sq = is_squeeze if is_squeeze is not None else (bbw >= kcw * 0.90)
+        squeeze_val = 20.0 if is_sq else 0.0
+        pb_val = 10.0 if pb <= 0.1 else 0.0
+        
+        base_points = sfp_val + fvg_val + squeeze_val + pb_val
+        if sfp_present and fvg_present:
+            total_setup = base_points * 1.5
+        else:
+            total_setup = base_points
+        total_setup = min(total_setup, 100.0)
+        
+        bbw_score = total_setup
+        pb_score = total_setup
+        fvg_sfp_score = total_setup
+    else:
+        bbw_score = score_bbw_squeeze(bbw, kcw)
+        pb_score = score_percent_b(pb, pb_min=pb_min, pb_max=pb_max)
+        fvg_sfp_score = score_fvg_sfp(fvg_present, sfp_present)
+
     return {
-        "bbw_squeeze":   score_bbw_squeeze(bbw, kcw),
-        "percent_b":     score_percent_b(pb, pb_min=pb_min, pb_max=pb_max),
-        "fvg_sfp":       score_fvg_sfp(fvg_present, sfp_present),
+        "bbw_squeeze":   bbw_score,
+        "percent_b":     pb_score,
+        "fvg_sfp":       fvg_sfp_score,
         "volume_ratio":  score_volume_ratio(volume, vol_sma),
         "dollar_volume": score_dollar_volume(dollar_vol, market),
         "rr_ratio":      score_rr_ratio(rr, regime),
