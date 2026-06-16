@@ -497,6 +497,12 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                         })
 
     # BIST 7: VWAP KURUMSAL MIKNATISI
+    # Pazartesi-Salı günleri haftalık reset gürültüsünü engelle (Çarşamba ve sonrası aktiftir)
+    last_1h_time = pd.to_datetime(last_1h.name) if last_1h.name is not None else None
+    is_not_mon_tue = True
+    if last_1h_time is not None and not pd.isna(last_1h_time):
+        is_not_mon_tue = last_1h_time.weekday() not in (0, 1)
+
     sma_50 = last_1d.get('SMA_50')
     sma_200 = last_1d.get('SMA_200')
     is_bear_regime = (not pd.isna(sma_50) and not pd.isna(sma_200) and current_price < sma_50 and current_price < sma_200)
@@ -504,7 +510,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     mtf_trend_down = (not pd.isna(ema_21_daily) and last_1d['close'] < ema_21_daily)
     macro_gravity_ok = not xu100_down
 
-    if not is_bear_regime and not mtf_trend_down and macro_gravity_ok:
+    if not is_bear_regime and not mtf_trend_down and macro_gravity_ok and is_not_mon_tue:
         vwap_val = calculate_anchored_vwap(df_1h, anchor_type="weekly")
         if vwap_val is not None:
             bounce_ok, wick_low = detect_vwap_bounce(df_1h, vwap_val)
@@ -512,7 +518,10 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 # RED-01: Volume SMA manipülasyon koruması
                 vol_sma_20 = last_1h.get('vol_sma_20')
                 guarded_vol_sma = _apply_volume_sma_guard(df_1h, vol_sma_20)
-                if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                
+                # Kurumsal limit emir emilimi (absorption) nedeniyle temasta hacim patlaması aranmaz.
+                # Sadece tahtanın likit olduğunu teyit etmek için asgari mutlak TL hacmi kontrol edilir.
+                if _has_absolute_hourly_volume(last_1h['volume'], current_price, "BIST"):
                     sl = wick_low * 0.995
                     _tp7 = current_price + (dynamic_sl_dist * 3.0)
                     _rr7 = abs(_tp7 - current_price) / max(abs(current_price - sl), 1e-8)
