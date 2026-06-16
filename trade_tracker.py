@@ -13,7 +13,7 @@ import threading
 from datetime import datetime, timezone
 from data_sources import get_funding_rate
 from data_guard import validate_signal_output
-from circuit_breaker_v5 import cb_observer_v5
+from circuit_breaker import cb_observer
 
 # V3.2 Kaos Çözümleri
 from penalty_box import record_asset_sl, record_asset_tp
@@ -1127,7 +1127,7 @@ def check_active_trades(current_prices_dict):
             if msg:
                 cb_notifications.append(msg)
                 
-        cb_observer_v5.subscribe(_cb_listener)
+        cb_observer.subscribe(_cb_listener)
         try:
             for ct in closed_trades:
                 status = ct.get("status", "")
@@ -1167,7 +1167,7 @@ def check_active_trades(current_prices_dict):
                     rr_achieved = -rr_achieved
                 
                 if "SL" in status or "BLACK_SWAN" in status:
-                    cb_observer_v5.on_trade_closed({
+                    cb_observer.on_trade_closed({
                         "ticker": ticker_ct,
                         "strategy": strategy_ct,
                         "pnl_percent": -abs(pnl_pct) if pnl_pct != 0 else -0.01
@@ -1191,7 +1191,7 @@ def check_active_trades(current_prices_dict):
                         })
                     
                 elif "TP" in status:
-                    cb_observer_v5.on_trade_closed({
+                    cb_observer.on_trade_closed({
                         "ticker": ticker_ct,
                         "strategy": strategy_ct,
                         "pnl_percent": abs(pnl_pct) if pnl_pct != 0 else 0.01
@@ -1224,7 +1224,7 @@ def check_active_trades(current_prices_dict):
                             "rr_achieved": round(rr_achieved, 2),
                         })
         finally:
-            cb_observer_v5.unsubscribe(_cb_listener)
+            cb_observer.unsubscribe(_cb_listener)
                 
         notifications.extend(cb_notifications)
 
