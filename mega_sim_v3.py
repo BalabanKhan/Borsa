@@ -134,16 +134,10 @@ def fetch_multi_timeframe_data(symbol, market):
         
     return df_1d, df_4h, df_1h
 
-# Makro Veriler (Gate 3 ve Zırhlar)
-print(f"{Colors.CYAN}Makro veriler çekiliyor (XU100, BTC, DXY)...{Colors.ENDC}")
-_, _, df_xu100 = fetch_multi_timeframe_data("XU100.IS", "MACRO")
-df_xu100 = apply_indicators(df_xu100)
-
-_, _, df_btc = fetch_multi_timeframe_data("BTC/USDT", "CRYPTO")
-df_btc = apply_indicators(df_btc)
-
-_, _, df_dxy = fetch_multi_timeframe_data("DX-Y.NYB", "MACRO")
-df_dxy = apply_indicators(df_dxy)
+# Makro veriler main altinda veya fonksiyon icinde cekilmeli.
+df_xu100 = pd.DataFrame()
+df_btc = pd.DataFrame()
+df_dxy = pd.DataFrame()
 
 # ══════════════════════════════════════════════════════════════════
 # SİMÜLASYON MOTORU
@@ -408,7 +402,17 @@ def print_executive_summary():
     print(f"{Colors.HEADER}════════════════════════════════════════════════════════════════════════════{Colors.ENDC}\n")
 
 if __name__ == "__main__":
-    print(f"{Colors.CYAN}{Colors.BOLD}MEGA ZAMAN MAKİNESİ BAŞLATILIYOR... (GERÇEK STRATEJİLER İLE){Colors.ENDC}")
+    print(f"{Colors.CYAN}Makro veriler çekiliyor (XU100, BTC, DXY)...{Colors.ENDC}")
+    _, _, df_xu100 = fetch_multi_timeframe_data("XU100.IS", "MACRO")
+    df_xu100 = apply_indicators(df_xu100)
+    
+    _, _, df_btc = fetch_multi_timeframe_data("BTC/USDT", "CRYPTO")
+    df_btc = apply_indicators(df_btc)
+    
+    _, _, df_dxy = fetch_multi_timeframe_data("DX-Y.NYB", "MACRO")
+    df_dxy = apply_indicators(df_dxy)
+    
+    print(f"{Colors.HEADER}{Colors.BOLD}🚀 MEGA SİMÜLASYON (30 GÜNLÜK SONUÇ ODAKLI) BAŞLIYOR...{Colors.ENDC}")
     
     run_simulation("BIST", TICKERS_BIST, "BIST STRATEJİLERİ")
     run_simulation("CRYPTO_LONG", TICKERS_CRYPTO_LONG, "KRİPTO LONG STRATEJİLERİ")

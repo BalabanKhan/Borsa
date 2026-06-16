@@ -65,6 +65,7 @@ from conviction_scorer import (
     score_regime, score_regime_short, score_engulfing,
     score_macro_alignment, score_penalty_level,
     CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH,
+    build_sniper_scores, SNIPER_CRYPTO_WEIGHTS
 )
 
 
@@ -675,7 +676,6 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     # ════════════════════════════════════════
     # KRİPTO 6: KESKİN NİŞANCI (SNIPER)
     # ════════════════════════════════════════
-    from conviction_scorer import build_sniper_scores, calculate_conviction, SNIPER_CRYPTO_WEIGHTS
     
     df_1h_sniper = get_crypto_1h_data(symbol)
     if df_1h_sniper is not None and not df_1h_sniper.empty:

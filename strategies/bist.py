@@ -58,7 +58,7 @@ from data_guard import guard_mtf_bundle, guard_signal_output
 from meta_engine import get_bist100_trend
 from conviction_scorer import (
     check_hard_blocks, calculate_conviction,
-    build_trend_scores, build_dip_scores, build_breakout_scores, build_short_scores,
+    build_trend_scores, build_dip_scores, build_breakout_scores, build_short_scores, build_sniper_scores, SNIPER_BIST_WEIGHTS,
     score_adx, score_rsi_oversold, score_rsi_trend, score_rsi_direction,
     score_volume_ratio, score_dollar_volume, score_rr_ratio,
     score_ema_alignment, score_ema_dip_distance, score_ema_short,
@@ -546,7 +546,6 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     # ════════════════════════════════════════
     # BIST 10: KESKİN NİŞANCI (SNIPER)
     # ════════════════════════════════════════
-    from conviction_scorer import build_sniper_scores, calculate_conviction, SNIPER_BIST_WEIGHTS
     
     df_1h_sniper = df_1h.copy()
     df_1h_sniper.ta.kc(length=20, scalar=1.5, append=True)
