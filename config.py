@@ -581,7 +581,7 @@ STRUCTURAL_STOP_ENABLED: bool = True          # EMA-20 yapısal trend desteği a
 
 # --- 15. Kripto Short-4 (Keskin Nişancı) ---
 SHORT4_BBP_MAX_PULLBACK = 1.0
-SHORT4_BBP_MIN_PULLBACK = 0.0
+SHORT4_BBP_MIN_PULLBACK = 0.15
 
 # ════════════════════════════════════════
 # 🚀 Vectorbt Yüksek Hızlı Backtest Motoru (V4.0)
