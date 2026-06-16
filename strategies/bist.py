@@ -55,7 +55,8 @@ from indicators import (
     sniper_calculate_ote_body,
 )
 from data_guard import guard_mtf_bundle, guard_signal_output
-from meta_engine import get_bist100_trend
+from meta_engine import get_bist100_trend, get_bist100_intraday_trend
+
 from conviction_scorer import (
     check_hard_blocks, calculate_conviction,
     build_trend_scores, build_dip_scores, build_breakout_scores, build_short_scores, build_sniper_scores, SNIPER_BIST_WEIGHTS,
@@ -695,12 +696,13 @@ def scan_orb_bist(symbol, df_15m):
 
     # 4. Endeks Korelasyonu
     bist100_trend = get_bist100_trend()
+    bist100_intraday_trend = get_bist100_intraday_trend()
 
     # LONG Kırılım (Candle Close > Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
     # LONG Kırılım (Candle Close > Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
     if current_price > cage_high and last['close'] > last['open']:
-        if bist100_trend != "BULL":
-             return signals  # Hard Block: Endeks Bullish değil
+        if bist100_trend == "BEAR" or bist100_intraday_trend == "BEAR":
+             return signals  # Hard Block: Endeks negatif (ekside)
 
         # ORB Hacim ve Gövde Kapanış Teyidi
         body_ok = not config.ORB_BODY_CLOSE_REQUIRED or (last['close'] > cage_high)
@@ -738,8 +740,9 @@ def scan_orb_bist(symbol, df_15m):
                 })
     # SHORT Kırılım (Candle Close < Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
     elif current_price < cage_low and last['close'] < last['open']:
-        if bist100_trend == "BULL":
+        if bist100_trend == "BULL" or bist100_intraday_trend == "BULL":
              return signals  # Hard Block: Endeks Bullish iken short açma
+
 
         # ORB Hacim ve Gövde Kapanış Teyidi
         body_ok = not config.ORB_BODY_CLOSE_REQUIRED or (last['close'] < cage_low)

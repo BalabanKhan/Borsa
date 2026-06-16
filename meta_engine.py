@@ -53,3 +53,41 @@ def get_bist100_trend() -> str:
         logging.warning(f"[meta_engine] BIST100 veri çekme hatası: {e}")
         # Hata anında varsa eski cache'i dön, yoksa NEUTRAL
         return _cache.get("trend", "NEUTRAL")
+
+_intraday_cache = {
+    "trend": "NEUTRAL",
+    "timestamp": datetime.min
+}
+
+def get_bist100_intraday_trend() -> str:
+    """
+    BIST100 (XU100.IS) endeksinin gün içi (intraday) rejimini döndürür.
+    Bugünkü fiyatın bugünkü açılış fiyatının üzerinde olup olmadığına bakar.
+    """
+    now = datetime.now()
+    if now - _intraday_cache["timestamp"] < timedelta(minutes=5):
+        return _intraday_cache["trend"]
+
+    try:
+        ticker = yf.Ticker("XU100.IS")
+        df = ticker.history(period="1d", interval="15m")
+        if df.empty:
+            return "NEUTRAL"
+        
+        first_bar = df.iloc[0]
+        last_bar = df.iloc[-1]
+        
+        open_val = float(first_bar['Open'])
+        current_val = float(last_bar['Close'])
+        
+        if math.isnan(open_val) or math.isnan(current_val):
+            return "NEUTRAL"
+            
+        trend = "BULL" if current_val >= open_val else "BEAR"
+        _intraday_cache["trend"] = trend
+        _intraday_cache["timestamp"] = now
+        return trend
+    except Exception as e:
+        logging.warning(f"[meta_engine] BIST100 intraday veri çekme hatası: {e}")
+        return _intraday_cache.get("trend", "NEUTRAL")
+
