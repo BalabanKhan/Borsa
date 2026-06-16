@@ -424,21 +424,12 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
         rs_strong, rs_trend_up, idx_stressed, idx_recovering = calculate_relative_strength(df_1d, xu100_daily)
         # RED-14: İmkansız AND gevşetmesi — endeks stres dışındaysa da kabul et
         if rs_strong and rs_trend_up and (idx_recovering or not idx_stressed):
-            # RS_ENTRY_TIMING_RSI_LIMIT: timing teyidi (RSI çok aşırı alımda olmamalı, pull-back fırsatı sunmalı)
-            rsi_timing_ok = True
-            if not pd.isna(last_1h.get('RSI_14')):
-                if last_1h['RSI_14'] > config.RS_ENTRY_TIMING_RSI_LIMIT:
-                    rsi_timing_ok = False
-
             # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
-            if rsi_timing_ok and not pd.isna(last_1h.get('vol_sma_20')):
+            if not pd.isna(last_1h.get('vol_sma_20')):
                 guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
                 if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
-                    swing_lows_rs = sniper_find_swing_points(df_1d, point_type="low", neighbors=2)
-                    if swing_lows_rs:
-                        sl = swing_lows_rs[-1][1] * 0.98
-                    else:
-                        sl = current_price * 0.95
+                    # Swing Low yerine dinamik ATR bazlı stop
+                    sl = current_price - dynamic_sl_dist
                     _tp6 = current_price + (dynamic_sl_dist * 3.0)
                     _rr6 = abs(_tp6 - current_price) / max(abs(current_price - sl), 1e-8)
                     _scores6 = build_trend_scores(
