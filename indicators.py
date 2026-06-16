@@ -938,6 +938,71 @@ def detect_obv_accumulation(df, max_change_pct=8.0):
     return True, box_high, box_low
 
 
+def detect_obv_accumulation_bist(df, max_change_pct=8.0):
+    """BIST 8 için özel yeni matematiksel mantık:
+    1. 18/20 Yatay Kutu: Son 20 mumdan en az 18'i dar bir kutu (max_change_pct) içinde kalmalı.
+    2. Kutu Zirvesinin %1-3.5 Yukarı Kırılımı: Son kapanış kutu zirvesinin %1.0 ile %3.5 üstünde olmalı.
+    3. En Yüksek OBV Kapanışı: Son günün OBV'si önceki 20 günün zirve OBV'sinden büyük olmalı.
+    """
+    if len(df) < config.IND_OBV_ACC_MIN_LEN:
+        return False, None, None
+
+    # Pandas Mutability koruması: kaynak DataFrame'i kirletme
+    df = df.copy()
+
+    if 'OBV' not in df.columns:
+        df.ta.obv(append=True)
+    if 'OBV' not in df.columns:
+        return False, None, None
+
+    # Son 20 günlük kapanışlar (kırılım mumu hariç)
+    closes = df['close'].iloc[-21:-1].tolist()
+    sorted_closes = sorted(closes)
+
+    # 18/20 Yatay Kutu Kontrolü
+    best_window = None
+    min_chg = float('inf')
+
+    # 20 elemandan ardışık 18 eleman alan pencereler: 0:18, 1:19, 2:20
+    for i in range(3):
+        w_low = sorted_closes[i]
+        w_high = sorted_closes[i + 17]
+        w_chg = ((w_high - w_low) / w_low) * 100
+        if w_chg <= max_change_pct and w_chg < min_chg:
+            min_chg = w_chg
+            best_window = (w_low, w_high)
+
+    if best_window is None:
+        return False, None, None
+
+    box_low, box_high = best_window
+
+    # Kutu Zirvesinin %1.0 - %3.5 Yukarı Kırılımı
+    last_close = float(df['close'].iloc[-1])
+    breakout_pct = ((last_close - box_high) / box_high) * 100
+    if not (1.0 <= breakout_pct <= 3.5):
+        return False, None, None
+
+    # En Yüksek OBV Kapanışı
+    last_obv = float(df['OBV'].iloc[-1])
+    prev_obv_max = float(df['OBV'].iloc[-21:-1].max())
+    if last_obv <= prev_obv_max:
+        return False, None, None
+
+    # OBV SMA Hizalama Kontrolü
+    if config.OBV_SMA_ALIGN_REQUIRED:
+        df['OBV_SMA'] = df['OBV'].rolling(config.OBV_SMA_PERIOD).mean()
+        if not pd.isna(df['OBV_SMA'].iloc[-1]) and df['OBV'].iloc[-1] <= df['OBV_SMA'].iloc[-1]:
+            return False, None, None
+
+    # Hacim Spike Kontrolü (Hacim ortalamasının üzerinde teyit)
+    vol_sma = df['volume'].rolling(config.IND_OBV_ACC_PERIOD).mean()
+    if not pd.isna(vol_sma.iloc[-1]) and df['volume'].iloc[-1] < vol_sma.iloc[-1] * config.IND_OBV_ACC_VOL_MULTIPLIER:
+        return False, None, None
+
+    return True, box_high, box_low
+
+
 def calculate_orb_cage(df_15m):
     """BIST 10:00-11:00 kafesi + günlük VWAP. Returns: (cage_high, cage_low, cage_mid, vwap)"""
     if df_15m is None or df_15m.empty:

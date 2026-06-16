@@ -143,8 +143,9 @@ BIST9_RVOL_MULTIPLIER = 1.5     # Kırılım mumunun hacmi, ortalama hacmin kaç
 BIST9_EMA_LENGTH = 21           # Onay için kullanılacak EMA periyodu
 BIST9_RVOL_PERIOD = 20          # RVOL hesaplaması için geriye dönük bakılacak gün sayısı
 BIST9_TRADE_START_HOUR = 11     # Sinyal arama başlangıç saati
-BIST9_TRADE_END_HOUR = 17       # Sinyal arama bitiş saati
+BIST9_TRADE_END_HOUR = 11       # Sinyal arama bitiş saati
 BIST9_TRADE_END_MINUTE = 30     # Sinyal arama bitiş dakikası
+
 
 ORB_CAGE_HOUR = 10              # Kafes oluşum saati
 ORB_MIN_BARS = 4                # Kafes hesaplama için minimum gün içi bar sayısı
@@ -543,7 +544,8 @@ OBV_SMA_ALIGN_REQUIRED: bool = True           # OBV'nin kendi 20 SMA'sı üzerin
 OBV_SMA_PERIOD: int = 20
 
 # --- 9. Opening Range Breakout (ORB) ---
-ORB_BODY_CLOSE_REQUIRED: bool = True          # ORB kırılımlarında mumun gövdeyle dışarıda kapanması koşulu
+ORB_BODY_CLOSE_REQUIRED: bool = False          # ORB kırılımlarında mumun gövdeyle dışarıda kapanması koşulu
+
 ORB_VOLUME_MULT: float = 1.3                  # ORB kırılım barı hacminin ortalama RVOL'e oranı
 
 # --- 10. Parabolic Reversal Short ---

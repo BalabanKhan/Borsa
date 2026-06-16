@@ -48,7 +48,7 @@ from indicators import (
     sniper_detect_msb, sniper_calculate_ote, sniper_detect_fvg,
     detect_sfp, detect_premium_rejection, detect_bearish_divergence,
     detect_bullish_divergence, detect_squeeze, calculate_relative_strength,
-    calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation,
+    calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation, detect_obv_accumulation_bist,
     calculate_orb_cage, calculate_time_specific_rvol,
     # AM Serisi
     check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
@@ -556,7 +556,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                             ) + _conv7.to_reason_suffix()
                         })
 
-    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation(df_1d, max_change_pct=7.0)
+    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation_bist(df_1d, max_change_pct=7.0)
     if obv_ok and obv_box_high is not None:
         cmf_val = calculate_cmf(df_1d)
         # Wash trade / blok virman engellemesi için CMF >= 0.05 şartı
@@ -697,24 +697,25 @@ def scan_orb_bist(symbol, df_15m):
     bist100_trend = get_bist100_trend()
 
     # LONG Kırılım (Candle Close > Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
+    # LONG Kırılım (Candle Close > Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
     if current_price > cage_high and last['close'] > last['open']:
         if bist100_trend != "BULL":
              return signals  # Hard Block: Endeks Bullish değil
 
         # ORB Hacim ve Gövde Kapanış Teyidi
-        # ORB_BODY_CLOSE_REQUIRED: Mum kapanış gövdesinin kafes üst sınırının üzerinde olmasını şart koşar.
-        # ORB_VOLUME_MULT: Kırılım hacminin, RVOL'in N katı olmasını şart koşar.
         body_ok = not config.ORB_BODY_CLOSE_REQUIRED or (last['close'] > cage_high)
         vol_ok = current_vol >= rvol * config.ORB_VOLUME_MULT
              
         if body_ok and vol_ok:
+            entry_price = cage_high * 1.001 if not config.ORB_BODY_CLOSE_REQUIRED else current_price
             _sl9u = cage_mid
-            _tp9u = current_price + tp_range
-            _rr9u = abs(_tp9u - current_price) / max(abs(current_price - _sl9u), 1e-8)
+            _risk9u = entry_price - _sl9u
+            _tp9u = entry_price + (_risk9u * 2.0)
+            _rr9u = 2.0
             _scores9u = build_breakout_scores(
-                bb_width=None, price=current_price,
+                bb_width=None, price=entry_price,
                 ema_fast=ema21, ema_mid=today_vwap, ema_slow=None,
-                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
+                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * entry_price,
                 rr=_rr9u, regime="BULL",
                 macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
             )
@@ -723,15 +724,15 @@ def scan_orb_bist(symbol, df_15m):
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "BIST",
                     "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "AL", "is_day_trade": True,
-                    "entry_price": current_price, "sl": cage_mid, "tp": _tp9u,
+                    "entry_price": entry_price, "sl": _sl9u, "tp": _tp9u,
                     "conviction_score": _conv9u.total_score, "conviction_grade": _conv9u.grade, "conviction_details": _conv9u.component_scores,
                     "position_size_pct": _conv9u.position_size_pct,
                     "reason": (
                         f"⏱️ Açılış Kafesi Kırılımı (ORB)\n"
                         f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f} (Genişlik: %{cage_width_pct:.2f})\n"
-                        f"📍 Fiyat: {current_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
+                        f"📍 Fiyat: {entry_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
                         f"📈 Hacim: {current_vol:,.0f} (Ort. RVOL: {rvol:,.0f}, Oran: {current_vol/max(rvol, 1e-8):.2f}x)\n"
-                        f"🎯 Hedef: +{tp_range:.2f} TL\n"
+                        f"🎯 Hedef: +{_tp9u-entry_price:.2f} TL\n"
                         f"⚠️ DAY TRADE: 17:55'te otomatik kapatılır."
                     ) + _conv9u.to_reason_suffix()
                 })
@@ -745,12 +746,14 @@ def scan_orb_bist(symbol, df_15m):
         vol_ok = current_vol >= rvol * config.ORB_VOLUME_MULT
              
         if body_ok and vol_ok:
+            entry_price = cage_low * 0.999 if not config.ORB_BODY_CLOSE_REQUIRED else current_price
             _sl9d = cage_mid
-            _tp9d = current_price - tp_range
-            _rr9d = abs(tp_range) / max(abs(cage_mid - current_price), 1e-8)
+            _risk9d = _sl9d - entry_price
+            _tp9d = entry_price - (_risk9d * 2.0)
+            _rr9d = 2.0
             _scores9d = build_breakout_scores(
-                bb_width=None, price=current_price, ema_fast=today_vwap, ema_mid=ema21, ema_slow=None,
-                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
+                bb_width=None, price=entry_price, ema_fast=today_vwap, ema_mid=ema21, ema_slow=None,
+                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * entry_price,
                 rr=_rr9d, regime="BEAR", macro_aligned=True,
                 consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
             )
@@ -759,15 +762,15 @@ def scan_orb_bist(symbol, df_15m):
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "BIST",
                     "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "SAT", "is_day_trade": True,
-                    "entry_price": current_price, "sl": cage_mid, "tp": _tp9d,
+                    "entry_price": entry_price, "sl": _sl9d, "tp": _tp9d,
                     "conviction_score": _conv9d.total_score, "conviction_grade": _conv9d.grade, "conviction_details": _conv9d.component_scores,
                     "position_size_pct": _conv9d.position_size_pct,
                     "reason": (
                         f"⏱️ Açılış Kafesi Aşağı Kırılımı (ORB)\n"
                         f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f} (Genişlik: %{cage_width_pct:.2f})\n"
-                        f"📍 Fiyat: {current_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
+                        f"📍 Fiyat: {entry_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
                         f"📈 Hacim: {current_vol:,.0f} (Ort. RVOL: {rvol:,.0f}, Oran: {current_vol/max(rvol, 1e-8):.2f}x)\n"
-                        f"🎯 Hedef: -{tp_range:.2f} TL\n"
+                        f"🎯 Hedef: -{entry_price-_tp9d:.2f} TL\n"
                         f"⚠️ DAY TRADE: 17:55'te otomatik kapatılır."
                     ) + _conv9d.to_reason_suffix()
                 })
