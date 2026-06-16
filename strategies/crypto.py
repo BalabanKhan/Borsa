@@ -69,7 +69,7 @@ from conviction_scorer import (
 
 
 
-from .helpers import _extract_raw_indicators, _apply_volume_sma_guard, _is_meaningful_volume, _get_consecutive_sl, _has_absolute_hourly_volume, _apply_rr_filter, _apply_regime_filter, _resolve_dual_signals, _adx_momentum_ok, _is_darth_maul, _is_unclosed_candle, _get_darth_maul_ratio
+from .helpers import _extract_raw_indicators, _apply_volume_sma_guard, _is_meaningful_volume, _get_consecutive_sl, _has_absolute_hourly_volume, _apply_rr_filter, _apply_regime_filter, _resolve_dual_signals, _adx_momentum_ok, _is_darth_maul, _is_unclosed_candle, _get_darth_maul_ratio, _is_funding_safe_for_short
 # ════════════════════════════════════════
 def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bias=0, metrics_collector=None):
     signals = []
