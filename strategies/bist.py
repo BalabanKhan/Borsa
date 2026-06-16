@@ -99,7 +99,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     df_1h.ta.ema(length=config.IND_EMA_21, append=True)
     df_1h['vol_sma_20'] = ta.sma(df_1h['volume'], length=config.IND_VOL_SMA_LENGTH)
 
-    if len(df_1d) < 2 or len(df_4h) < 2 or len(df_1h) < 3:
+    if len(df_1d) < 200 or len(df_4h) < 20 or len(df_1h) < 20:
         return signals
 
     last_1d = df_1d.iloc[-1]
