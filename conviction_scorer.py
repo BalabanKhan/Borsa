@@ -1253,7 +1253,35 @@ def build_sniper_scores(
     # Hiçbiri yoksa yumuşak ceza puanı uygulayarak puanı düşür (-12 puan)
     has_squeeze_breakout = bbw >= (kcw * 0.90)
     if not fvg_present and not sfp_present and not has_squeeze_breakout:
-        conflict_penalty += 12.0
+        conflict_penalty -= 12.0
+
+    # ════════════════════════════════════════
+    # Dinamik Confluence (Ödül / Ceza) Mekanizması
+    # ════════════════════════════════════════
+    
+    # 1. EMA 21 Yakınlığı (FOMO / Kovalamaca Cezası)
+    if ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
+        dist_ema21 = abs(price - ema_mid) / ema_mid
+        # Fiyat EMA 21'den %1.5'ten fazla uzaklaşmışsa lineer ceza uygula (maksimum -10 puan)
+        if dist_ema21 > 0.015:
+            excess = dist_ema21 - 0.015
+            penalty_val = min(excess * 200.0, 10.0)
+            conflict_penalty -= penalty_val
+
+    # 2. Squeeze & Hacim Confluence (Hacimli Patlama Ödülü)
+    if volume and vol_sma and vol_sma > 0:
+        vol_ratio = volume / vol_sma
+        if has_squeeze_breakout and vol_ratio >= 1.5:
+            # Sıkışma patlaması + Hacim patlaması varsa soft ödül (maksimum +8 puan)
+            bonus = min((vol_ratio - 1.5) * 8.0, 8.0)
+            conflict_penalty += bonus
+
+    # 3. SFP (Likidite Avı) + EMA Desteği Confluence (Güvenilir Dip Ödülü)
+    if sfp_present and ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
+        dist_ema21 = abs(price - ema_mid) / ema_mid
+        # Stop patlatma (SFP) gerçekleşmiş ve fiyat EMA 21 desteğine yakınsa (%1.5 veya daha yakın) +5 puan bonus
+        if dist_ema21 <= 0.015:
+            conflict_penalty += 5.0
 
     return {
         "bbw_squeeze":   score_bbw_squeeze(bbw, kcw),
