@@ -208,7 +208,7 @@ def _get_structural_floor(ticker: str, signal: str) -> float:
 
         if ticker.endswith(".IS"):
             # BIST
-            _, df_1h = get_bist_data(ticker)
+            _, _, df_1h = get_bist_data(ticker)
         elif "=" in ticker or "GLDTR" in ticker or "GMSTR" in ticker:
             # Emtia
             from data_sources import get_emtia_1h_data
