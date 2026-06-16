@@ -21,16 +21,20 @@ from telegram.constants import ParseMode
 import logging
 logger = logging.getLogger("quant_bot")
 logger.setLevel(logging.INFO)
-_file_handler = RotatingFileHandler(
-    "bot.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8"
-)
-_file_handler.setFormatter(logging.Formatter(
-    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-))
-logger.addHandler(_file_handler)
-_console_handler = logging.StreamHandler()
-_console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-logger.addHandler(_console_handler)
+logger.propagate = False
+
+if not logger.handlers:
+    _file_handler = RotatingFileHandler(
+        "bot.log", maxBytes=5*1024*1024, backupCount=3, encoding="utf-8"
+    )
+    _file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    ))
+    logger.addHandler(_file_handler)
+    
+    _console_handler = logging.StreamHandler()
+    _console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    logger.addHandler(_console_handler)
 
 from data_fetcher import scan_all_markets, get_current_prices
 from trade_tracker import add_trade, check_active_trades, load_trades
