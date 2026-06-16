@@ -1100,99 +1100,99 @@ def check_active_trades(current_prices_dict):
         cb_observer_v5.subscribe(_cb_listener)
         try:
             for ct in closed_trades:
-            status = ct.get("status", "")
-            ticker_ct = ct.get("ticker", "?")
-            strategy_ct = ct.get("strategy", "")
-            entry_price_ct = float(ct.get("entry_price", 0))
-            exit_price_ct = float(ct.get("exit_price", ct.get("entry_price", 0)))
-            signal_ct = ct.get("signal", "AL")
-            
-            # PnL hesabı
-            if entry_price_ct > 0 and exit_price_ct > 0:
-                if signal_ct == "AL":
-                    pnl_pct = ((exit_price_ct - entry_price_ct) / entry_price_ct) * 100
-                else:
-                    pnl_pct = ((entry_price_ct - exit_price_ct) / entry_price_ct) * 100
-            else:
-                pnl_pct = 0.0
-            
-            # Tutma süresi
-            hold_hours = 0.0
-            entry_time_ct = ct.get("entry_time", "")
-            if entry_time_ct:
-                try:
-                    if '+' in entry_time_ct:
-                        entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M:%S+00:00').replace(tzinfo=timezone.utc)
+                status = ct.get("status", "")
+                ticker_ct = ct.get("ticker", "?")
+                strategy_ct = ct.get("strategy", "")
+                entry_price_ct = float(ct.get("entry_price", 0))
+                exit_price_ct = float(ct.get("exit_price", ct.get("entry_price", 0)))
+                signal_ct = ct.get("signal", "AL")
+                
+                # PnL hesabı
+                if entry_price_ct > 0 and exit_price_ct > 0:
+                    if signal_ct == "AL":
+                        pnl_pct = ((exit_price_ct - entry_price_ct) / entry_price_ct) * 100
                     else:
-                        entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M').replace(tzinfo=timezone.utc)
-                    hold_hours = (datetime.now(timezone.utc) - entry_dt_ct).total_seconds() / 3600
-                except Exception:
-                    pass
-            
-            # R:R hesabı
-            sl_ct = float(ct.get("sl", 0))
-            risk_ct = abs(entry_price_ct - sl_ct) if abs(entry_price_ct - sl_ct) > 0 else 1e-8
-            rr_achieved = abs(exit_price_ct - entry_price_ct) / risk_ct
-            if pnl_pct < 0:
-                rr_achieved = -rr_achieved
-            
-            if "SL" in status or "BLACK_SWAN" in status:
-                cb_observer_v5.on_trade_closed({
-                    "ticker": ticker_ct,
-                    "strategy": strategy_ct,
-                    "pnl_percent": -abs(pnl_pct) if pnl_pct != 0 else -0.01
-                })
+                        pnl_pct = ((entry_price_ct - exit_price_ct) / entry_price_ct) * 100
+                else:
+                    pnl_pct = 0.0
                 
-                # V3.2 Kaos #4: Ceza Kutusu — SL kaydı
-                penalty_msg = record_asset_sl(ticker_ct)
-                if penalty_msg:
-                    cb_notifications.append(penalty_msg)
+                # Tutma süresi
+                hold_hours = 0.0
+                entry_time_ct = ct.get("entry_time", "")
+                if entry_time_ct:
+                    try:
+                        if '+' in entry_time_ct:
+                            entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M:%S+00:00').replace(tzinfo=timezone.utc)
+                        else:
+                            entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M').replace(tzinfo=timezone.utc)
+                        hold_hours = (datetime.now(timezone.utc) - entry_dt_ct).total_seconds() / 3600
+                    except Exception:
+                        pass
                 
-                # V3.2 Kaos #5: Strateji Karnesi — SL kaydı
-                if strategy_ct:
-                    record_trade_result(strategy_ct, {
+                # R:R hesabı
+                sl_ct = float(ct.get("sl", 0))
+                risk_ct = abs(entry_price_ct - sl_ct) if abs(entry_price_ct - sl_ct) > 0 else 1e-8
+                rr_achieved = abs(exit_price_ct - entry_price_ct) / risk_ct
+                if pnl_pct < 0:
+                    rr_achieved = -rr_achieved
+                
+                if "SL" in status or "BLACK_SWAN" in status:
+                    cb_observer_v5.on_trade_closed({
                         "ticker": ticker_ct,
-                        "outcome": "SL",
-                        "pnl_pct": pnl_pct,
-                        "hold_hours": hold_hours,
-                        "entry_time": entry_time_ct,
-                        "exit_time": ct.get("exit_time", ""),
-                        "rr_achieved": round(rr_achieved, 2),
+                        "strategy": strategy_ct,
+                        "pnl_percent": -abs(pnl_pct) if pnl_pct != 0 else -0.01
                     })
-                
-            elif "TP" in status:
-                cb_observer_v5.on_trade_closed({
-                    "ticker": ticker_ct,
-                    "strategy": strategy_ct,
-                    "pnl_percent": abs(pnl_pct) if pnl_pct != 0 else 0.01
-                })
-                
-                # V3.2 Kaos #4: Ceza Kutusu — TP kaydı (SL sayacı düşer)
-                record_asset_tp(ticker_ct)
-                
-                # V3.2 Kaos #5: Strateji Karnesi — TP kaydı
-                if strategy_ct:
-                    record_trade_result(strategy_ct, {
+                    
+                    # V3.2 Kaos #4: Ceza Kutusu — SL kaydı
+                    penalty_msg = record_asset_sl(ticker_ct)
+                    if penalty_msg:
+                        cb_notifications.append(penalty_msg)
+                    
+                    # V3.2 Kaos #5: Strateji Karnesi — SL kaydı
+                    if strategy_ct:
+                        record_trade_result(strategy_ct, {
+                            "ticker": ticker_ct,
+                            "outcome": "SL",
+                            "pnl_pct": pnl_pct,
+                            "hold_hours": hold_hours,
+                            "entry_time": entry_time_ct,
+                            "exit_time": ct.get("exit_time", ""),
+                            "rr_achieved": round(rr_achieved, 2),
+                        })
+                    
+                elif "TP" in status:
+                    cb_observer_v5.on_trade_closed({
                         "ticker": ticker_ct,
-                        "outcome": "TP",
-                        "pnl_pct": pnl_pct,
-                        "hold_hours": hold_hours,
-                        "entry_time": entry_time_ct,
-                        "exit_time": ct.get("exit_time", ""),
-                        "rr_achieved": round(rr_achieved, 2),
+                        "strategy": strategy_ct,
+                        "pnl_percent": abs(pnl_pct) if pnl_pct != 0 else 0.01
                     })
-            else:
-                # Manuel kapanış
-                if strategy_ct:
-                    record_trade_result(strategy_ct, {
-                        "ticker": ticker_ct,
-                        "outcome": "MANUAL",
-                        "pnl_pct": pnl_pct,
-                        "hold_hours": hold_hours,
-                        "entry_time": entry_time_ct,
-                        "exit_time": ct.get("exit_time", ""),
-                        "rr_achieved": round(rr_achieved, 2),
-                    })
+                    
+                    # V3.2 Kaos #4: Ceza Kutusu — TP kaydı (SL sayacı düşer)
+                    record_asset_tp(ticker_ct)
+                    
+                    # V3.2 Kaos #5: Strateji Karnesi — TP kaydı
+                    if strategy_ct:
+                        record_trade_result(strategy_ct, {
+                            "ticker": ticker_ct,
+                            "outcome": "TP",
+                            "pnl_pct": pnl_pct,
+                            "hold_hours": hold_hours,
+                            "entry_time": entry_time_ct,
+                            "exit_time": ct.get("exit_time", ""),
+                            "rr_achieved": round(rr_achieved, 2),
+                        })
+                else:
+                    # Manuel kapanış
+                    if strategy_ct:
+                        record_trade_result(strategy_ct, {
+                            "ticker": ticker_ct,
+                            "outcome": "MANUAL",
+                            "pnl_pct": pnl_pct,
+                            "hold_hours": hold_hours,
+                            "entry_time": entry_time_ct,
+                            "exit_time": ct.get("exit_time", ""),
+                            "rr_achieved": round(rr_achieved, 2),
+                        })
         finally:
             cb_observer_v5.unsubscribe(_cb_listener)
                 
