@@ -104,19 +104,19 @@ def test_sniper_soft_scoring():
     
     # 1. BBW Squeeze tests
     assert score_bbw_squeeze(12.0, 10.0) == 100.0  # bbw >= kcw (expansion)
-    assert abs(score_bbw_squeeze(8.0, 10.0) - 33.333) < 0.01  # deficit 2.0 (tolerance 3.0) -> ~33.33 points
-    assert score_bbw_squeeze(6.0, 10.0) == 0.0   # deficit 4.0 (> 3.0 tolerance) -> 0.0 points
+    assert abs(score_bbw_squeeze(9.5, 10.0) - 50.0) < 0.01  # deficit 0.5 (tolerance 1.0) -> 50.0 points
+    assert score_bbw_squeeze(8.0, 10.0) == 0.0   # deficit 2.0 (> 1.0 tolerance) -> 0.0 points
     
     # 2. Percent B tests
     assert score_percent_b(0.5) == 100.0   # inside [0, 1]
-    assert abs(score_percent_b(-0.1) - 50.0) < 0.001   # outside by 0.1 (dist/0.2 = 50% penalty)
-    assert score_percent_b(-0.3) == 0.0    # outside by 0.3 (> 0.2 tolerance)
-    assert abs(score_percent_b(1.1) - 50.0) < 0.001    # outside by 0.1
+    assert abs(score_percent_b(-0.04) - 50.0) < 0.001   # outside by 0.04 (dist/0.08 = 50% penalty)
+    assert score_percent_b(-0.1) == 0.0    # outside by 0.1 (> 0.08 tolerance)
+    assert abs(score_percent_b(1.04) - 50.0) < 0.001    # outside by 0.04
     
     # 3. FVG/SFP tests
     assert score_fvg_sfp(True, False) == 100.0
     assert score_fvg_sfp(False, True) == 100.0
-    assert score_fvg_sfp(False, False) == 20.0  # partial points
+    assert score_fvg_sfp(False, False) == 15.0  # partial points
     
     # 4. Scorer Integration
     scores_bist = build_sniper_scores(

@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 import indicators
 import strategies
+from strategies import helpers as strategies_helpers
 from conviction_scorer import calculate_conviction
 
 class TestChaosDynamicFilters(unittest.TestCase):
@@ -80,15 +81,15 @@ class TestChaosDynamicFilters(unittest.TestCase):
 
     def test_volume_spike_guard_division_by_zero(self):
         """CHAOS TEST 5: Volume SMA guard sıfır olduğunda division by zero oluşmamalı"""
-        # strategies._apply_volume_sma_guard(df, vol_sma) 
+        # strategies_helpers._apply_volume_sma_guard(df, vol_sma) 
         # test: vol_sma = 0 veya None iken stratejiler çöküyor mu?
         vol_sma_zero = 0.0
         df_dummy = pd.DataFrame({'volume': [100.0]*5})
-        guarded = strategies._apply_volume_sma_guard(df_dummy, vol_sma_zero)
+        guarded = strategies_helpers._apply_volume_sma_guard(df_dummy, vol_sma_zero)
         self.assertEqual(guarded, 0.0) # Zero/negative input returns safely
         
         # is_meaningful_volume da bu durumda hata vermeden False dönmeli
-        meaningful = strategies._is_meaningful_volume(100.0, guarded, 10.0, "BIST")
+        meaningful = strategies_helpers._is_meaningful_volume(100.0, guarded, 10.0, "BIST")
         self.assertFalse(meaningful)
 
     def test_divergence_nan_rsi(self):

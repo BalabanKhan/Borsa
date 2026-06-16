@@ -943,7 +943,7 @@ def calculate_orb_cage(df_15m):
     if df_15m is None or df_15m.empty:
         return None, None, None, None
     # Bug-fix: use the last candle's date to support backtests/simulations
-    today = df.index[-1].date()
+    today = df_15m.index[-1].date()
 
     df = df_15m.copy()
     try:
