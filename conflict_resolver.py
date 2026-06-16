@@ -11,12 +11,15 @@ class SignalConflictResolver:
     def __init__(self):
         pass
 
-    def _get_strategy_type(self, strategy_name):
+    @staticmethod
+    def get_strategy_type(strategy_name):
         """
         Strateji ismine göre strateji tipini belirler:
         - MEAN_REVERSION_DIP: Dip alımı, VWAP Bounce, Mean Reversion
         - TREND_BREAKOUT: Trend takip, Breakout, Squeeze, ORB vb.
         """
+        if not strategy_name:
+            return "UNKNOWN"
         name_upper = strategy_name.upper()
         # Dip / Ortalama dönüş stratejilerini yakala
         if any(x in name_upper for x in ["DİP", "DIP", "VWAP", "MEAN REVERSION", "MEAN_REV", "TURNAROUND"]):
@@ -91,40 +94,6 @@ class SignalConflictResolver:
 
             if has_opposite_active:
                 continue
-
-            # 3. Aşama: ADX Rejim Filtresi (Trend vs Mean Reversion)
-            raw_ind = sig.get('raw_indicators', {})
-            # hem ADX_4H hem ADX_1D veya ADX_1S olabilir. Biz 4H ADX'i önceliklendiriyoruz (en kararlı trend)
-            adx_val = raw_ind.get('ADX_4H', raw_ind.get('ADX_1D', raw_ind.get('ADX_1H')))
-            strategy = sig.get('strategy', '')
-            strat_type = self._get_strategy_type(strategy)
-
-            if adx_val is not None:
-                if strat_type == "MEAN_REVERSION_DIP":
-                    # Trend çok güçlüyse Mean Reversion/Dip alımı tehlikelidir
-                    if adx_val > config.CONFLICT_RESOLVER_ADX_TREND_LIMIT:
-                        logger.warning(f"[ConflictResolver] {ticker} engellendi: ADX ({adx_val:.1f}) > {config.CONFLICT_RESOLVER_ADX_TREND_LIMIT} (Güçlü Trend). {strategy} (Mean Reversion) sinyali iptal edildi.")
-                        continue
-                elif strat_type == "TREND_BREAKOUT":
-                    # Trend yoksa Trend Takip/Breakout sahte kırılımlara yol açar
-                    if adx_val < config.CONFLICT_RESOLVER_ADX_RANGING_LIMIT:
-                        logger.warning(f"[ConflictResolver] {ticker} engellendi: ADX ({adx_val:.1f}) < {config.CONFLICT_RESOLVER_ADX_RANGING_LIMIT} (Yatay Piyasa). {strategy} (Trend Takip) sinyali iptal edildi.")
-                        continue
-
-            # 4. Aşama: Zaman Dilimi Hiyerarşisi (1D trend yönü kontrolü)
-            # 1D Trend bearish iken LONG yönlü sinyallere ceza verilir, WATCH/REJECT sınırına itilir.
-            trend_status = raw_ind.get('Trend_1D', 'Neutral')
-            
-            if sig_type == 'AL' and trend_status == 'Bearish':
-                old_score = sig.get('conviction_score', 50)
-                new_score = old_score * config.CONFLICT_RESOLVER_BEAR_TREND_PENALTY
-                sig['conviction_score'] = new_score
-                logger.info(f"[ConflictResolver] {ticker} LONG sinyali 1D Bearish trend nedeniyle cezalandırıldı: {old_score:.1f} ➔ {new_score:.1f}")
-                
-                # Eğer yeni skor WATCH eşiğinin (< 45) altına düşerse sinyali direkt filtrele
-                if new_score < 45:
-                    logger.warning(f"[ConflictResolver] {ticker} engellendi: 1D Bearish trend cezası sonrası conviction skoru ({new_score:.1f}) limit altı (< 45).")
-                    continue
 
             final_signals.append(sig)
 

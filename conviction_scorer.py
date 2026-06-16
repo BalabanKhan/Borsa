@@ -68,10 +68,12 @@ CONVICTION_MEDIUM = "MEDIUM"   # 60-74  → Yarım pozisyon
 CONVICTION_WATCH  = "WATCH"    # 45-59  → Sadece izle (Telegram watchlist)
 CONVICTION_REJECT = "REJECT"   # 0-44   → Sinyal yok
 
+from config import GLOBAL_STRONG_CONVICTION_SCORE, GLOBAL_MEDIUM_CONVICTION_SCORE, GLOBAL_MIN_CONVICTION_SCORE
+
 # Grade eşikleri
-THRESHOLD_STRONG = 75
-THRESHOLD_MEDIUM = 60
-THRESHOLD_WATCH  = 45
+THRESHOLD_STRONG = GLOBAL_STRONG_CONVICTION_SCORE
+THRESHOLD_MEDIUM = GLOBAL_MEDIUM_CONVICTION_SCORE
+THRESHOLD_WATCH  = GLOBAL_MIN_CONVICTION_SCORE
 
 # Position sizing
 POSITION_SIZE_MAP = {
@@ -121,6 +123,34 @@ CRYPTO_WEIGHTS = {
 }
 assert abs(sum(CRYPTO_WEIGHTS.values()) - 1.0) < 0.001, \
     f"CRYPTO_WEIGHTS toplamı 1.0 olmalı, şu an: {sum(CRYPTO_WEIGHTS.values())}"
+
+
+SNIPER_BIST_WEIGHTS = {
+    "bbw_squeeze":      0.20,
+    "percent_b":        0.20,
+    "fvg_sfp":          0.20,
+    "volume_ratio":     0.15,
+    "dollar_volume":    0.05,
+    "rr_ratio":         0.10,
+    "regime":           0.05,
+    "macro":            0.05,
+}
+assert abs(sum(SNIPER_BIST_WEIGHTS.values()) - 1.0) < 0.001, \
+    f"SNIPER_BIST_WEIGHTS toplamı 1.0 olmalı, şu an: {sum(SNIPER_BIST_WEIGHTS.values())}"
+
+SNIPER_CRYPTO_WEIGHTS = {
+    "bbw_squeeze":      0.20,
+    "percent_b":        0.20,
+    "fvg_sfp":          0.20,
+    "volume_ratio":     0.10,
+    "dollar_volume":    0.05,
+    "rr_ratio":         0.10,
+    "regime":           0.05,
+    "macro":            0.05,
+    "funding_rate":     0.05,
+}
+assert abs(sum(SNIPER_CRYPTO_WEIGHTS.values()) - 1.0) < 0.001, \
+    f"SNIPER_CRYPTO_WEIGHTS toplamı 1.0 olmalı, şu an: {sum(SNIPER_CRYPTO_WEIGHTS.values())}"
 
 
 
@@ -471,6 +501,62 @@ def score_penalty_level(consecutive_sl: int) -> float:
 
 
 # ════════════════════════════════════════
+# Sniper (Keskin Nişancı) Soft Skorlama
+# ════════════════════════════════════════
+
+def score_bbw_squeeze(bbw: float, kcw: float) -> float:
+    """
+    Sniper Kanun 1: Volatilite Patlaması (BBW >= KCW).
+    Sert 'if' yerine lineer soft skorlama.
+    """
+    if _is_nan(bbw) or _is_nan(kcw) or kcw == 0:
+        return 0.0
+    if bbw >= kcw:
+        return 100.0  # Tam isabet (Patlama gerçekleşti)
+    
+    # Ne kadar geride? %30 tolerans.
+    deficit = kcw - bbw
+    max_tolerance = kcw * 0.3
+    if deficit < max_tolerance:
+        penalty_pct = deficit / max_tolerance
+        return 100.0 * (1.0 - penalty_pct)
+    return 0.0
+
+def score_percent_b(pb: float, pb_min: float = 0.0, pb_max: float = 1.0) -> float:
+    """
+    Sniper Kanun 2: %B Pullback sınırları (0.0 - 1.0 arası optimum).
+    Sınır dışına taşmalarda lineer soft ceza.
+    """
+    if _is_nan(pb):
+        return 0.0
+    
+    if pb_min <= pb <= pb_max:
+        return 100.0
+    
+    # Sınırın %20 (0.20) dışına kadar tolerans. 0.20'den fazla saparsa 0 puan.
+    tolerance = 0.20
+    if pb < pb_min:
+        dist = pb_min - pb
+        if dist < tolerance:
+            return 100.0 * (1.0 - (dist / tolerance))
+        return 0.0
+    else:
+        dist = pb - pb_max
+        if dist < tolerance:
+            return 100.0 * (1.0 - (dist / tolerance))
+        return 0.0
+
+def score_fvg_sfp(fvg_present: bool, sfp_present: bool) -> float:
+    """
+    Sniper Kanun 3: Mıknatıs/Tuzak (FVG veya SFP).
+    Biri varsa 100 puan. Yoksa soft penalty (kısmi puan).
+    """
+    if fvg_present or sfp_present:
+        return 100.0
+    return 20.0  # Kısmi tolerans
+
+
+# ════════════════════════════════════════
 # Hard Block Kontrolleri
 # ════════════════════════════════════════
 
@@ -486,6 +572,7 @@ def check_hard_blocks(
     rr_ratio: float = None,
     consecutive_sl: int = 0,
     is_core_indicators_nan: bool = False,
+    min_volume_usd: float = 50_000,
 ) -> tuple:
     """
     Asla esnetilemeyen güvenlik kontrolleri.
@@ -496,17 +583,14 @@ def check_hard_blocks(
     """
     dollar_vol = (volume or 0) * (price or 0)
 
-    if dollar_vol < 50_000:
-        return True, "HB-1: Sıfıra yakın hacim — likidite yok"
+    if dollar_vol < min_volume_usd:
+        return True, f"HB-1: Hacim limiti altı ({min_volume_usd}) — likidite yetersiz"
 
     if is_quarantined:
         return True, "HB-2: Varlık karantinada — veri güvenilmez"
 
     if is_circuit_open:
         return True, "HB-3: Devre Kesici aktif — sistem korumada"
-
-    if is_darth_maul_flag:
-        return True, "HB-5: Darth Maul mumu — flash crash"
 
     if not sl_direction_ok:
         return True, "HB-4: SL yönü yanlış — veri bütünlüğü bozuk"
@@ -643,6 +727,105 @@ def _ab_update_stats(ticker, score, control_grade, exp_grade):
 
 
 # ════════════════════════════════════════
+# Data Guard ve Conflict Resolver Ceza Hesaplayıcıları (V3.4)
+# ════════════════════════════════════════
+
+def score_data_guard(
+    dollar_volume: float,
+    is_darth_maul,
+    is_gap,
+    cmf: float,
+    is_liquidity_window: bool,
+    min_volume_usd: float = 50_000,
+    optimum_volume_usd: float = 500_000
+) -> float:
+    """
+    Data Guard soft cezalarını hesaplar.
+    Dönen değer toplam skordan düşülecek ceza puanıdır (negatif veya 0).
+    """
+    from config import (
+        GAP_THRESHOLD_PCT,
+        DARTH_MAUL_BODY_RATIO,
+        DATA_GUARD_PENALTY_GAP,
+        DATA_GUARD_PENALTY_LIQUIDITY_WINDOW
+    )
+    
+    # Handle boolean or float for is_gap (treating it as gap_pct)
+    if isinstance(is_gap, bool):
+        gap_val = GAP_THRESHOLD_PCT if is_gap else 0.0
+    else:
+        gap_val = float(is_gap) if is_gap is not None else 0.0
+
+    # Handle boolean or float for is_darth_maul (treating it as darth_maul_ratio)
+    if isinstance(is_darth_maul, bool):
+        # If True, it is a Darth Maul candle (extreme dev candle, ratio = 0.0)
+        # If False, it is not a Darth Maul candle (ratio = 1.0)
+        dm_ratio_val = 0.0 if is_darth_maul else 1.0
+    else:
+        dm_ratio_val = float(is_darth_maul) if is_darth_maul is not None else 1.0
+
+    penalty = 0.0
+    
+    # 1. Proportional Gap Penalty
+    if gap_val > 0.0:
+        penalty -= min(40.0, (gap_val / GAP_THRESHOLD_PCT) * abs(DATA_GUARD_PENALTY_GAP))
+        
+    # 2. Proportional Darth Maul Penalty
+    if not _is_nan(dm_ratio_val) and dm_ratio_val < DARTH_MAUL_BODY_RATIO:
+        penalty -= min(40.0, (1.0 - (dm_ratio_val / DARTH_MAUL_BODY_RATIO)) * 25.0)
+        
+    # 3. Proportional CMF Penalty
+    if not _is_nan(cmf) and cmf < 0.0:
+        penalty -= min(40.0, abs(cmf) * 100.0)
+        
+    # 4. Liquidity Window Penalty
+    if not is_liquidity_window:
+        penalty += DATA_GUARD_PENALTY_LIQUIDITY_WINDOW
+        
+    # Hacim soft cezası: mutlak alt sınır ile optimum arasında orantısal ceza (maks -25 puan)
+    if dollar_volume > 0 and dollar_volume < optimum_volume_usd:
+        clamped_vol = max(min_volume_usd, dollar_volume)
+        ratio = (optimum_volume_usd - clamped_vol) / (optimum_volume_usd - min_volume_usd) if optimum_volume_usd > min_volume_usd else 1.0
+        penalty -= (25.0 * ratio)
+        
+    return penalty
+
+
+def score_conflict_resolver(
+    adx: float,
+    regime: str,
+    strategy_type: str,
+    is_long: bool = True
+) -> tuple:
+    """
+    Sinyal çelişki cezalarını hesaplar.
+    Döner: (penalty_points, apply_bear_multiplier)
+    """
+    from config import (
+        CONFLICT_RESOLVER_ADX_TREND_LIMIT,
+        CONFLICT_RESOLVER_ADX_RANGING_LIMIT,
+        CONFLICT_RESOLVER_ADX_TREND_PENALTY_MULT,
+        CONFLICT_RESOLVER_ADX_RANGING_PENALTY_MULT,
+    )
+    
+    penalty = 0.0
+    apply_bear_penalty = False
+    
+    if not _is_nan(adx):
+        if strategy_type == "MEAN_REVERSION" and adx > CONFLICT_RESOLVER_ADX_TREND_LIMIT:
+            diff = adx - CONFLICT_RESOLVER_ADX_TREND_LIMIT
+            penalty -= (diff * CONFLICT_RESOLVER_ADX_TREND_PENALTY_MULT)
+        elif strategy_type == "TREND_FOLLOWING" and adx < CONFLICT_RESOLVER_ADX_RANGING_LIMIT:
+            diff = CONFLICT_RESOLVER_ADX_RANGING_LIMIT - adx
+            penalty -= (diff * CONFLICT_RESOLVER_ADX_RANGING_PENALTY_MULT)
+            
+    if is_long and regime == "BEAR":
+        apply_bear_penalty = True
+        
+    return penalty, apply_bear_penalty
+
+
+# ════════════════════════════════════════
 # Ana Conviction Hesaplayıcı
 # ════════════════════════════════════════
 
@@ -696,6 +879,19 @@ def calculate_conviction(
         result.component_scores[factor] = round(factor_score, 1)
         total += factor_score * weight
 
+    # V3.4: Data Guard & Conflict Resolver Soft Cezaları
+    data_guard_penalty = scores.get("data_guard_penalty", 0.0)
+    conflict_penalty = scores.get("conflict_penalty", 0.0)
+    apply_bear_penalty = scores.get("apply_bear_penalty", False)
+    
+    total += data_guard_penalty
+    total += conflict_penalty
+    
+    if apply_bear_penalty:
+        from config import CONFLICT_RESOLVER_BEAR_TREND_PENALTY
+        total *= CONFLICT_RESOLVER_BEAR_TREND_PENALTY
+        
+    total = max(0.0, total)
     result.total_score = round(total, 1)
 
     # Rejim-adaptif eşikler: config tabanlı sıkılaştırılmış limitler
@@ -761,8 +957,37 @@ def build_trend_scores(
     market="BIST",
     oi_crash=False,
     funding_rate=None,
+    dg_is_darth_maul=False,
+    dg_gap_pct=0.0,
+    cmf=0.0,
+    is_liquidity_window=True,
+    strategy_type="TREND_BREAKOUT",
+    is_long=True,
 ):
     """Trend stratejileri (BIST 2, KRİPTO 2) için skor paketi."""
+    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
+    is_gap = (dg_gap_pct >= GAP_THRESHOLD_PCT) if dg_gap_pct else False
+    
+    optimum_vol = 500_000 if market == "KRIPTO" else 10_000_000
+    min_vol = SOFT_DOLLAR_VOL_CRYPTO_MIN if market == "KRIPTO" else SOFT_DOLLAR_VOL_BIST_MIN
+    
+    dg_penalty = score_data_guard(
+        dollar_volume=dollar_vol,
+        is_darth_maul=dg_is_darth_maul,
+        is_gap=is_gap,
+        cmf=cmf,
+        is_liquidity_window=is_liquidity_window,
+        min_volume_usd=min_vol,
+        optimum_volume_usd=optimum_vol
+    )
+    
+    conflict_penalty, apply_bear = score_conflict_resolver(
+        adx=adx,
+        regime=regime,
+        strategy_type=strategy_type,
+        is_long=is_long
+    )
+
     return {
         "adx":           score_adx(adx, adx_prev),
         "ema_alignment": score_ema_alignment(price, ema_fast, ema_mid, ema_slow),
@@ -777,6 +1002,9 @@ def build_trend_scores(
         "penalty":       score_penalty_level(consecutive_sl),
         "oi_crash":      score_oi_crash(oi_crash),
         "funding_rate":  score_funding_rate(funding_rate, direction="long"),
+        "data_guard_penalty": dg_penalty,
+        "conflict_penalty": conflict_penalty,
+        "apply_bear_penalty": apply_bear,
     }
 
 
@@ -792,8 +1020,37 @@ def build_dip_scores(
     market="BIST",
     oi_crash=False,
     funding_rate=None,
+    dg_is_darth_maul=False,
+    dg_gap_pct=0.0,
+    cmf=0.0,
+    is_liquidity_window=True,
+    strategy_type="MEAN_REVERSION_DIP",
+    is_long=True,
 ):
     """Dip avcılığı stratejileri (BIST 1, KRİPTO 1) için skor paketi."""
+    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
+    is_gap = (dg_gap_pct >= GAP_THRESHOLD_PCT) if dg_gap_pct else False
+    
+    optimum_vol = 500_000 if market == "KRIPTO" else 10_000_000
+    min_vol = SOFT_DOLLAR_VOL_CRYPTO_MIN if market == "KRIPTO" else SOFT_DOLLAR_VOL_BIST_MIN
+    
+    dg_penalty = score_data_guard(
+        dollar_volume=dollar_vol,
+        is_darth_maul=dg_is_darth_maul,
+        is_gap=is_gap,
+        cmf=cmf,
+        is_liquidity_window=is_liquidity_window,
+        min_volume_usd=min_vol,
+        optimum_volume_usd=optimum_vol
+    )
+    
+    conflict_penalty, apply_bear = score_conflict_resolver(
+        adx=None,
+        regime=regime,
+        strategy_type=strategy_type,
+        is_long=is_long
+    )
+
     return {
         "adx":           50.0,  # Dip avcılığında ADX önemsiz → nötr
         "ema_alignment": score_ema_dip_distance(price, ema_fast, ema_mid),
@@ -808,6 +1065,9 @@ def build_dip_scores(
         "penalty":       score_penalty_level(consecutive_sl),
         "oi_crash":      score_oi_crash(oi_crash),
         "funding_rate":  score_funding_rate(funding_rate, direction="long"),
+        "data_guard_penalty": dg_penalty,
+        "conflict_penalty": conflict_penalty,
+        "apply_bear_penalty": apply_bear,
     }
 
 
@@ -822,8 +1082,36 @@ def build_breakout_scores(
     market="BIST",
     oi_crash=False,
     funding_rate=None,
+    dg_is_darth_maul=False,
+    dg_gap_pct=0.0,
+    cmf=0.0,
+    is_liquidity_window=True,
+    strategy_type="TREND_BREAKOUT",
+    is_long=True,
 ):
     """Kırılım/Squeeze stratejileri (BIST 3/5, KRİPTO 3) için skor paketi."""
+    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
+    is_gap = (dg_gap_pct >= GAP_THRESHOLD_PCT) if dg_gap_pct else False
+    
+    optimum_vol = 500_000 if market == "KRIPTO" else 10_000_000
+    min_vol = SOFT_DOLLAR_VOL_CRYPTO_MIN if market == "KRIPTO" else SOFT_DOLLAR_VOL_BIST_MIN
+    
+    dg_penalty = score_data_guard(
+        dollar_volume=dollar_vol,
+        is_darth_maul=dg_is_darth_maul,
+        is_gap=is_gap,
+        cmf=cmf,
+        is_liquidity_window=is_liquidity_window,
+        min_volume_usd=min_vol,
+        optimum_volume_usd=optimum_vol
+    )
+    
+    conflict_penalty, apply_bear = score_conflict_resolver(
+        adx=None,
+        regime=regime,
+        strategy_type=strategy_type,
+        is_long=is_long
+    )
     squeeze_score = inverse_linear_score(bb_width, SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX) if bb_width else SOFT_UNCERTAINTY_PENALTY
 
     return {
@@ -840,6 +1128,9 @@ def build_breakout_scores(
         "penalty":       score_penalty_level(consecutive_sl),
         "oi_crash":      score_oi_crash(oi_crash),
         "funding_rate":  score_funding_rate(funding_rate, direction="long"),
+        "data_guard_penalty": dg_penalty,
+        "conflict_penalty": conflict_penalty,
+        "apply_bear_penalty": apply_bear,
     }
 
 
@@ -856,8 +1147,37 @@ def build_short_scores(
     market="KRIPTO",
     oi_crash=False,
     funding_rate=None,
+    dg_is_darth_maul=False,
+    dg_gap_pct=0.0,
+    cmf=0.0,
+    is_liquidity_window=True,
+    strategy_type="TREND_BREAKOUT",
+    is_long=False,
 ):
     """SHORT stratejileri (SHORT 1-4, Bear Hunter) için skor paketi."""
+    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
+    is_gap = (dg_gap_pct >= GAP_THRESHOLD_PCT) if dg_gap_pct else False
+    
+    optimum_vol = 500_000 if market == "KRIPTO" else 10_000_000
+    min_vol = SOFT_DOLLAR_VOL_CRYPTO_MIN if market == "KRIPTO" else SOFT_DOLLAR_VOL_BIST_MIN
+    
+    dg_penalty = score_data_guard(
+        dollar_volume=dollar_vol,
+        is_darth_maul=dg_is_darth_maul,
+        is_gap=is_gap,
+        cmf=cmf,
+        is_liquidity_window=is_liquidity_window,
+        min_volume_usd=min_vol,
+        optimum_volume_usd=optimum_vol
+    )
+    
+    conflict_penalty, apply_bear = score_conflict_resolver(
+        adx=adx,
+        regime=regime,
+        strategy_type=strategy_type,
+        is_long=is_long
+    )
+
     return {
         "adx":           score_adx(adx, adx_prev),
         "ema_alignment": score_ema_short(price, ema_fast, ema_mid, ema_slow),
@@ -872,4 +1192,75 @@ def build_short_scores(
         "penalty":       score_penalty_level(consecutive_sl),
         "oi_crash":      score_oi_crash(oi_crash),
         "funding_rate":  score_funding_rate(funding_rate, direction="short"),
+        "data_guard_penalty": dg_penalty,
+        "conflict_penalty": conflict_penalty,
+        "apply_bear_penalty": apply_bear,
+    }
+
+
+def build_sniper_scores(
+    price, ema_fast, ema_mid, ema_slow,
+    rsi, rsi_prev,
+    volume, vol_sma, dollar_vol,
+    rr,
+    regime="BULL",
+    macro_aligned=True,
+    consecutive_sl=0,
+    bbw=0.0, kcw=0.0, pb=0.5, fvg_present=False, sfp_present=False,
+    has_engulfing=False,
+    market="BIST",
+    oi_crash=False,
+    funding_rate=None,
+    dg_is_darth_maul=False,
+    dg_gap_pct=0.0,
+    cmf=0.0,
+    is_liquidity_window=True,
+    strategy_type="TREND_BREAKOUT",
+    is_long=True,
+):
+    """Keskin Nişancı stratejisi (BIST Sniper, KRIPTO Sniper) için skor paketi."""
+    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
+    is_gap = (dg_gap_pct >= GAP_THRESHOLD_PCT) if dg_gap_pct else False
+    
+    optimum_vol = 500_000 if market == "KRIPTO" else 10_000_000
+    min_vol = SOFT_DOLLAR_VOL_CRYPTO_MIN if market == "KRIPTO" else SOFT_DOLLAR_VOL_BIST_MIN
+    
+    dg_penalty = score_data_guard(
+        dollar_volume=dollar_vol,
+        is_darth_maul=dg_is_darth_maul,
+        is_gap=is_gap,
+        cmf=cmf,
+        is_liquidity_window=is_liquidity_window,
+        min_volume_usd=min_vol,
+        optimum_volume_usd=optimum_vol
+    )
+    
+    conflict_penalty, apply_bear = score_conflict_resolver(
+        adx=None,
+        regime=regime,
+        strategy_type=strategy_type,
+        is_long=is_long
+    )
+
+    import config
+    if not is_long and market == "KRIPTO":
+        pb_min = getattr(config, "SHORT4_BBP_MIN_PULLBACK", 0.0)
+        pb_max = getattr(config, "SHORT4_BBP_MAX_PULLBACK", 1.0)
+    else:
+        pb_min = 0.0
+        pb_max = 1.0
+
+    return {
+        "bbw_squeeze":   score_bbw_squeeze(bbw, kcw),
+        "percent_b":     score_percent_b(pb, pb_min=pb_min, pb_max=pb_max),
+        "fvg_sfp":       score_fvg_sfp(fvg_present, sfp_present),
+        "volume_ratio":  score_volume_ratio(volume, vol_sma),
+        "dollar_volume": score_dollar_volume(dollar_vol, market),
+        "rr_ratio":      score_rr_ratio(rr, regime),
+        "regime":        score_regime(regime),
+        "macro":         score_macro_alignment(macro_aligned),
+        "funding_rate":  score_funding_rate(funding_rate, direction="long" if is_long else "short") if market == "KRIPTO" else 0.0,
+        "data_guard_penalty": dg_penalty,
+        "conflict_penalty": conflict_penalty,
+        "apply_bear_penalty": apply_bear,
     }

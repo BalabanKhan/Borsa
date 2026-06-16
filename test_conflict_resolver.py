@@ -108,68 +108,6 @@ class TestSignalConflictResolver(unittest.TestCase):
         resolved = self.resolver.resolve_conflicts(candidate_signals, active_trades)
         self.assertEqual(len(resolved), 0)
 
-    def test_adx_regime_mean_reversion_blocked(self):
-        """Güçlü trend varken (ADX > 40) Mean Reversion/Dip stratejisi bloke edilmeli"""
-        candidate_signals = [
-            {
-                "ticker": "AVAX/USDT",
-                "strategy": "KRIPTO-1: RSI Dip Avcısı", # Dip buying
-                "signal": "AL",
-                "conviction_score": 75.0,
-                "raw_indicators": {"ADX_4H": 45.0} # Trend çok güçlü
-            }
-        ]
-        active_trades = []
-        resolved = self.resolver.resolve_conflicts(candidate_signals, active_trades)
-        self.assertEqual(len(resolved), 0)
-
-    def test_adx_regime_trend_following_blocked(self):
-        """Yatay piyasada (ADX < 20) Trend Takip stratejisi bloke edilmeli"""
-        candidate_signals = [
-            {
-                "ticker": "NEAR/USDT",
-                "strategy": "KRIPTO-2: Mega Trend Takibi", # Trend strategy
-                "signal": "AL",
-                "conviction_score": 75.0,
-                "raw_indicators": {"ADX_4H": 15.0} # Trend çok zayıf/Ranging
-            }
-        ]
-        active_trades = []
-        resolved = self.resolver.resolve_conflicts(candidate_signals, active_trades)
-        self.assertEqual(len(resolved), 0)
-
-    def test_bearish_trend_1d_penalty_passed(self):
-        """1D Bearish trend varken LONG sinyal cezalandırılmalı ama WATCH eşiği (45) üstündeyse geçmeli"""
-        candidate_signals = [
-            {
-                "ticker": "XU100.IS",
-                "strategy": "BIST-2: Trend Following",
-                "signal": "AL",
-                "conviction_score": 80.0,
-                "raw_indicators": {"Trend_1D": "Bearish", "ADX_4H": 30.0}
-            }
-        ]
-        active_trades = []
-        resolved = self.resolver.resolve_conflicts(candidate_signals, active_trades)
-        self.assertEqual(len(resolved), 1)
-        # 80.0 * 0.6 = 48.0 (> 45.0)
-        self.assertEqual(resolved[0]["conviction_score"], 48.0)
-
-    def test_bearish_trend_1d_penalty_blocked(self):
-        """1D Bearish trend varken LONG sinyal cezası sonrası skor limitin (< 45) altına inerse bloke edilmeli"""
-        candidate_signals = [
-            {
-                "ticker": "XU100.IS",
-                "strategy": "BIST-2: Trend Following",
-                "signal": "AL",
-                "conviction_score": 70.0,
-                "raw_indicators": {"Trend_1D": "Bearish", "ADX_4H": 30.0}
-            }
-        ]
-        active_trades = []
-        resolved = self.resolver.resolve_conflicts(candidate_signals, active_trades)
-        # 70.0 * 0.6 = 42.0 (< 45.0) -> Bloke edilmeli
-        self.assertEqual(len(resolved), 0)
 
 if __name__ == "__main__":
     unittest.main()

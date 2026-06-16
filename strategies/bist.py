@@ -1,0 +1,729 @@
+"""
+strategies.py — Strateji Katmanı
+Tüm BIST, Kripto, Emtia ve Ayı Avcısı strateji fonksiyonları + scan_all_markets.
+ThreadPoolExecutor ile toplu tarama.
+"""
+import logging
+import math
+import time as _time
+import gc
+import pandas as pd
+import pandas_ta as ta
+import config
+from datetime import datetime, time as dt_time
+from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from config import (
+    TOP_BIST, TOP_CRYPTO, TOP_EMTIA, TOP_HEAVY_SHORT, MEME_BLACKLIST,
+    EMTIA_ATR_MULT, DXY_SENSITIVE, EMTIA_NAMES,
+    API_SLEEP_BIST, API_SLEEP_CRYPTO, API_SLEEP_EMTIA, BATCH_MAX_WORKERS,
+    ATR_MULTIPLIER_BIST, ATR_MULTIPLIER_CRYPTO,
+    ATR_CAP_BIST, ATR_CAP_CRYPTO, ATR_CAP_EMTIA,
+    MIN_DOLLAR_VOL_CRYPTO, MIN_DOLLAR_VOL_BIST,
+    GAP_THRESHOLD_PCT, DARTH_MAUL_BODY_RATIO,
+    VOL_SMA_LONG_RATIO, ADX_TOO_LATE,
+    # AM Serisi Anti-Manipülasyon Kalkanları
+    ENGULFING_MIN_BODY_RATIO,
+    MIN_HOURLY_DOLLAR_VOL_CRYPTO, MIN_HOURLY_TL_VOL_BIST,
+    FUNDING_SHORT_BLOCK_THRESHOLD,
+    OTE_MIN_WAVE_PCT,
+    LIQUIDITY_WINDOW_START_HOUR, LIQUIDITY_WINDOW_START_MIN,
+    LIQUIDITY_WINDOW_END_HOUR, LIQUIDITY_WINDOW_END_MIN,
+    RR_MINIMUM,
+)
+from data_sources import (
+    get_bist_data, get_crypto_data, get_emtia_data, get_bist_15m_data,
+    get_bist_data_batch, get_bist_15m_batch,
+    get_crypto_data_cached, get_crypto_1h_data, get_emtia_1h_data, clear_cycle_cache, purge_expired_cache,
+    is_bist_open, is_weekend_fakeout_time, check_xu100_wind,
+    get_btc_status, check_btc_not_pumping,
+    get_funding_rate, fetch_crypto_oi_crash, get_btc_dominance_trend,
+    check_token_unlocks, _get_btc_htf_bias, _check_dxy_shield,
+    _is_macro_news_hour, _is_btc_bullish_for_shorts, _get_xu100_daily_data,
+    get_current_prices,
+)
+from indicators import (
+    sniper_get_htf_bias, sniper_find_swing_points, sniper_detect_sweep,
+    sniper_detect_msb, sniper_calculate_ote, sniper_detect_fvg,
+    detect_sfp, detect_premium_rejection, detect_bearish_divergence,
+    detect_bullish_divergence, detect_squeeze, calculate_relative_strength,
+    calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation,
+    calculate_orb_cage, calculate_time_specific_rvol,
+    # AM Serisi
+    check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
+    sniper_calculate_ote_body,
+)
+from data_guard import guard_mtf_bundle, guard_signal_output
+from meta_engine import get_bist100_trend
+from conviction_scorer import (
+    check_hard_blocks, calculate_conviction,
+    build_trend_scores, build_dip_scores, build_breakout_scores, build_short_scores,
+    score_adx, score_rsi_oversold, score_rsi_trend, score_rsi_direction,
+    score_volume_ratio, score_dollar_volume, score_rr_ratio,
+    score_ema_alignment, score_ema_dip_distance, score_ema_short,
+    score_regime, score_regime_short, score_engulfing,
+    score_macro_alignment, score_penalty_level,
+    CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH,
+)
+
+
+
+from .helpers import _extract_raw_indicators, _apply_volume_sma_guard, _is_meaningful_volume, _get_consecutive_sl, _get_bist_regime, _has_absolute_hourly_volume, _apply_rr_filter, _apply_regime_filter, _resolve_dual_signals, _adx_momentum_ok
+# 1. BIST 100 STRATEJİ MODÜLÜ
+# ════════════════════════════════════════
+def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100_daily=None, metrics_collector=None):
+    signals = []
+
+    # Pandas Mutability koruması: kaynak DataFrame'leri kirletme
+    df_1d = df_1d.copy()
+    df_4h = df_4h.copy()
+    df_1h = df_1h.copy()
+
+    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_21, append=True)
+    df_1d.ta.sma(length=config.IND_SMA_SLOW, append=True)
+    df_1d.ta.sma(length=config.IND_SMA_TREND, append=True)
+    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
+    df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+
+    month_high = df_1d['high'].tail(30).max() if len(df_1d) >= 30 else df_1d['high'].max()
+
+    df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_4h.ta.ema(length=config.IND_EMA_21, append=True)
+
+    df_1h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_1h.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_1h.ta.ema(length=config.IND_EMA_21, append=True)
+    df_1h['vol_sma_20'] = ta.sma(df_1h['volume'], length=config.IND_VOL_SMA_LENGTH)
+
+    if len(df_1d) < 2 or len(df_4h) < 2 or len(df_1h) < 3:
+        return signals
+
+    last_1d = df_1d.iloc[-1]
+    last_4h = df_4h.iloc[-1]
+    last_1h = df_1h.iloc[-1]
+    prev_1h = df_1h.iloc[-2]
+    current_price = last_1h['close']
+
+    atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
+    if atr_val is None or pd.isna(atr_val): atr_val = current_price * 0.02
+    # RED-08: ATR Cap — flash crash'te devasa stop mesafesini engelle
+    raw_sl_dist = ATR_MULTIPLIER_BIST * atr_val
+    dynamic_sl_dist = max(
+        min(raw_sl_dist, current_price * ATR_CAP_BIST),  # Üst sınır
+        current_price * 0.03  # Alt sınır
+    )
+    sl_pct = (dynamic_sl_dist / current_price) * 100
+
+    # V3.3: Piyasa rejimi (Conviction Scoring için)
+    bist_regime = _get_bist_regime(xu100_daily)
+
+    if metrics_collector is not None:
+        metrics_collector[symbol] = {
+            "Symbol": symbol,
+            "Market": "BIST",
+            "Price": current_price,
+            "1D RSI": round(last_1d.get("RSI_14", 0), 2) if pd.notna(last_1d.get("RSI_14")) else None,
+            "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
+            "1H RSI": round(last_1h.get("RSI_14", 0), 2) if pd.notna(last_1h.get("RSI_14")) else None,
+            "1D SMA 50": round(last_1d.get("SMA_50", 0), 2) if pd.notna(last_1d.get("SMA_50")) else None,
+            "1D SMA 200": round(last_1d.get("SMA_200", 0), 2) if pd.notna(last_1d.get("SMA_200")) else None,
+            "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
+            "1H Volume": last_1h.get("volume")
+        }
+
+    # BIST 1: DİP AVCILIĞI (Turnaround)
+    # BIST 1: DİP AVCILIĞI (Turnaround)
+    if not pd.isna(last_1d.get('RSI_14')):
+        if last_1d[f'RSI_{config.IND_RSI_LENGTH}'] < 35:
+            # DIP_RSI_1D_SMA200_ALIGN_ENABLED: 1D Fiyat > SMA200 trend hizalamasını sorgular (Long yönlü teyit)
+            sma_200 = last_1d.get('SMA_200')
+            trend_aligned = not config.DIP_RSI_1D_SMA200_ALIGN_ENABLED or (sma_200 is not None and not pd.isna(sma_200) and current_price > sma_200)
+            
+            if trend_aligned and not pd.isna(last_1h.get('RSI_14')) and not pd.isna(prev_1h.get('RSI_14')) and not pd.isna(last_1h.get('EMA_8')) and not pd.isna(last_1h.get('vol_sma_20')):
+                if last_1h['close'] > last_1h['EMA_8'] and prev_1h['close'] <= prev_1h['EMA_8'] and last_1h['close'] > last_1h['open']:
+                    # AM-01: Engulfing momentum onayı — ölü kedi sıçraması filtresi
+                    if not check_bullish_engulfing_momentum(df_1h):
+                        pass  # Yeşil mum önceki kırmızıyı yutmadı → sahte hareket
+                    else:
+                        # RED-01: Volume SMA manipülasyon koruması
+                        guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+                        
+                        # DIP_VOLUME_SPIKE_REQUIRED: dip dönüş mumunda hacim patlaması şartını sorgular (Volume Spike)
+                        volume_spike_ok = not config.DIP_VOLUME_SPIKE_REQUIRED or (last_1h['volume'] >= guarded_vol_sma * config.DIP_VOLUME_SPIKE_MULT)
+                        
+                        if volume_spike_ok and _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                            if last_1h[f'RSI_{config.IND_RSI_LENGTH}'] > prev_1h[f'RSI_{config.IND_RSI_LENGTH}']:
+                                sl = current_price - dynamic_sl_dist
+                                tp = last_1d.get('EMA_21', current_price * 1.05)
+                                _rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                                _scores = build_dip_scores(
+                                    rsi_daily=last_1d[f'RSI_{config.IND_RSI_LENGTH}'], rsi_hourly=last_1h[f'RSI_{config.IND_RSI_LENGTH}'], rsi_prev=prev_1h[f'RSI_{config.IND_RSI_LENGTH}'],
+                                    price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'),
+                                    volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                                    rr=_rr, has_engulfing=True, regime=bist_regime,
+                                    macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                                )
+                                _conv = calculate_conviction(_scores)
+                                if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                        "ticker": symbol, "market": "BIST", "strategy": "BIST 1: DİP AVCILIĞI", "signal": "AL",
+                                        "entry_price": current_price, "sl": sl, "tp": tp,
+                                        "conviction_score": _conv.total_score, "conviction_grade": _conv.grade, "conviction_details": _conv.component_scores,
+                                        "position_size_pct": _conv.position_size_pct,
+                                        "indicators": {"RSI_1G": round(last_1d.get("RSI_14", 0), 2), "RSI_1S": round(last_1h.get("RSI_14", 0), 2)},
+                                        "reason": f"1G RSI<35 + Engulfing Onaylı Turnaround. (ATR Stop: -%{sl_pct:.1f})" + _conv.to_reason_suffix()
+                                    })
+
+    # BIST 2: TREND TAKİBİ
+    if not pd.isna(last_4h.get('ADX_14')) and not pd.isna(last_4h.get('EMA_8')) and not pd.isna(last_4h.get('EMA_21')):
+        # TREND_BB_SQUEEZE_BLOCKED: Dar bant squeeze içindeyken trend takibini bloke eder (Chop market engeli)
+        in_squeeze = False
+        if config.TREND_BB_SQUEEZE_BLOCKED:
+            bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
+            bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
+            bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
+            if bb_upper_col and bb_lower_col and bb_mid_col:
+                bbu = last_1d[bb_upper_col[0]]
+                bbl = last_1d[bb_lower_col[0]]
+                bbm = last_1d[bb_mid_col[0]]
+                bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
+                if bb_width < 0.15:
+                    in_squeeze = True
+
+        # RED-02: ADX momentum kontrolü — gecikmeli ve olgunlaşmış trend filtresi
+        if not in_squeeze and _adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h[f'EMA_{config.IND_EMA_21}']:
+            if not pd.isna(last_1h.get('EMA_21')):
+                if last_1h['low'] <= last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h['open']:
+                    # AM-01: Engulfing momentum onayı — pullback'te gerçek dönüş mü?
+                    if check_bullish_engulfing_momentum(df_1h):
+                        sl = current_price - dynamic_sl_dist
+                        _tp2 = current_price * 1.10
+                        _rr2 = abs(_tp2 - current_price) / max(abs(current_price - sl), 1e-8)
+                        _adx_prev2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+                        _scores2 = build_trend_scores(
+                            adx=last_4h['ADX_14'], adx_prev=_adx_prev2,
+                            price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=None,
+                            rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
+                            volume=last_1h['volume'], vol_sma=last_1h.get('vol_sma_20', 0), dollar_vol=last_1h['volume'] * current_price,
+                            rr=_rr2, has_engulfing=True, regime=bist_regime,
+                            macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                        )
+                        _conv2 = calculate_conviction(_scores2)
+                        if _conv2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                "ticker": symbol, "market": "BIST", "strategy": "BIST 2: TREND TAKİBİ", "signal": "AL",
+                                "entry_price": current_price, "sl": sl, "tp": _tp2,
+                                "conviction_score": _conv2.total_score, "conviction_grade": _conv2.grade, "conviction_details": _conv2.component_scores,
+                                "position_size_pct": _conv2.position_size_pct,
+                                "indicators": {"ADX_4S": round(last_4h.get("ADX_14", 0), 2), "RSI_1S": round(last_1h.get("RSI_14", 0), 2)},
+                                "reason": f"4S ADX>25 Trend + Engulfing Momentum. 1S EMA21 pullback. (ATR Stop: -%{sl_pct:.1f})" + _conv2.to_reason_suffix()
+                            })
+
+    # BIST 3: KIRILIM VE MOMENTUM
+    bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
+    bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
+    bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
+
+    if bb_upper_col and bb_lower_col and bb_mid_col:
+        bbu = last_1d[bb_upper_col[0]]
+        bbl = last_1d[bb_lower_col[0]]
+        bbm = last_1d[bb_mid_col[0]]
+
+        bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
+        if bb_width < 0.15:
+            # BREAKOUT_RETEST_REQUIRED: direnç kırılımı sonrası retest/pullback aralığı teyidi
+            retest_ok = True
+            if config.BREAKOUT_RETEST_REQUIRED:
+                max_limit = month_high * (1.0 + (config.BREAKOUT_RETEST_TOLERANCE_PCT / 100.0))
+                if not (month_high <= current_price <= max_limit):
+                    retest_ok = False
+
+            if retest_ok and current_price > month_high:
+                # RED-05: Gap-Up filtresi — sabah gap'i ile sahte kırılım engelle
+                prev_close = df_1d.iloc[-2]['close'] if len(df_1d) >= 2 else current_price
+                gap_pct = abs(last_1h['open'] - prev_close) / max(prev_close, 1e-8) * 100
+                if not pd.isna(last_1h.get('vol_sma_20')):
+                    guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+                    if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                        # AM-03: Mutlak hacim eşiği — SMA'nın 5 katı bile olsa TL karşılığı yeterli mi?
+                        if _has_absolute_hourly_volume(last_1h['volume'], current_price, "BIST"):
+                            if not xu100_down:
+                                now = datetime.now(ZoneInfo("Europe/Istanbul"))
+                                if now.time() >= dt_time(10, 30):
+                                    sl = current_price - dynamic_sl_dist
+                                    _tp3 = current_price + (dynamic_sl_dist * 3.0)
+                                    _rr3 = abs(_tp3 - current_price) / max(abs(current_price - sl), 1e-8)
+                                    _scores3 = build_breakout_scores(
+                                        bb_width=bb_width, price=current_price,
+                                        ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                                        volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                                        rr=_rr3, regime=bist_regime,
+                                        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+                                        dg_gap_pct=gap_pct
+                                    )
+                                    _conv3 = calculate_conviction(_scores3)
+                                    if _conv3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                            "ticker": symbol, "market": "BIST", "strategy": "BIST 3: KIRILIM AVCILIĞI", "signal": "AL",
+                                            "entry_price": current_price, "sl": sl, "tp": _tp3,
+                                            "conviction_score": _conv3.total_score, "conviction_grade": _conv3.grade, "conviction_details": _conv3.component_scores,
+                                            "position_size_pct": _conv3.position_size_pct,
+                                            "reason": f"Günlükte daralma, hacimli direnç kırılımı + Mutlak TL hacmi onaylı. (ATR Stop: -%{sl_pct:.1f})" + _conv3.to_reason_suffix()
+                                        })
+
+    # BIST 4: KESKİN NİŞANCI (SMC / Likidite Avı ve OTE)
+    htf_bias = sniper_get_htf_bias(df_1d)
+
+    if htf_bias == 1:
+        swing_lows = sniper_find_swing_points(df_4h, point_type="low")
+        swing_highs = sniper_find_swing_points(df_4h, point_type="high")
+
+        sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows, point_type="low")
+        if sweep_ok:
+            msb_ok, msb_high, msb_idx = sniper_detect_msb(df_4h, swing_highs, point_type="high")
+            if msb_ok:
+                # AM-05: Gövde-bazlı OTE + minimum dalga amplitüdü kontrolü
+                sweep_idx = swing_lows[-1][0] if swing_lows else None
+                ote_top, ote_bottom = sniper_calculate_ote_body(df_4h, sweep_idx, msb_idx, direction="long")
+                if ote_top > 0 and ote_bottom > 0 and ote_bottom <= current_price <= ote_top:
+                    # SMC OTE FVG Filtresi (SMC_FVG_REQUIRED = True ise FVG bulunması şarttır)
+                    has_fvg, Fvg_low, fvg_high = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
+                    fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                    
+                    if fvg_ok:
+                        # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
+                        ltf_confirm = True
+                        if config.SMC_LTF_MSB_CONFIRM:
+                            swing_highs_1h = sniper_find_swing_points(df_1h, point_type="high", neighbors=2)
+                            ltf_msb_ok, _, _ = sniper_detect_msb(df_1h, swing_highs_1h, point_type="high")
+                            if not ltf_msb_ok:
+                                ltf_confirm = False
+                        
+                        if ltf_confirm and not pd.isna(last_1h.get('vol_sma_20')):
+                            guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+                            if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                                sl = sweep_low * 0.995
+                                sl_dist = max(current_price - sl, 1e-8)
+                                tp = current_price + (sl_dist * 3.0)
+                                fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
+                                _rr4 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                                _scores4 = build_breakout_scores(
+                                    bb_width=None, price=current_price,
+                                    ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                                    volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                                    rr=_rr4, regime=bist_regime,
+                                    macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                                )
+                                if has_fvg:
+                                    # SMC_FVG_BONUS: FVG bulunması durumunda inanç skoruna (engulfing alt bileşeniyle) eklenir
+                                    _scores4["engulfing"] = min(100.0, _scores4["engulfing"] + config.SMC_FVG_BONUS)
+                                _conv4 = calculate_conviction(_scores4)
+                                if _conv4.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                        "ticker": symbol, "market": "BIST",
+                                        "strategy": "BIST 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
+                                        "entry_price": current_price, "sl": sl, "tp": tp,
+                                        "conviction_score": _conv4.total_score, "conviction_grade": _conv4.grade, "conviction_details": _conv4.component_scores,
+                                        "position_size_pct": _conv4.position_size_pct,
+                                        "reason": (
+                                            f"🎯 SMC Kurulum (Gövde Fibo){fvg_label}\n"
+                                            f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
+                                            f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
+                                            f"🎣 OTE Bölgesi (Gövde): {ote_bottom:.2f} - {ote_top:.2f}\n"
+                                            f"🛡️ İşlem %4 kâra geçince Break-Even uygula."
+                                        ) + _conv4.to_reason_suffix()
+                                    })
+
+    # BIST 5: VOLATİLİTE SIKIŞMASI (Squeeze)
+    squeeze_fired, sq_dir, sq_candle = detect_squeeze(df_1d)
+    if squeeze_fired and sq_dir == "up" and not xu100_down:
+        # SQUEEZE_TREND_ALIGN_REQUIRED: squeeze patlama yönünün günlük ana trendle uyumu
+        trend_aligned = True
+        if config.SQUEEZE_TREND_ALIGN_REQUIRED:
+            sma_200 = last_1d.get('SMA_200')
+            if sma_200 is not None and not pd.isna(sma_200):
+                trend_aligned = current_price > sma_200
+
+        # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
+        if trend_aligned and not pd.isna(last_1h.get('vol_sma_20')):
+            guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+            if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
+                ema_fallback = last_1d.get('EMA_21', last_1d.get('EMA_8', current_price * 0.95))
+                sl = min(sq_mid, ema_fallback) if not pd.isna(ema_fallback) else sq_mid
+                _tp5u = current_price + (dynamic_sl_dist * 3.0)
+                _rr5u = abs(_tp5u - current_price) / max(abs(current_price - sl), 1e-8)
+                _scores5u = build_breakout_scores(
+                    bb_width=None, price=current_price,
+                    ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                    volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                    rr=_rr5u, regime=bist_regime,
+                    macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                )
+                _conv5u = calculate_conviction(_scores5u)
+                if _conv5u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                        "ticker": symbol, "market": "BIST",
+                        "strategy": "BIST 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "AL",
+                        "entry_price": current_price, "sl": sl, "tp": _tp5u,
+                        "conviction_score": _conv5u.total_score, "conviction_grade": _conv5u.grade, "conviction_details": _conv5u.component_scores,
+                        "position_size_pct": _conv5u.position_size_pct,
+                        "reason": (
+                            f"🗜️ Squeeze Patlaması!\n"
+                            f"BB(20,2) Keltner(20,1.5) içinden yukarı kırıldı.\n"
+                            f"Hacimli yeşil mum ile BB üst bandı aşıldı.\n"
+                            f"SL: Kırılım mumunun %50'si ({sl:.2f})"
+                        ) + _conv5u.to_reason_suffix()
+                    })
+    elif squeeze_fired and sq_dir == "down":
+        # SQUEEZE_TREND_ALIGN_REQUIRED: squeeze patlama yönünün günlük ana trendle uyumu
+        trend_aligned = True
+        if config.SQUEEZE_TREND_ALIGN_REQUIRED:
+            sma_200 = last_1d.get('SMA_200')
+            if sma_200 is not None and not pd.isna(sma_200):
+                trend_aligned = current_price < sma_200
+
+        # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
+        if trend_aligned and not pd.isna(last_1h.get('vol_sma_20')):
+            guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+            if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
+                ema_fallback = last_1d.get('EMA_21', last_1d.get('EMA_8', current_price * 1.05))
+                sl = max(sq_mid, ema_fallback) if not pd.isna(ema_fallback) else sq_mid
+                _tp5d = current_price - (dynamic_sl_dist * 3.0)
+                _rr5d = abs(current_price - _tp5d) / max(abs(sl - current_price), 1e-8)
+                _scores5d = build_breakout_scores(
+                    bb_width=None, price=current_price,
+                    ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                    volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                    rr=_rr5d, regime=bist_regime,
+                    macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                )
+                _conv5d = calculate_conviction(_scores5d)
+                if _conv5d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                        "ticker": symbol, "market": "BIST",
+                        "strategy": "BIST 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": "SAT",
+                        "entry_price": current_price, "sl": sl, "tp": _tp5d,
+                        "conviction_score": _conv5d.total_score, "conviction_grade": _conv5d.grade, "conviction_details": _conv5d.component_scores,
+                        "position_size_pct": _conv5d.position_size_pct,
+                        "reason": (
+                            f"🗜️ Squeeze Aşağı Patlaması!\n"
+                            f"BB(20,2) Keltner(20,1.5) içinden aşağı kırıldı.\n"
+                            f"Hacimli kırmızı mum ile BB alt bandı kırıldı.\n"
+                            f"SL: Kırılım mumunun %50'si ({sl:.2f})"
+                        ) + _conv5d.to_reason_suffix()
+                    })
+
+    # BIST 6: GÖRECELİ GÜÇ RADARI (RS)
+    if xu100_daily is not None:
+        rs_strong, rs_trend_up, idx_stressed, idx_recovering = calculate_relative_strength(df_1d, xu100_daily)
+        # RED-14: İmkansız AND gevşetmesi — endeks stres dışındaysa da kabul et
+        if rs_strong and rs_trend_up and (idx_recovering or not idx_stressed):
+            # RS_ENTRY_TIMING_RSI_LIMIT: timing teyidi (RSI çok aşırı alımda olmamalı, pull-back fırsatı sunmalı)
+            rsi_timing_ok = True
+            if not pd.isna(last_1h.get('RSI_14')):
+                if last_1h['RSI_14'] > config.RS_ENTRY_TIMING_RSI_LIMIT:
+                    rsi_timing_ok = False
+
+            # RED-07: Anlamlı hacim kontrolü (tutarlılık: BIST 1/3/7 ile aynı)
+            if rsi_timing_ok and not pd.isna(last_1h.get('vol_sma_20')):
+                guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
+                if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                    swing_lows_rs = sniper_find_swing_points(df_1d, point_type="low", neighbors=2)
+                    if swing_lows_rs:
+                        sl = swing_lows_rs[-1][1] * 0.98
+                    else:
+                        sl = current_price * 0.95
+                    _tp6 = current_price + (dynamic_sl_dist * 3.0)
+                    _rr6 = abs(_tp6 - current_price) / max(abs(current_price - sl), 1e-8)
+                    _scores6 = build_trend_scores(
+                        adx=None, adx_prev=None,
+                        price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                        rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
+                        volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                        rr=_rr6, has_engulfing=False, regime=bist_regime,
+                        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                    )
+                    _conv6 = calculate_conviction(_scores6)
+                    if _conv6.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                            "ticker": symbol, "market": "BIST",
+                            "strategy": "BIST 6: GÖRECELİ GÜÇ RADARI (RS)", "signal": "AL",
+                            "entry_price": current_price, "sl": sl, "tp": _tp6,
+                            "conviction_score": _conv6.total_score, "conviction_grade": _conv6.grade, "conviction_details": _conv6.component_scores,
+                            "position_size_pct": _conv6.position_size_pct,
+                            "reason": (
+                                f"🏋️ Endekse Kafa Tutan Hisse!\n"
+                                f"RS Çizgisi > 50G SMA (Güçlü ✅)\n"
+                                f"Endeks toparlandı, EMA8 üzerine çıktı.\n"
+                                f"Bu hisse endeks düşerken düşmedi → Kurumsal birikim."
+                            ) + _conv6.to_reason_suffix()
+                        })
+
+    # BIST 7: VWAP KURUMSAL MIKNATISI
+    sma_50 = last_1d.get('SMA_50')
+    sma_200 = last_1d.get('SMA_200')
+    is_bear_regime = (not pd.isna(sma_50) and not pd.isna(sma_200) and current_price < sma_50 and current_price < sma_200)
+    ema_21_daily = last_1d.get('EMA_21')
+    mtf_trend_down = (not pd.isna(ema_21_daily) and last_1d['close'] < ema_21_daily)
+    macro_gravity_ok = not xu100_down
+
+    if not is_bear_regime and not mtf_trend_down and macro_gravity_ok:
+        vwap_val = calculate_anchored_vwap(df_1h, anchor_type="weekly")
+        if vwap_val is not None:
+            bounce_ok, wick_low = detect_vwap_bounce(df_1h, vwap_val)
+            if bounce_ok and wick_low is not None:
+                # RED-01: Volume SMA manipülasyon koruması
+                vol_sma_20 = last_1h.get('vol_sma_20')
+                guarded_vol_sma = _apply_volume_sma_guard(df_1h, vol_sma_20)
+                if _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
+                    sl = wick_low * 0.995
+                    _tp7 = current_price + (dynamic_sl_dist * 3.0)
+                    _rr7 = abs(_tp7 - current_price) / max(abs(current_price - sl), 1e-8)
+                    _scores7 = build_trend_scores(
+                        adx=None, adx_prev=None,
+                        price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+                        rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
+                        volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
+                        rr=_rr7, has_engulfing=False, regime=bist_regime,
+                        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                    )
+                    _conv7 = calculate_conviction(_scores7)
+                    if _conv7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                            "ticker": symbol, "market": "BIST",
+                            "strategy": "BIST 7: VWAP KURUMSAL MIKNATISI", "signal": "AL",
+                            "entry_price": current_price, "sl": sl, "tp": _tp7,
+                            "conviction_score": _conv7.total_score, "conviction_grade": _conv7.grade, "conviction_details": _conv7.component_scores,
+                            "position_size_pct": _conv7.position_size_pct,
+                            "reason": (
+                                f"⚓ VWAP Bounce (Kurumsal Mıknatıs) + 4 Kapı Zırhı!\n"
+                                f"✅ Rejim: Boğa | ✅ Trend: Uyumlu | ✅ Endeks: Güvenli\n"
+                                f"Anchored VWAP: {vwap_val:.2f} (1.5x Hacimle Sıçradı)\n"
+                                f"SL: Fitil ucunun altı ({sl:.2f}) — Dar stop."
+                            ) + _conv7.to_reason_suffix()
+                        })
+
+    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation(df_1d, max_change_pct=7.0)
+    if obv_ok and obv_box_high is not None:
+        # RED-12: SL kutu ortasına indir — tepeden retest'te patlamayı engelle
+        sl = (obv_box_high + obv_box_low) / 2
+        cmf_val = calculate_cmf(df_1d)
+        cmf_label = f"CMF: {cmf_val:.3f}" if cmf_val is not None else "CMF: N/A"
+        _tp8 = current_price + (dynamic_sl_dist * 3.0)
+        _rr8 = abs(_tp8 - current_price) / max(abs(current_price - sl), 1e-8)
+        _scores8 = build_dip_scores(
+            rsi_daily=last_1d.get('RSI_14', 50), rsi_hourly=last_1h.get('RSI_14', 50),
+            rsi_prev=prev_1h.get('RSI_14', 50) if len(df_1h) >= 2 else 50,
+            price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'),
+            volume=last_1h.get('volume', 0), vol_sma=last_1h.get('vol_sma_20', 0),
+            dollar_vol=last_1h.get('volume', 0) * current_price,
+            rr=_rr8, has_engulfing=False, regime=bist_regime,
+            macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+            cmf=cmf_val if cmf_val is not None else 0.0
+        )
+        _conv8 = calculate_conviction(_scores8)
+        if _conv8.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                "ticker": symbol, "market": "BIST",
+                "strategy": "BIST 8: SESSİZ BİRİKİM RADARI (OBV)", "signal": "AL",
+                "entry_price": current_price, "sl": sl, "tp": _tp8,
+                "conviction_score": _conv8.total_score, "conviction_grade": _conv8.grade, "conviction_details": _conv8.component_scores,
+                "position_size_pct": _conv8.position_size_pct,
+                "reason": (
+                    f"🕵️ Sessiz Birikim + CMF Onaylı!\n"
+                    f"20 gün yatay kutu: {obv_box_low:.2f} - {obv_box_high:.2f}\n"
+                    f"OBV sürekli yeni tepeler yapıyor + {cmf_label}\n"
+                    f"Kutu direnci hacimli kırıldı → Ralli başlıyor."
+                ) + _conv8.to_reason_suffix()
+            })
+
+    # ════════════════════════════════════════
+    # BIST 10: KESKİN NİŞANCI (SNIPER)
+    # ════════════════════════════════════════
+    from conviction_scorer import build_sniper_scores, calculate_conviction, SNIPER_BIST_WEIGHTS
+    
+    df_1h_sniper = df_1h.copy()
+    df_1h_sniper.ta.kc(length=20, scalar=1.5, append=True)
+    df_1h_sniper.ta.bbands(length=20, std=2.0, append=True)
+    
+    kc_upper_col = [c for c in df_1h_sniper.columns if 'KCU' in c]
+    kc_lower_col = [c for c in df_1h_sniper.columns if 'KCL' in c]
+    bb_upper_col = [c for c in df_1h_sniper.columns if 'BBU' in c]
+    bb_lower_col = [c for c in df_1h_sniper.columns if 'BBL' in c]
+    bb_mid_col = [c for c in df_1h_sniper.columns if 'BBM' in c]
+    bb_pct_col = [c for c in df_1h_sniper.columns if 'BBP' in c]
+    
+    if kc_upper_col and kc_lower_col and bb_upper_col and bb_lower_col and bb_mid_col and bb_pct_col:
+        last_1h_s = df_1h_sniper.iloc[-1]
+        kcu = last_1h_s[kc_upper_col[0]]
+        kcl = last_1h_s[kc_lower_col[0]]
+        bbu = last_1h_s[bb_upper_col[0]]
+        bbl = last_1h_s[bb_lower_col[0]]
+        bbm = last_1h_s[bb_mid_col[0]]
+        bb_pct = last_1h_s[bb_pct_col[0]]
+        
+        bbw = (bbu - bbl) / bbm if bbm != 0 else 0
+        kcw = (kcu - kcl) / bbm if bbm != 0 else 0
+        
+        has_fvg, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bullish")
+        swing_lows_s = sniper_find_swing_points(df_1h_sniper, point_type="low")
+        sweep_ok, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
+        has_sfp = sweep_ok
+        
+        sl = current_price * 0.95
+        _tp_sn = current_price * 1.10
+        _rr_sn = abs(_tp_sn - current_price) / max(abs(current_price - sl), 1e-8)
+        guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h.get('vol_sma_20', 0))
+        
+        _scores_sn = build_sniper_scores(
+            price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
+            rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
+            volume=last_1h.get('volume', 0), vol_sma=guarded_vol_sma, dollar_vol=last_1h.get('volume', 0) * current_price,
+            rr=_rr_sn, regime=bist_regime,
+            macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol),
+            bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg, sfp_present=has_sfp,
+            market="BIST"
+        )
+        _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS)
+        if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                "ticker": symbol, "market": "BIST",
+                "strategy": "BIST 10: KESKİN NİŞANCI (SNIPER)", "signal": "AL",
+                "entry_price": current_price, "sl": sl, "tp": _tp_sn,
+                "conviction_score": _conv_sn.total_score, "conviction_grade": _conv_sn.grade, "conviction_details": _conv_sn.component_scores,
+                "position_size_pct": _conv_sn.position_size_pct,
+                "reason": (
+                    f"🎯 Keskin Nişancı!\n"
+                    f"Kanunlar: Squeeze: {_scores_sn['bbw_squeeze']:.1f}, %B: {_scores_sn['percent_b']:.1f}, FVG/SFP: {_scores_sn['fvg_sfp']:.1f}\n"
+                    f"SL: %5 Dar Stop ({sl:.2f})"
+                ) + _conv_sn.to_reason_suffix()
+            })
+
+    return signals
+
+
+# ════════════════════════════════════════
+# BIST 9: ZAMAN KAFESİ (ORB)
+# ════════════════════════════════════════
+def scan_orb_bist(symbol, df_15m):
+    """BIST 9: ZAMAN KAFESİ (ORB) taraması."""
+    signals = []
+    now = datetime.now(ZoneInfo("Europe/Istanbul"))
+    if now.hour < config.BIST9_TRADE_START_HOUR or (now.hour >= config.BIST9_TRADE_END_HOUR and now.minute > config.BIST9_TRADE_END_MINUTE):
+        return signals
+
+    cage_high, cage_low, cage_mid, today_vwap = calculate_orb_cage(df_15m)
+    if cage_high is None or today_vwap is None:
+        return signals
+
+    last = df_15m.iloc[-1]
+    current_price = float(last['close'])
+    tp_range = cage_high - cage_low
+    
+    # 1. Kafes Genişlik Sınırı
+    cage_width_pct = (tp_range / cage_low) * 100
+    if cage_width_pct > config.BIST9_MAX_CAGE_WIDTH_PCT:
+        return signals  # Hard Block: Kafes çok geniş
+
+    # 2. Hacim Bilgisi (Yetersiz olsa bile soft-score ile değerlendirilecek, Hard Block kaldırıldı)
+    candle_time = df_15m.index[-1]
+    rvol = calculate_time_specific_rvol(df_15m, target_hour=candle_time.hour, target_minute=candle_time.minute, period=config.BIST9_RVOL_PERIOD)
+    current_vol = last['volume']
+
+    # 3. EMA Hesaplaması (Soft-score içinde değerlendirilecek)
+    df = df_15m.copy()
+    df.ta.ema(length=config.BIST9_EMA_LENGTH, append=True)
+    ema21 = float(df[f'EMA_{config.BIST9_EMA_LENGTH}'].iloc[-1])
+    if math.isnan(ema21):
+        return signals
+
+    # 4. Endeks Korelasyonu
+    bist100_trend = get_bist100_trend()
+
+    # LONG Kırılım (Candle Close > Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
+    if current_price > cage_high and last['close'] > last['open']:
+        if bist100_trend != "BULL":
+             return signals  # Hard Block: Endeks Bullish değil
+
+        # ORB Hacim ve Gövde Kapanış Teyidi
+        # ORB_BODY_CLOSE_REQUIRED: Mum kapanış gövdesinin kafes üst sınırının üzerinde olmasını şart koşar.
+        # ORB_VOLUME_MULT: Kırılım hacminin, RVOL'in N katı olmasını şart koşar.
+        body_ok = not config.ORB_BODY_CLOSE_REQUIRED or (last['close'] > cage_high)
+        vol_ok = current_vol >= rvol * config.ORB_VOLUME_MULT
+             
+        if body_ok and vol_ok:
+            _sl9u = cage_mid
+            _tp9u = current_price + tp_range
+            _rr9u = abs(_tp9u - current_price) / max(abs(current_price - _sl9u), 1e-8)
+            _scores9u = build_breakout_scores(
+                bb_width=None, price=current_price,
+                ema_fast=ema21, ema_mid=today_vwap, ema_slow=None,
+                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
+                rr=_rr9u, regime="BULL",
+                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+            )
+            _conv9u = calculate_conviction(_scores9u)
+            if _conv9u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                    "ticker": symbol, "market": "BIST",
+                    "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "AL", "is_day_trade": True,
+                    "entry_price": current_price, "sl": cage_mid, "tp": _tp9u,
+                    "conviction_score": _conv9u.total_score, "conviction_grade": _conv9u.grade, "conviction_details": _conv9u.component_scores,
+                    "position_size_pct": _conv9u.position_size_pct,
+                    "reason": (
+                        f"⏱️ Açılış Kafesi Kırılımı (ORB)\n"
+                        f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f} (Genişlik: %{cage_width_pct:.2f})\n"
+                        f"📍 Fiyat: {current_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
+                        f"📈 Hacim: {current_vol:,.0f} (Ort. RVOL: {rvol:,.0f}, Oran: {current_vol/max(rvol, 1e-8):.2f}x)\n"
+                        f"🎯 Hedef: +{tp_range:.2f} TL\n"
+                        f"⚠️ DAY TRADE: 17:55'te otomatik kapatılır."
+                    ) + _conv9u.to_reason_suffix()
+                })
+    # SHORT Kırılım (Candle Close < Kafes, VWAP ve EMA21 onayları soft-score'a devredildi)
+    elif current_price < cage_low and last['close'] < last['open']:
+        if bist100_trend == "BULL":
+             return signals  # Hard Block: Endeks Bullish iken short açma
+
+        # ORB Hacim ve Gövde Kapanış Teyidi
+        body_ok = not config.ORB_BODY_CLOSE_REQUIRED or (last['close'] < cage_low)
+        vol_ok = current_vol >= rvol * config.ORB_VOLUME_MULT
+             
+        if body_ok and vol_ok:
+            _sl9d = cage_mid
+            _tp9d = current_price - tp_range
+            _rr9d = abs(tp_range) / max(abs(cage_mid - current_price), 1e-8)
+            _scores9d = build_breakout_scores(
+                bb_width=None, price=current_price, ema_fast=today_vwap, ema_mid=ema21, ema_slow=None,
+                volume=current_vol, vol_sma=rvol, dollar_vol=current_vol * current_price,
+                rr=_rr9d, regime="BEAR", macro_aligned=True,
+                consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+            )
+            _conv9d = calculate_conviction(_scores9d)
+            if _conv9d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                    "ticker": symbol, "market": "BIST",
+                    "strategy": "BIST 9: ZAMAN KAFESİ (ORB)", "signal": "SAT", "is_day_trade": True,
+                    "entry_price": current_price, "sl": cage_mid, "tp": _tp9d,
+                    "conviction_score": _conv9d.total_score, "conviction_grade": _conv9d.grade, "conviction_details": _conv9d.component_scores,
+                    "position_size_pct": _conv9d.position_size_pct,
+                    "reason": (
+                        f"⏱️ Açılış Kafesi Aşağı Kırılımı (ORB)\n"
+                        f"📊 Kafes: {cage_low:.2f} - {cage_high:.2f} (Genişlik: %{cage_width_pct:.2f})\n"
+                        f"📍 Fiyat: {current_price:.2f} TL (EMA21: {ema21:.2f}, VWAP: {today_vwap:.2f})\n"
+                        f"📈 Hacim: {current_vol:,.0f} (Ort. RVOL: {rvol:,.0f}, Oran: {current_vol/max(rvol, 1e-8):.2f}x)\n"
+                        f"🎯 Hedef: -{tp_range:.2f} TL\n"
+                        f"⚠️ DAY TRADE: 17:55'te otomatik kapatılır."
+                    ) + _conv9d.to_reason_suffix()
+                })
+
+    return signals
+
+
+# ════════════════════════════════════════
+# 2. KRİPTO STRATEJİ MODÜLÜ

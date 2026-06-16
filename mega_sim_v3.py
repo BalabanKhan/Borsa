@@ -42,14 +42,25 @@ class Colors:
 MEGA_ACTIVE_FILE = "mega_test_active.json"
 MEGA_HISTORY_FILE = "mega_test_history.json"
 
-TICKERS_BIST = ["THYAO.IS", "TUPRS.IS", "KCHOL.IS", "AKBNK.IS", "EREGL.IS"]
+TICKERS_BIST = [
+    "AEFES.IS", "AGHOL.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKFGY.IS", "AKFYE.IS", "AKSA.IS", "AKSEN.IS", "ALARK.IS",
+    "ALBRK.IS", "ALFAS.IS", "ARCLK.IS", "ASELS.IS", "ASTOR.IS", "BIMAS.IS", "BINHO.IS", "BRSAN.IS", "CANTE.IS", "CCOLA.IS",
+    "CIMSA.IS", "CWENE.IS", "DOAS.IS", "DOHOL.IS", "ECILC.IS", "EGEEN.IS", "EKGYO.IS", "ENERY.IS", "ENJSA.IS", "ENKAI.IS",
+    "EREGL.IS", "EUPWR.IS", "EUREN.IS", "FROTO.IS", "GARAN.IS", "GESAN.IS", "GUBRF.IS", "GWIND.IS", "HALKB.IS", "HEKTS.IS",
+    "ISCTR.IS", "ISGYO.IS", "ISMEN.IS", "IZENR.IS", "KALES.IS", "KARDMD.IS", "KCAER.IS", "KCHOL.IS", "KMPUR.IS", "KONYA.IS",
+    "KORDS.IS", "KOZAA.IS", "KOZAL.IS", "KRDMD.IS", "MAVI.IS", "MGROS.IS", "MIATK.IS", "ODAS.IS", "OTKAR.IS", "OYAKC.IS",
+    "PENTA.IS", "PETKM.IS", "PGSUS.IS", "QUAGR.IS", "REEDR.IS", "SAHOL.IS", "SASA.IS", "SDTTR.IS", "SISE.IS", "SKBNK.IS",
+    "SMRTG.IS", "SOKM.IS", "TABGD.IS", "TAVHL.IS", "TCELL.IS", "THYAO.IS", "TKFEN.IS", "TOASO.IS", "TSKB.IS", "TTKOM.IS",
+    "TTRAK.IS", "TUKAS.IS", "TUPRS.IS", "ULKER.IS", "VAKBN.IS", "VESBE.IS", "VESTL.IS", "YKBNK.IS", "YYLGD.IS", "ZOREN.IS",
+    "KLSER.IS", "KTLEV.IS", "CVKMD.IS", "KOPOL.IS", "BIENY.IS", "KAYSE.IS", "ASGYO.IS", "FZLGY.IS", "BJKAS.IS", "GSRAY.IS"
+]
 TICKERS_CRYPTO_LONG = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "AVAX/USDT"]
 TICKERS_CRYPTO_SHORT = ["DOGE/USDT", "PEPE/USDT", "WIF/USDT"]
 TICKERS_EMTIA = ["GC=F", "SI=F"] # Altın, Gümüş
 
-# Zaman Makinesi: Son 7 Gün
+# Zaman Makinesi: Son 30 Gün
 END_DATE = datetime.now()
-START_DATE = END_DATE - timedelta(days=7)
+START_DATE = END_DATE - timedelta(days=30)
 
 # Savaş Masası İstatistikleri
 stats = {
@@ -263,6 +274,11 @@ def run_simulation(market_type, tickers, strategy_name):
 
                 if sigs:
                     sig = sigs[0] # İlk sinyali alıyoruz
+                    import re
+                    match = re.search(r"Poz:\s*%(\d+)", sig['reason'])
+                    if match and int(match.group(1)) < 50:
+                        continue # Güven skoru %50'den düşükse sinyali yoksay
+                        
                     signal_type = "LONG" if sig['signal'] == "AL" else "SHORT"
                     strategy_reason = sig['reason']
                     sl_strat = float(sig['sl'])

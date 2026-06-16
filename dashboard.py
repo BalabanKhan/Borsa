@@ -12,7 +12,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import datetime
 import time
-
+import config
 # Dosya yolları
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TRACKER_FILE = os.path.join(BASE_DIR, "active_trades.json")
@@ -144,10 +144,10 @@ def _parse_scan_stats():
             'dg_rejects': dg_rejects,
             'avg_conviction': avg_score,
             'conviction_distribution': {
-                'strong': sum(1 for s in conviction_scores if s >= 75),
-                'medium': sum(1 for s in conviction_scores if 60 <= s < 75),
-                'watch': sum(1 for s in conviction_scores if 45 <= s < 60),
-                'reject': sum(1 for s in conviction_scores if s < 45),
+                'strong': sum(1 for s in conviction_scores if s >= config.GLOBAL_STRONG_CONVICTION_SCORE),
+                'medium': sum(1 for s in conviction_scores if config.GLOBAL_MEDIUM_CONVICTION_SCORE <= s < config.GLOBAL_STRONG_CONVICTION_SCORE),
+                'watch': sum(1 for s in conviction_scores if config.GLOBAL_MIN_CONVICTION_SCORE <= s < config.GLOBAL_MEDIUM_CONVICTION_SCORE),
+                'reject': sum(1 for s in conviction_scores if s < config.GLOBAL_MIN_CONVICTION_SCORE),
             } if conviction_scores else {}
         }
     except Exception:

@@ -475,28 +475,56 @@ def guard_dataframe(
 ) -> Optional[pd.DataFrame]:
     """
     Tek çağrıda DG-01 + DG-02 + DG-04 uygular.
-    Geçersiz veri → None döner (sinyal üretilmez).
-    Geçerli veri → aynı DataFrame döner.
+    Geçersiz veri → None döner (DG-01 için).
+    Bayatlık (DG-02) ve Anomali (DG-04) durumlarında DataFrame'e flag ekler (Soft Block).
+    Ayrıca Darth Maul ve Gap oranlarını hesaplayarak DataFrame'e ekler.
     """
-    # DG-01: OHLCV Bütünlük
+    # DG-01: OHLCV Bütünlük (Hard Block - Karantina)
     ok, reason = validate_ohlcv_integrity(df, symbol, timeframe)
     if not ok:
         logging.warning(reason)
         return None
 
-    # DG-02: Bayatlık
+    # Flag'leri başlat
+    df['dg_is_stale'] = False
+    df['dg_corporate_anomaly'] = False
+    df['dg_staleness_reason'] = ""
+    df['dg_anomaly_reason'] = ""
+
+    # DG-02: Bayatlık (Soft Penalty)
     if check_freshness:
         ok, reason = check_data_freshness(df, symbol, timeframe)
         if not ok:
             logging.warning(reason)
-            return None
+            df['dg_is_stale'] = True
+            df['dg_staleness_reason'] = reason
 
-    # DG-04: Kurumsal Eylem Anomalisi
+    # DG-04: Kurumsal Eylem Anomalisi (Soft Penalty)
     if check_anomaly:
         ok, reason = detect_corporate_action_anomaly(df, symbol)
         if not ok:
             logging.warning(reason)
-            return None
+            df['dg_corporate_anomaly'] = True
+            df['dg_anomaly_reason'] = reason
+
+    # Soft Penalty Ek Metrikleri Hesapla (Darth Maul, Gap)
+    try:
+        from config import DARTH_MAUL_BODY_RATIO
+    except ImportError:
+        DARTH_MAUL_BODY_RATIO = 0.15
+
+    total_range = df['high'] - df['low']
+    body = (df['close'] - df['open']).abs()
+    
+    # Sıfıra bölme hatasını önle
+    safe_range = total_range.replace(0, 1e-8)
+    df['dg_is_darth_maul'] = (body / safe_range) < DARTH_MAUL_BODY_RATIO
+
+    # Gap Yüzdesi
+    prev_close = df['close'].shift(1)
+    safe_prev_close = prev_close.replace(0, 1e-8)
+    df['dg_gap_pct'] = ((df['open'] - safe_prev_close).abs() / safe_prev_close) * 100
+    df['dg_gap_pct'] = df['dg_gap_pct'].fillna(0.0)
 
     return df
 
