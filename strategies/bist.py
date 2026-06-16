@@ -189,48 +189,36 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
 
     # BIST 2: TREND TAKİBİ
     if not pd.isna(last_4h.get('ADX_14')) and not pd.isna(last_4h.get('EMA_8')) and not pd.isna(last_4h.get('EMA_21')):
-        # TREND_BB_SQUEEZE_BLOCKED: Dar bant squeeze içindeyken trend takibini bloke eder (Chop market engeli)
-        in_squeeze = False
-        if config.TREND_BB_SQUEEZE_BLOCKED:
-            bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
-            bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
-            bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
-            if bb_upper_col and bb_lower_col and bb_mid_col:
-                bbu = last_1d[bb_upper_col[0]]
-                bbl = last_1d[bb_lower_col[0]]
-                bbm = last_1d[bb_mid_col[0]]
-                bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
-                if bb_width < 0.15:
-                    in_squeeze = True
-
         # RED-02: ADX momentum kontrolü — gecikmeli ve olgunlaşmış trend filtresi
-        if not in_squeeze and _adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h[f'EMA_{config.IND_EMA_21}']:
+        if _adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h[f'EMA_{config.IND_EMA_21}']:
             if not pd.isna(last_1h.get('EMA_21')):
                 if last_1h['low'] <= last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h[f'EMA_{config.IND_EMA_21}'] and last_1h['close'] > last_1h['open']:
-                    # AM-01: Engulfing momentum onayı — pullback'te gerçek dönüş mü?
-                    if check_bullish_engulfing_momentum(df_1h):
-                        sl = current_price - dynamic_sl_dist
-                        _tp2 = current_price * 1.10
-                        _rr2 = abs(_tp2 - current_price) / max(abs(current_price - sl), 1e-8)
-                        _adx_prev2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
-                        _scores2 = build_trend_scores(
-                            adx=last_4h['ADX_14'], adx_prev=_adx_prev2,
-                            price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=None,
-                            rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
-                            volume=last_1h['volume'], vol_sma=last_1h.get('vol_sma_20', 0), dollar_vol=last_1h['volume'] * current_price,
-                            rr=_rr2, has_engulfing=True, regime=bist_regime,
-                            macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
-                        )
-                        _conv2 = calculate_conviction(_scores2)
-                        if _conv2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                            signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                "ticker": symbol, "market": "BIST", "strategy": "BIST 2: TREND TAKİBİ", "signal": "AL",
-                                "entry_price": current_price, "sl": sl, "tp": _tp2,
-                                "conviction_score": _conv2.total_score, "conviction_grade": _conv2.grade, "conviction_details": _conv2.component_scores,
-                                "position_size_pct": _conv2.position_size_pct,
-                                "indicators": {"ADX_4S": round(last_4h.get("ADX_14", 0), 2), "RSI_1S": round(last_1h.get("RSI_14", 0), 2)},
-                                "reason": f"4S ADX>25 Trend + Engulfing Momentum. 1S EMA21 pullback. (ATR Stop: -%{sl_pct:.1f})" + _conv2.to_reason_suffix()
-                            })
+                    has_engulfing = check_bullish_engulfing_momentum(df_1h)
+                    sl = current_price - dynamic_sl_dist
+                    _tp2 = current_price * 1.10
+                    _rr2 = abs(_tp2 - current_price) / max(abs(current_price - sl), 1e-8)
+                    _adx_prev2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+                    _scores2 = build_trend_scores(
+                        adx=last_4h['ADX_14'], adx_prev=_adx_prev2,
+                        price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=None,
+                        rsi=last_1h.get('RSI_14'), rsi_prev=prev_1h.get('RSI_14') if len(df_1h) >= 2 else None,
+                        volume=last_1h['volume'], vol_sma=last_1h.get('vol_sma_20', 0), dollar_vol=last_1h['volume'] * current_price,
+                        rr=_rr2, has_engulfing=has_engulfing, regime=bist_regime,
+                        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                    )
+                    _conv2 = calculate_conviction(_scores2)
+                    if _conv2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                        signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                            "ticker": symbol, "market": "BIST", "strategy": "BIST 2: TREND TAKİBİ", "signal": "AL",
+                            "entry_price": current_price, "sl": sl, "tp": _tp2,
+                            "conviction_score": _conv2.total_score, "conviction_grade": _conv2.grade, "conviction_details": _conv2.component_scores,
+                            "position_size_pct": _conv2.position_size_pct,
+                            "indicators": {"ADX_4S": round(last_4h.get("ADX_14", 0), 2), "RSI_1S": round(last_1h.get("RSI_14", 0), 2)},
+                            "reason": (
+                                f"4S ADX>25 Trend{ ' + Engulfing Momentum' if has_engulfing else ''}. "
+                                f"1S EMA21 pullback. (ATR Stop: -%{sl_pct:.1f})"
+                            ) + _conv2.to_reason_suffix()
+                        })
 
     # BIST 3: KIRILIM VE MOMENTUM
     bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
