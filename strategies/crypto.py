@@ -175,6 +175,8 @@ def _check_crypto_2_mega_trend(ctx):
         return signals
 
     guarded_vol_sma = _apply_volume_sma_guard(df_4h, last_4h['vol_sma_20'])
+    if last_4h['volume'] < guarded_vol_sma * config.CRYPTO_TREND_VOLUME_SMA_MULT:
+        return signals
     if not _is_meaningful_volume(last_4h['volume'], guarded_vol_sma, current_price, "KRIPTO"):
         return signals
 
@@ -278,6 +280,11 @@ def _check_crypto_3_breakout(ctx):
     df_1d = ctx["df_1d"]
     df_4h = ctx["df_4h"]
     btc_ok = ctx["btc_ok"]
+
+    if last_4h.get('RSI_14', 0) >= config.CRYPTO_RETEST_RSI_MAX:
+        return signals
+    if last_4h.get('ADX_14', 0) < config.CRYPTO_RETEST_ADX_MIN:
+        return signals
 
     ok_setup, last_width = _is_breakout_setup(symbol, last_4h, current_price, df_1d, df_4h)
     if not ok_setup:
@@ -404,7 +411,11 @@ def _check_crypto_short_2_waterfall(ctx):
     if not (last_1d[f'EMA_{config.IND_EMA_MID}'] < last_1d[f'EMA_{config.IND_EMA_SLOW}'] and current_price < last_1d[f'EMA_{config.IND_EMA_MID}']):
         return signals
 
-    if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.ADX_STRONG_TREND:
+    if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.CRYPTO_SHORT2_ADX_MIN:
+        return signals
+        
+    vol_sma = last_4h.get('vol_sma_20', 0)
+    if vol_sma > 0 and last_4h.get('volume', 0) < vol_sma * config.CRYPTO_SHORT2_VOLUME_SMA_MULT:
         return signals
 
     if not (last_4h['high'] >= last_4h['EMA_20'] and current_price < last_4h['EMA_20'] and current_price < last_4h['open']):
@@ -746,6 +757,8 @@ def _check_crypto_5_vol_squeeze(ctx):
 
     sq_fired, sq_dir, sq_candle = detect_squeeze(df_4h)
     if sq_fired and sq_dir is not None:
+        if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] < config.CRYPTO_SQUEEZE_ADX_MIN:
+            return signals
         trend_up = (not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')) and
                     last_1d[f'EMA_{config.IND_EMA_MID}'] > last_1d[f'EMA_{config.IND_EMA_SLOW}'])
         valid_breakout = (sq_dir == "up" and trend_up) or (sq_dir == "down" and not trend_up)
@@ -794,10 +807,18 @@ def _check_crypto_5_vol_squeeze(ctx):
 def _check_crypto_6_vwap(ctx):
     signals = []
     symbol = ctx["symbol"]
+    last_1d = ctx["last_1d"]
     last_4h = ctx["last_4h"]
     current_price = ctx["current_price"]
     df_4h = ctx["df_4h"]
     btc_ok = ctx["btc_ok"]
+
+    if last_1d is None or pd.isna(last_1d.get('EMA_20')) or pd.isna(last_1d.get('EMA_50')):
+        return signals
+    if last_1d['EMA_20'] <= last_1d['EMA_50']:
+        return signals
+    if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.CRYPTO_VWAP_ADX_MIN:
+        return signals
 
     vwap_val = calculate_anchored_vwap(df_4h, anchor_type="weekly")
     if vwap_val is not None:

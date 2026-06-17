@@ -11,10 +11,18 @@ sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore')
 
 from data_fetcher import TOP_BIST, TOP_CRYPTO
+import config
+from indicators import (
+    detect_squeeze,
+    calculate_anchored_vwap,
+    detect_vwap_bounce,
+    detect_obv_accumulation,
+    inject_smart_indicators,
+)
 
 # Simulation parameters
 start_sim = pd.to_datetime("2026-06-08 00:00:00")
-end_sim = pd.to_datetime("2026-06-12 23:59:59")
+end_sim = pd.to_datetime("2026-06-17 23:59:59")
 
 exchange = ccxt.binance({'enableRateLimit': True})
 completed_trades = []
@@ -284,6 +292,9 @@ def _check_crypto_trend_following(row, curr_time, sym, last_1d, atr_val, dynamic
     current_price = row['close']
     if last_1d.get('EMA_20', 0) > last_1d.get('EMA_50', current_price*2) and last_1d['close'] > last_1d.get('EMA_20', current_price*2):
         if row.get('ADX_14', 0) > 25:
+            vol_sma = row.get('vol_sma_20', 0)
+            if vol_sma > 0 and row.get('volume', 0) < vol_sma * config.CRYPTO_TREND_VOLUME_SMA_MULT:
+                return None
             if row['low'] <= row.get('EMA_20', 0) and current_price > row.get('EMA_20', current_price*2) and current_price > row['open']:
                 sl_atr = current_price - (1.5 * atr_val)
                 sl_ema = row.get('EMA_50', current_price) * 0.98
@@ -296,6 +307,10 @@ def _check_crypto_trend_following(row, curr_time, sym, last_1d, atr_val, dynamic
 
 def _check_crypto_retest(row, curr_time, sym, avail_1d, df_4h, is_weekend):
     if is_weekend:
+        return None
+    if row.get('RSI_14', 0) >= config.CRYPTO_RETEST_RSI_MAX:
+        return None
+    if row.get('ADX_14', 0) < config.CRYPTO_RETEST_ADX_MIN:
         return None
     current_price = row['close']
     cols = avail_1d.columns
@@ -360,7 +375,10 @@ def _check_crypto_short_waterfall(row, curr_time, sym, avail_4h_for_high, last_1
     current_price = row['close']
     if last_1d.get('EMA_20', 0) >= last_1d.get('EMA_50', 0) or current_price >= last_1d.get('EMA_20', 0):
         return None
-    if row.get('ADX_14', 0) <= 30:
+    if row.get('ADX_14', 0) <= config.CRYPTO_SHORT2_ADX_MIN:
+        return None
+    vol_sma = row.get('vol_sma_20', 0)
+    if vol_sma > 0 and row.get('volume', 0) < vol_sma * config.CRYPTO_SHORT2_VOLUME_SMA_MULT:
         return None
     if row['high'] < row.get('EMA_20', 999999) or current_price >= row.get('EMA_20', 0) or current_price >= row['open']:
         return None
@@ -407,6 +425,83 @@ def _check_crypto_shorts(row, curr_time, sym, df_4h, last_1d, atr_val):
     if res3:
         return res3
     return None
+def _check_crypto_squeeze(row, curr_time, sym, df_4h, last_1d):
+    avail_4h = df_4h[df_4h.index <= curr_time]
+    if len(avail_4h) < 20:
+        return None
+    sq_fired, sq_dir, sq_candle = detect_squeeze(avail_4h)
+    if sq_fired and sq_dir is not None:
+        if row.get('ADX_14', 0) < config.CRYPTO_SQUEEZE_ADX_MIN:
+            return None
+        trend_up = (last_1d is not None and 
+                    not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')) and
+                    last_1d.get('EMA_20', 0) > last_1d.get('EMA_50', 0))
+        valid_breakout = (sq_dir == "up" and trend_up) or (sq_dir == "down" and not trend_up)
+        if valid_breakout:
+            if sq_dir == "up" and row.get('ADX_14', 0) < config.CRYPTO_SQUEEZE_LONG_ADX_MIN:
+                return None
+            sq_mid = (sq_candle['high'] + sq_candle['low']) / 2
+            ema20_4h = row.get('EMA_20', row['close'])
+            if sq_dir == "up":
+                sl = min(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
+                sl_dist = abs(row['close'] - sl)
+                tp = row['close'] + (sl_dist * config.BEAR_HUNTER_TP_RR)
+                return {
+                    'symbol': sym, 'market': 'KRIPTO', 'strategy': 'KRİPTO 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)', 'signal': 'AL',
+                    'entry_time': curr_time, 'entry_price': row['close'], 'sl': sl, 'tp': tp,
+                    'highest_high': row['close'], 'trailing_dist': sl_dist
+                }
+            else:
+                sl = max(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
+                sl_dist = abs(sl - row['close'])
+                tp = row['close'] - (sl_dist * config.BEAR_HUNTER_TP_RR)
+                return {
+                    'symbol': sym, 'market': 'KRIPTO', 'strategy': 'KRİPTO 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)', 'signal': 'SAT',
+                    'entry_time': curr_time, 'entry_price': row['close'], 'sl': sl, 'tp': tp,
+                    'lowest_low': row['close'], 'trailing_dist': sl_dist
+                }
+    return None
+
+def _check_crypto_vwap(row, curr_time, sym, df_4h, last_1d):
+    if last_1d is None or pd.isna(last_1d.get('EMA_20')) or pd.isna(last_1d.get('EMA_50')):
+        return None
+    if last_1d['EMA_20'] <= last_1d['EMA_50']:
+        return None
+    if row.get('ADX_14', 0) <= config.CRYPTO_VWAP_ADX_MIN:
+        return None
+        
+    avail_4h = df_4h[df_4h.index <= curr_time]
+    if len(avail_4h) < 20:
+        return None
+    vwap_val = calculate_anchored_vwap(avail_4h, anchor_type="weekly")
+    if vwap_val is not None:
+        bounce_ok, wick_low = detect_vwap_bounce(avail_4h, vwap_val)
+        if bounce_ok and wick_low is not None:
+            sl = wick_low * config.CRYPTO_VWAP_SL_MULT
+            sl_dist = abs(row['close'] - sl)
+            tp = row['close'] + (sl_dist * config.BEAR_HUNTER_TP_RR)
+            return {
+                'symbol': sym, 'market': 'KRIPTO', 'strategy': 'KRİPTO 6: VWAP KURUMSAL MIKNATISI', 'signal': 'AL',
+                'entry_time': curr_time, 'entry_price': row['close'], 'sl': sl, 'tp': tp,
+                'highest_high': row['close'], 'trailing_dist': sl_dist
+            }
+    return None
+
+def _check_crypto_obv(row, curr_time, sym, df_1d, last_1d):
+    avail_1d = df_1d[df_1d.index <= curr_time.floor('d')]
+    if len(avail_1d) < 30:
+        return None
+    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation(avail_1d, max_change_pct=config.CRYPTO_OBV_ACC_MAX_CHANGE_PCT)
+    if obv_ok and obv_box_high is not None:
+        sl = (obv_box_high + obv_box_low) / 2
+        sl_dist = abs(row['close'] - sl)
+        tp = row['close'] + (sl_dist * config.BEAR_HUNTER_TP_RR)
+        return {
+            'symbol': sym, 'market': 'KRIPTO', 'strategy': 'KRİPTO 7: SESSİZ BİRİKİM RADARI (OBV)', 'signal': 'AL',
+            'entry_time': curr_time, 'entry_price': row['close'], 'sl': sl, 'tp': tp,
+            'highest_high': row['close'], 'trailing_dist': sl_dist
+        }
+    return None
 
 def _check_crypto_entry_triggers(row, curr_time, sym, df_1d, df_4h, df_btc, atr_val, dynamic_sl_dist):
     avail_1d = df_1d[df_1d.index <= curr_time.floor('d')]
@@ -416,22 +511,42 @@ def _check_crypto_entry_triggers(row, curr_time, sym, df_1d, df_4h, df_btc, atr_
     last_1d = avail_1d.iloc[-1]
     is_weekend = _is_crypto_weekend(curr_time)
     
+    res = None
     res_dip = _check_crypto_dip_hunter(row, curr_time, sym, is_weekend)
     if res_dip:
-        return res_dip
-        
-    res_trend = _check_crypto_trend_following(row, curr_time, sym, last_1d, atr_val, dynamic_sl_dist)
-    if res_trend:
-        return res_trend
-        
-    res_retest = _check_crypto_retest(row, curr_time, sym, avail_1d, df_4h, is_weekend)
-    if res_retest:
-        return res_retest
-        
-    if not is_weekend and _is_btc_not_pumping(df_btc, curr_time):
-        res_short = _check_crypto_shorts(row, curr_time, sym, df_4h, last_1d, atr_val)
-        if res_short:
-            return res_short
+        res = res_dip
+    else:
+        res_trend = _check_crypto_trend_following(row, curr_time, sym, last_1d, atr_val, dynamic_sl_dist)
+        if res_trend:
+            res = res_trend
+        else:
+            res_retest = _check_crypto_retest(row, curr_time, sym, avail_1d, df_4h, is_weekend)
+            if res_retest:
+                res = res_retest
+            else:
+                res_squeeze = _check_crypto_squeeze(row, curr_time, sym, df_4h, last_1d)
+                if res_squeeze:
+                    res = res_squeeze
+                else:
+                    res_vwap = _check_crypto_vwap(row, curr_time, sym, df_4h, last_1d)
+                    if res_vwap:
+                        res = res_vwap
+                    else:
+                        res_obv = _check_crypto_obv(row, curr_time, sym, df_1d, last_1d)
+                        if res_obv:
+                            res = res_obv
+                        elif not is_weekend and _is_btc_not_pumping(df_btc, curr_time):
+                            res_short = _check_crypto_shorts(row, curr_time, sym, df_4h, last_1d, atr_val)
+                            if res_short:
+                                res = res_short
+                                
+    if res:
+        res['entry_rsi'] = float(row.get('RSI_14')) if not pd.isna(row.get('RSI_14')) else None
+        res['entry_adx'] = float(row.get('ADX_14')) if not pd.isna(row.get('ADX_14')) else None
+        res['entry_volume'] = float(row.get('volume')) if not pd.isna(row.get('volume')) else None
+        res['entry_vol_sma'] = float(row.get('vol_sma_20')) if not pd.isna(row.get('vol_sma_20')) else None
+        res['entry_atr'] = float(atr_val) if not pd.isna(atr_val) else None
+        return res
             
     return None
 
@@ -657,16 +772,10 @@ def _prepare_crypto_data(sym, start_ts):
         
         df_1d = df_4h.resample('1d').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna()
         
+        df_4h = inject_smart_indicators(df_4h)
         df_4h['vol_sma_20'] = ta.sma(df_4h['volume'], length=20)
-        df_4h.ta.rsi(length=14, append=True)
-        df_4h.ta.ema(length=20, append=True)
-        df_4h.ta.ema(length=50, append=True)
-        df_4h.ta.adx(length=14, append=True)
-        df_4h.ta.atr(length=14, append=True)
         
-        df_1d.ta.ema(length=20, append=True)
-        df_1d.ta.ema(length=50, append=True)
-        df_1d.ta.bbands(length=20, std=2, append=True)
+        df_1d = inject_smart_indicators(df_1d)
         return df_4h, df_1d
     except Exception as e:
         logging.warning(f"[simulate_crypto] {sym} veri hazırlama hatası: {e}")
@@ -741,7 +850,8 @@ def simulate_crypto():
 
 def simulate_pnl():
     completed_trades.clear()
-    simulate_bist()
+    # BIST simülasyonu devre dışı bırakıldı (Sadece Kripto varlıklar için)
+    # simulate_bist()
     simulate_crypto()
     
     df_trades = pd.DataFrame(completed_trades)
@@ -755,24 +865,30 @@ def simulate_pnl():
         losses = len(df_trades[df_trades['pnl_pct'] <= 0])
         total_pnl = df_trades['pnl_pct'].sum()
         
-        bist_trades = df_trades[df_trades['market'] == 'BIST']
-        crypto_trades = df_trades[df_trades['market'] == 'KRIPTO']
-        
-        print("\n=== ÖZET ===")
+        print("\n=== GENEL KRİPTO ÖZETİ ===")
         print(f"Toplam İşlem: {total_trades}")
         print(f"Karlı İşlem: {wins}")
         print(f"Zararlı İşlem: {losses}")
+        print(f"Kazanma Oranı (Win Rate): %{(wins/total_trades*100):.2f}" if total_trades > 0 else "N/A")
         print(f"Toplam Net Getiri Yüzdesi: %{total_pnl:.2f}")
         
-        print("\n=== BIST ÖZETİ ===")
-        print(f"Toplam İşlem: {len(bist_trades)}")
-        print(f"BIST Net Getiri: %{bist_trades['pnl_pct'].sum():.2f}")
-        
-        print("\n=== KRIPTO ÖZETİ ===")
-        print(f"Toplam İşlem: {len(crypto_trades)}")
-        print(f"Kripto Net Getiri: %{crypto_trades['pnl_pct'].sum():.2f}")
-        
+        # Strateji bazlı kırılım analizi
+        print("\n=== STRATEJİ BAZLI ANALİZ KIRILIMI ===")
+        strategies = df_trades['strategy'].unique()
+        for strat in sorted(strategies):
+            strat_trades = df_trades[df_trades['strategy'] == strat]
+            s_total = len(strat_trades)
+            s_wins = len(strat_trades[strat_trades['pnl_pct'] > 0])
+            s_losses = len(strat_trades[strat_trades['pnl_pct'] <= 0])
+            s_wr = (s_wins / s_total * 100) if s_total > 0 else 0
+            s_pnl = strat_trades['pnl_pct'].sum()
+            print(f"\nStrateji: {strat}")
+            print(f"  └─ Toplam Sinyal/İşlem Sayısı: {s_total}")
+            print(f"  └─ W/R Oranı                 : %{s_wr:.2f} ({s_wins} Win / {s_losses} Loss)")
+            print(f"  └─ Toplam Net PnL            : %{s_pnl:.2f}")
+            
         df_trades.to_csv("simulation_results.csv", index=False)
+        print("\nTüm detaylı işlem logları ve giriş parametreleri 'simulation_results.csv' dosyasına kaydedildi.")
     else:
         print("Hiç işlem gerçekleşmedi.")
 

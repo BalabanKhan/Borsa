@@ -1,2 +1,3 @@
 # AutoAccept Test Dosyası
-print("AutoAccept çalışıyor mu kontrol ediyoruz...")
+print("AutoAccept test başarılı! Yeni koordinatlar ve renk kontrolü tıkır tıkır çalışıyor. Test 7.")
+

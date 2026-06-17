@@ -51,9 +51,22 @@ class ScannerService:
     def _save_scan_metrics(self, metrics):
         if not metrics:
             return
+        def convert_numpy(obj):
+            import numpy as np
+            import pandas as pd
+            if isinstance(obj, (np.integer, np.int64, np.int32)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float64, np.float32)):
+                return float(obj)
+            elif isinstance(obj, (np.ndarray, pd.Series)):
+                return obj.tolist()
+            elif isinstance(obj, pd.DataFrame):
+                return obj.to_dict()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
         try:
             with open('last_scan_metrics.json', 'w', encoding='utf-8') as f:
-                json.dump(metrics, f, ensure_ascii=False, indent=2)
+                json.dump(metrics, f, ensure_ascii=False, indent=2, default=convert_numpy)
         except Exception as e:
             logger.warning(f"Metrics kaydedilemedi: {e}")
 
