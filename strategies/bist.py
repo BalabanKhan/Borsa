@@ -775,70 +775,89 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
             from indicators import detect_chart_patterns
             pattern_name, pattern_details = detect_chart_patterns(df_4h)
             if pattern_name and pattern_details.get("signal") == "AL":
-                sl = pattern_details.get("sl")
-                if sl is None or sl <= 0 or sl >= current_price:
-                    # Fallback to ATR-based SL
+                # TUZAK ENGELLEYİCİ FİLTRELER (Boğa Tuzağı Önlemi)
+                rsi_1d = df_1d['RSI_14'].iloc[-1] if 'RSI_14' in df_1d.columns else 50.0
+                ema_21_4h = df_4h['EMA_21'].iloc[-1] if 'EMA_21' in df_4h.columns else current_price
+                dist_to_ema21 = abs(current_price - ema_21_4h) / ema_21_4h * 100 if ema_21_4h > 0 else 0
+                
+                if rsi_1d >= 60.0 or dist_to_ema21 >= 6.0:
+                    pass # Boğa Tuzağı reddedildi
+                else:
+                    sl = pattern_details.get("sl")
+                    
                     atr_series_4h = df_4h['ATR_14'] if 'ATR_14' in df_4h.columns else df_4h.ta.atr(length=14)
                     atr_4h = float(atr_series_4h.iloc[-1]) if atr_series_4h is not None and not atr_series_4h.empty and not pd.isna(atr_series_4h.iloc[-1]) else (df_4h['high'].iloc[-1] - df_4h['low'].iloc[-1])
                     if atr_4h <= 0:
                         atr_4h = 1e-8
-                    sl = current_price - (atr_4h * config.BIST12_ATR_MULTIPLIER)
-                
-                tp = current_price + 3.0 * (current_price - sl)
-                rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
-                
-                # Conviction Scorer
-                vol_4h = df_4h['volume'].values
-                current_hour = df_4h.index[-1].hour
-                session_bars = df_4h[df_4h.index.hour == current_hour]
-                avg_vol_prev = float(session_bars.iloc[:-1]['volume'].mean()) if len(session_bars) >= 2 else float(np.mean(vol_4h[-11:-1]))
-                if avg_vol_prev <= 0:
-                    avg_vol_prev = 1.0
-                
-                _scores_pattern = build_trend_scores(
-                    adx=df_4h['ADX_14'].iloc[-1] if 'ADX_14' in df_4h.columns else 25.0,
-                    adx_prev=df_4h['ADX_14'].iloc[-2] if len(df_4h) >= 2 and 'ADX_14' in df_4h.columns else 25.0,
-                    price=current_price,
-                    ema_fast=df_4h['EMA_8'].iloc[-1] if 'EMA_8' in df_4h.columns else None,
-                    ema_mid=df_4h['EMA_21'].iloc[-1] if 'EMA_21' in df_4h.columns else None,
-                    ema_slow=df_1d['SMA_50'].iloc[-1] if 'SMA_50' in df_1d.columns else None,
-                    rsi=df_4h['RSI_14'].iloc[-1] if 'RSI_14' in df_4h.columns else 50.0,
-                    rsi_prev=df_4h['RSI_14'].iloc[-2] if len(df_4h) >= 2 and 'RSI_14' in df_4h.columns else 50.0,
-                    volume=vol_4h[-1],
-                    vol_sma=avg_vol_prev,
-                    dollar_vol=vol_4h[-1] * current_price,
-                    rr=rr,
-                    has_engulfing=False,
-                    regime=bist_regime,
-                    macro_aligned=not xu100_down,
-                    consecutive_sl=_get_consecutive_sl(symbol),
-                    market="BIST"
-                )
-                
-                _conv_pattern = calculate_conviction(_scores_pattern)
-                if _conv_pattern.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                    signals.append({
-                        "raw_indicators": _extract_raw_indicators(locals()),
-                        "ticker": symbol,
-                        "market": "BIST",
-                        "strategy": "BIST 12: GRAFİK FORMASYONLARI (CHART PATTERNS)",
-                        "signal": "AL",
-                        "entry_price": current_price,
-                        "sl": sl,
-                        "tp": tp,
-                        "conviction_score": _conv_pattern.total_score,
-                        "conviction_grade": _conv_pattern.grade,
-                        "conviction_details": _conv_pattern.component_scores,
-                        "position_size_pct": _conv_pattern.position_size_pct,
-                        "body_close_stop_required": True,
-                        "timeframe": "4h",
-                        "reason": (
-                            f"📈 Grafik Formasyonu Kırılımı: {pattern_name}\n"
-                            f"ℹ️ Detay: {pattern_details.get('details', 'N/A')}\n"
-                            f"📊 Hacim Teyidi: {vol_4h[-1] / avg_vol_prev:.1f}x (Eşik: {config.BIST12_VOLUME_MULT:.1f}x)\n"
-                            f"🎯 R:R Oranı: {rr:.2f}:1"
-                        ) + _conv_pattern.to_reason_suffix()
-                    })
+
+                    if sl is None or sl <= 0 or sl >= current_price:
+                        # Fallback to ATR-based SL if none provided
+                        sl = current_price - (atr_4h * config.BIST12_ATR_MULTIPLIER)
+                    
+                    # Daima minimum SL ve ATR çarpanı korumasını uygula
+                    atr_sl_dist = atr_4h * config.BIST12_ATR_MULTIPLIER
+                    min_sl_dist = current_price * config.BIST12_MIN_SL_PCT
+                    
+                    # Pattern kendi sl'ini daha geniş vermiş olabilir, en geniş mesafeyi seç
+                    pattern_sl_dist = current_price - sl
+                    final_sl_dist = max(pattern_sl_dist, atr_sl_dist, min_sl_dist)
+                    
+                    sl = current_price - final_sl_dist
+                    tp = current_price + 3.0 * (current_price - sl)
+                    rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                    
+                    # Conviction Scorer
+                    vol_4h = df_4h['volume'].values
+                    current_hour = df_4h.index[-1].hour
+                    session_bars = df_4h[df_4h.index.hour == current_hour]
+                    avg_vol_prev = float(session_bars.iloc[:-1]['volume'].mean()) if len(session_bars) >= 2 else float(np.mean(vol_4h[-11:-1]))
+                    if avg_vol_prev <= 0:
+                        avg_vol_prev = 1.0
+                    
+                    _scores_pattern = build_trend_scores(
+                        adx=df_4h['ADX_14'].iloc[-1] if 'ADX_14' in df_4h.columns else 25.0,
+                        adx_prev=df_4h['ADX_14'].iloc[-2] if len(df_4h) >= 2 and 'ADX_14' in df_4h.columns else 25.0,
+                        price=current_price,
+                        ema_fast=df_4h['EMA_8'].iloc[-1] if 'EMA_8' in df_4h.columns else None,
+                        ema_mid=df_4h['EMA_21'].iloc[-1] if 'EMA_21' in df_4h.columns else None,
+                        ema_slow=df_1d['SMA_50'].iloc[-1] if 'SMA_50' in df_1d.columns else None,
+                        rsi=df_4h['RSI_14'].iloc[-1] if 'RSI_14' in df_4h.columns else 50.0,
+                        rsi_prev=df_4h['RSI_14'].iloc[-2] if len(df_4h) >= 2 and 'RSI_14' in df_4h.columns else 50.0,
+                        volume=vol_4h[-1],
+                        vol_sma=avg_vol_prev,
+                        dollar_vol=vol_4h[-1] * current_price,
+                        rr=rr,
+                        has_engulfing=False,
+                        regime=bist_regime,
+                        macro_aligned=not xu100_down,
+                        consecutive_sl=_get_consecutive_sl(symbol),
+                        market="BIST"
+                    )
+                    
+                    _conv_pattern = calculate_conviction(_scores_pattern)
+                    if _conv_pattern.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                        signals.append({
+                            "raw_indicators": _extract_raw_indicators(locals()),
+                            "ticker": symbol,
+                            "market": "BIST",
+                            "strategy": "BIST 12: GRAFİK FORMASYONLARI (CHART PATTERNS)",
+                            "signal": "AL",
+                            "entry_price": current_price,
+                            "sl": sl,
+                            "tp": tp,
+                            "conviction_score": _conv_pattern.total_score,
+                            "conviction_grade": _conv_pattern.grade,
+                            "conviction_details": _conv_pattern.component_scores,
+                            "position_size_pct": _conv_pattern.position_size_pct,
+                            "body_close_stop_required": True,
+                            "timeframe": "4h",
+                            "reason": (
+                                f"📈 Grafik Formasyonu Kırılımı: {pattern_name}\n"
+                                f"ℹ️ Detay: {pattern_details.get('details', 'N/A')}\n"
+                                f"📊 Hacim Teyidi: {vol_4h[-1] / avg_vol_prev:.1f}x (Eşik: {config.BIST12_VOLUME_MULT:.1f}x)\n"
+                                f"🎯 R:R Oranı: {rr:.2f}:1"
+                            ) + _conv_pattern.to_reason_suffix()
+                        })
     except Exception as e:
         logging.warning(f"[analyze_strategies_bist] BIST 12 Hata: {e}", exc_info=True)
 

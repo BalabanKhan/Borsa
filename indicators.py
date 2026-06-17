@@ -1286,6 +1286,12 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
     
     # Son bar fiyat ve volatilite verileri
     current_price = close_arr[-1]
+    
+    # RSI Hesaplaması
+    if 'RSI_14' not in df_4h.columns:
+        df_4h.ta.rsi(length=14, append=True)
+    rsi_arr = df_4h['RSI_14'].values.astype(np.float64)
+    
     atr_series = df_4h.ta.atr(length=14) if 'ATR_14' not in df_4h.columns else df_4h['ATR_14']
     atr = float(atr_series.iloc[-1]) if atr_series is not None and not atr_series.empty and not pd.isna(atr_series.iloc[-1]) else (high_arr[-1] - low_arr[-1])
     if atr <= 0:
@@ -1355,12 +1361,22 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                     neck_price = val_p2 + m * (len(close_arr) - 1 - idx_p2)
                     
                     if current_price > neck_price:
-                        return "Ters Omuz Baş Omuz (TOBO) Kırılımı", {
-                            "pattern": "TOBO",
-                            "signal": "AL",
-                            "sl": val_v3 * 0.99,
-                            "details": f"Sol: {val_v1:.2f}, Baş: {val_v2:.2f}, Sağ: {val_v3:.2f}"
-                        }
+                        # RSI Uyumsuzluğu Kontrolü (Baş vs Sağ Omuz veya Sol vs Baş)
+                        rsi_divergence = False
+                        if rsi_arr[idx_v3] > rsi_arr[idx_v2] or rsi_arr[idx_v2] > rsi_arr[idx_v1]:
+                            rsi_divergence = True
+                            
+                        # Hacim Kontrolü
+                        current_hour = df_4h.index[-1].hour
+                        vol_ok = _check_session_aware_volume(df_4h, volume_arr[-1], current_hour)
+                        
+                        if (not config.BIST12_RSI_DIVERGENCE_REQUIRED or rsi_divergence) and vol_ok:
+                            return "Ters Omuz Baş Omuz (TOBO) Kırılımı", {
+                                "pattern": "TOBO",
+                                "signal": "AL",
+                                "sl": val_v3 * 0.99,
+                                "details": f"Sol: {val_v1:.2f}, Baş: {val_v2:.2f}, Sağ: {val_v3:.2f}"
+                            }
 
     # ----------------------------------------------------
     # 3. İkili Dip (Double Bottom) - Bullish Reversal
@@ -1380,13 +1396,23 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                 dip_diff = abs(val_v1 - val_v2) / max(val_v1, val_v2)
                 if dip_diff <= dynamic_double_tol:
                     if current_price > val_p:
-                        sl_level = min(val_v1, val_v2) * 0.99
-                        return "İkili Dip Kırılımı", {
-                            "pattern": "Double Bottom",
-                            "signal": "AL",
-                            "sl": sl_level,
-                            "details": f"Dip 1: {val_v1:.2f}, Dip 2: {val_v2:.2f}, Ara Tepe: {val_p:.2f}"
-                        }
+                        # RSI Uyumsuzluğu Kontrolü
+                        rsi_divergence = False
+                        if rsi_arr[idx_v2] > rsi_arr[idx_v1]: # Fiyat daha aşağıda veya eşitken RSI yükselmeli
+                            rsi_divergence = True
+                            
+                        # Hacim Kontrolü
+                        current_hour = df_4h.index[-1].hour
+                        vol_ok = _check_session_aware_volume(df_4h, volume_arr[-1], current_hour)
+
+                        if (not config.BIST12_RSI_DIVERGENCE_REQUIRED or rsi_divergence) and vol_ok:
+                            sl_level = min(val_v1, val_v2) * 0.99
+                            return "İkili Dip Kırılımı", {
+                                "pattern": "Double Bottom",
+                                "signal": "AL",
+                                "sl": sl_level,
+                                "details": f"Dip 1: {val_v1:.2f}, Dip 2: {val_v2:.2f}, Ara Tepe: {val_p:.2f}"
+                            }
 
     # ----------------------------------------------------
     # 4. Boğa Bayrağı (Bull Flag) - Bullish Continuation
@@ -1451,7 +1477,10 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                         sweep_ok = True
                         break
                 
-                if choch_ok and fvg_ok and sweep_ok:
+                # SMC Strict Mode kontrolü
+                smc_pass = (fvg_ok and sweep_ok) if config.BIST12_SMC_STRICT_MODE else True
+                
+                if choch_ok and smc_pass:
                     if current_price > resistance_at_last:
                         current_hour = df_4h.index[-1].hour
                         if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
@@ -1459,7 +1488,7 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                                 "pattern": "Falling Wedge",
                                 "signal": "AL",
                                 "sl": close_arr[v_idx[-1]] * 0.99,
-                                "details": f"Direnç Eğimi: %{norm_slope_p:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, FVG: Evet, Sweep: Evet"
+                                "details": f"Direnç Eğimi: %{norm_slope_p:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, SMC Strict: {config.BIST12_SMC_STRICT_MODE}"
                             }
 
     # ----------------------------------------------------
@@ -1494,14 +1523,61 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                             sweep_ok = True
                             break
                     
-                    if choch_ok and fvg_ok and sweep_ok:
+                    # SMC Strict Mode kontrolü
+                    smc_pass = (fvg_ok and sweep_ok) if config.BIST12_SMC_STRICT_MODE else True
+                    
+                    if choch_ok and smc_pass:
                         current_hour = df_4h.index[-1].hour
                         if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
                             return "Yükselen Üçgen Yukarı Kırılımı", {
                                 "pattern": "Ascending Triangle",
                                 "signal": "AL",
                                 "sl": close_arr[v_idx[-1]] * 0.99,
-                                "details": f"Direnç Varyansı: %{p_var:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, FVG: Evet, Sweep: Evet"
+                                "details": f"Direnç Varyansı: %{p_var:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, SMC Strict: {config.BIST12_SMC_STRICT_MODE}"
+                            }
+
+    # ----------------------------------------------------
+    # 7. Elmas Dip (Diamond Bottom) - Bullish Reversal
+    # ----------------------------------------------------
+    if len(valleys) >= 3 and len(peaks) >= 2:
+        # Basit bir elmas dip tespiti: Genişleyen yapı sonrası daralan yapı.
+        # V1 -> P1 -> V2 -> P2 -> V3 (V1 > V2 < V3, P1 < P2 > P3 veya benzeri)
+        # Orta dip en düşük olmalı, tepeler önce yükselip sonra düşmeli.
+        v1, v2, v3 = valleys[-3], valleys[-2], valleys[-1]
+        p_candidates_left = peaks[(peaks > v1) & (peaks < v2)]
+        p_candidates_right = peaks[(peaks > v2) & (peaks < v3)]
+        
+        if len(p_candidates_left) > 0 and len(p_candidates_right) > 0:
+            p1 = p_candidates_left[-1]
+            p2 = p_candidates_right[-1]
+            
+            val_v1, val_v2, val_v3 = close_arr[v1], close_arr[v2], close_arr[v3]
+            val_p1, val_p2 = close_arr[p1], close_arr[p2]
+            
+            # Elmas karakteristiği: V2 en düşük (Head of Diamond)
+            if val_v2 < val_v1 and val_v2 < val_v3:
+                # Genişleme (P1 > V1, P2 > P1 veya P2 yakın P1)
+                # Tam elmas için simetri aranır, ancak kırılım P2 ile V3 arasından çekilen düşen trendin kırılmasıdır.
+                m_desc = (val_v3 - val_p2) / max(1, (v3 - p2))
+                resistance_at_last = val_p2 + m_desc * (len(close_arr) - 1 - p2)
+                
+                # Elmas onayı: Daralma (V3 > V2) ve düşen trendin yukarı kırılması
+                if val_v3 > val_v2 and val_p2 < val_p1 * 1.05: # P2, P1'i çok aşmamalı
+                    if current_price > resistance_at_last:
+                        # RSI Uyumsuzluğu Kontrolü
+                        rsi_divergence = False
+                        if rsi_arr[v3] > rsi_arr[v2] or rsi_arr[v2] > rsi_arr[v1]:
+                            rsi_divergence = True
+                            
+                        current_hour = df_4h.index[-1].hour
+                        vol_ok = _check_session_aware_volume(df_4h, volume_arr[-1], current_hour)
+                        
+                        if (not config.BIST12_RSI_DIVERGENCE_REQUIRED or rsi_divergence) and vol_ok:
+                            return "Elmas Dip Yukarı Kırılımı", {
+                                "pattern": "Diamond Bottom",
+                                "signal": "AL",
+                                "sl": val_v2 * 0.99,
+                                "details": f"Orta Dip: {val_v2:.2f}, Kırılım Direnci: {resistance_at_last:.2f}"
                             }
 
     # ----------------------------------------------------

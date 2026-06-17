@@ -609,17 +609,20 @@ BIST11_DIVERGENCE_REQUIRED: bool = False      # RSI/MACD uyumsuzluğu zorunlu mu
 # --- 18. BIST 12: Grafik Formasyonları (Chart Patterns) ---
 BIST12_PROMINENCE_ATR_MULT: float = 0.5       # find_peaks için dinamik prominence (ATR oranı)
 BIST12_VOLATILITY_TOLERANCE_MULT: float = 1.0 # volatiliteye duyarlı tolerans katsayısı
-BIST12_OBO_BASE_TOLERANCE_PCT: float = 4.0    # OBO/TOBO omuzları arası taban tolerans yüzdesi (%)
+BIST12_OBO_BASE_TOLERANCE_PCT: float = 5.0    # OBO/TOBO omuzları arası taban tolerans yüzdesi (%)
 BIST12_NECK_TOLERANCE_PCT: float = 3.0       # OBO/TOBO boyun çizgisi hizalama toleransı (%)
-BIST12_DOUBLE_BASE_TOLERANCE_PCT: float = 2.5 # İkili dip/tepe taban tolerans yüzdesi (%)
-BIST12_RECTANGLE_HEIGHT_PCT: float = 4.0      # Dikdörtgen konsolidasyon kutusu maksimum yüksekliği (%)
+BIST12_DOUBLE_BASE_TOLERANCE_PCT: float = 4.5 # İkili dip/tepe taban tolerans yüzdesi (%)
+BIST12_RECTANGLE_HEIGHT_PCT: float = 5.5      # Dikdörtgen konsolidasyon kutusu maksimum yüksekliği (%)
 BIST12_FLAG_POLE_MIN_PCT: float = 10.0        # Bayrak direği minimum yükseliş/düşüş oranı (%)
 BIST12_FLAG_CONSOLIDATION_BARS: int = 6       # Bayrak konsolidasyon bar sayısı
-BIST12_VOLUME_MULT: float = 2.0               # Kırılım mumunun hacminin aynı seans ortalamasına oranı (min 2 kat)
+BIST12_VOLUME_MULT: float = 2.15              # Kırılım mumunun hacminin aynı seans ortalamasına oranı (min 2.15 kat)
+BIST12_RSI_DIVERGENCE_REQUIRED: bool = True   # İkili Dip, TOBO ve Elmas için RSI pozitif uyumsuzluğu zorunlu
 BIST12_ATR_MULTIPLIER: float = 2.0            # ATR tabanlı stop loss çarpanı
+BIST12_MIN_SL_PCT: float = 0.025              # Minimum stop loss mesafesi (örneğin %2.5)
 BIST12_WEDGE_CONVERGENCE_FACTOR: float = 0.1  # Takoz formasyonlarında çizgilerin yakınsama oranı (fark)
-BIST12_TRIANGLE_SLOPE_TOLERANCE: float = 0.05 # Yönlü üçgenlerde direnç/destek çizgisinin maksimum eğimi
-BIST12_HARMONIC_TOLERANCE: float = 0.02       # Harmonik formasyonlarda Fibonacci oran toleransı (%) (katı %2 limit)
+BIST12_TRIANGLE_SLOPE_TOLERANCE: float = 0.08 # Yönlü üçgenlerde direnç/destek çizgisinin maksimum eğimi
+BIST12_HARMONIC_TOLERANCE: float = 0.07       # Harmonik formasyonlarda Fibonacci oran toleransı (%) (katı %2 limit -> esnek %7)
+BIST12_SMC_STRICT_MODE: bool = False          # Eğer True ise Takoz ve Üçgenlerde FVG ve Likidite Temizliği arar. False ise sadece CHoCH yeterlidir.
 
 # --- 19. Kripto Optimizasyon Ayarları (KURAL 6 SSOT) ---
 BREAKOUT_CRYPTO_FUNDING_RATE_MAX: float = 0.05  # Kripto 3 Breakout için maksimum fonlama oranı
