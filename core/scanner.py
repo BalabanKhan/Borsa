@@ -74,9 +74,8 @@ class ScannerService:
         logger.info("Hibrit piyasa taraması başlatılıyor (BIST & Kripto)...")
         self._cleanup_cooldown()
 
-        loop = asyncio.get_event_loop()
         scan_start = time.time()
-        signals, scan_metrics = await loop.run_in_executor(None, scan_all_markets)
+        signals, scan_metrics = await scan_all_markets()
         logger.info(f"Tarama süresi: {time.time() - scan_start:.1f}s")
 
         self._save_scan_metrics(scan_metrics)

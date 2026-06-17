@@ -6,6 +6,7 @@ ThreadPoolExecutor ile toplu tarama.
 import logging
 import time as _time
 import gc
+import asyncio
 import config
 from datetime import datetime, time as dt_time
 from zoneinfo import ZoneInfo
@@ -48,17 +49,18 @@ from indicators import (
 from data_guard import guard_mtf_bundle, guard_signal_output
 
 
-
 from .bist import analyze_strategies_bist, scan_orb_bist
 from .crypto import analyze_strategies_crypto
 from .emtia import analyze_strategies_emtia
 from .bear_hunter import analyze_bear_hunter
 from .helpers import _get_bist_regime, _apply_regime_filter, _resolve_dual_signals, _apply_rr_filter
 # ════════════════════════════════════════
-def scan_all_markets():
+async def scan_all_markets():
     """Tüm piyasaları tarar ve (sinyal_listesi, scan_metrics) döndürür.
     
-    Scale-Up Optimizasyonları:
+    Scale-Up Optimizasyonları (Asenkron ve Paralel):
+    - asyncio.to_thread ile I/O bloklaması olmadan veri çekme.
+    - Kripto taramaları için Concurrency Semaphore (Eşzamanlı maksimum 10 istek).
     - Batch yfinance download (BIST 200 çağrı → 8 çağrı)
     - Cycle cache (Ayı Avcısı 96 gereksiz çağrı → 0)
     - gc.collect() (E2-micro 1GB RAM koruma)
@@ -89,15 +91,17 @@ def scan_all_markets():
     # 1. BIST TARAMALARI (Batch Download)
     if scan_bist and is_bist_open():
         t0 = _time.time()
-        xu100_down = check_xu100_wind()
-        xu100_daily = _get_xu100_daily_data()
+        xu100_down, xu100_daily = await asyncio.gather(
+            asyncio.to_thread(check_xu100_wind),
+            asyncio.to_thread(_get_xu100_daily_data)
+        )
 
         # FM-04: BIST Rejim Yöneticisi
         bist_regime = _get_bist_regime(xu100_daily)
         logging.info(f"[FM-04] BIST Rejimi: {bist_regime}")
 
         # Toplu BIST verisi çek (200 HTTP → ~8 batch çağrı)
-        bist_data = get_bist_data_batch(TOP_BIST, batch_size=25)
+        bist_data = await asyncio.to_thread(get_bist_data_batch, TOP_BIST, batch_size=25)
         
         for sym in TOP_BIST:
             try:
@@ -121,7 +125,7 @@ def scan_all_markets():
         # ORB (Zaman Kafesi) — Batch 15m
         now_ist = datetime.now(ZoneInfo("Europe/Istanbul"))
         if dt_time(config.BIST9_TRADE_START_HOUR, config.BIST9_TRADE_START_MINUTE) <= now_ist.time() <= dt_time(config.BIST9_TRADE_END_HOUR, config.BIST9_TRADE_END_MINUTE):
-            orb_data = get_bist_15m_batch(TOP_BIST, batch_size=25)
+            orb_data = await asyncio.to_thread(get_bist_15m_batch, TOP_BIST, batch_size=25)
 
             for sym in TOP_BIST:
                 try:
@@ -139,22 +143,33 @@ def scan_all_markets():
     # 2. KRİPTO TARAMALARI (Cycle Cache aktif)
     if scan_crypto:
         t0 = _time.time()
-        btc_ok = get_btc_status()
-        btc_sniper_bias = _get_btc_htf_bias()
+        btc_ok, btc_sniper_bias = await asyncio.gather(
+            asyncio.to_thread(get_btc_status),
+            asyncio.to_thread(_get_btc_htf_bias)
+        )
 
-        for sym in TOP_CRYPTO:
-            try:
-                # get_crypto_data_cached → hem burada hem Ayı Avcısı'nda kullanılır
-                df_1d, df_4h = get_crypto_data_cached(sym)
-                if df_1d is not None:
-                    # DG-05: MTF hizalama kontrolü
-                    if not guard_mtf_bundle(sym, df_1d, df_4h):
-                        continue
-                    sigs = analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias, metrics_collector=scan_metrics)
-                    all_signals.extend(sigs)
-            except Exception as e:
-                logging.warning(f"[scan_all_markets] KRİPTO {sym}: {e}")
-            _time.sleep(API_SLEEP_CRYPTO)
+        semaphore = asyncio.Semaphore(10)
+
+        async def fetch_and_analyze_crypto(sym):
+            async with semaphore:
+                try:
+                    df_1d, df_4h = await asyncio.to_thread(get_crypto_data_cached, sym)
+                    if df_1d is not None:
+                        # DG-05: MTF hizalama kontrolü
+                        if not guard_mtf_bundle(sym, df_1d, df_4h):
+                            return []
+                        return analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias, metrics_collector=scan_metrics)
+                except Exception as e:
+                    logging.warning(f"[scan_all_markets] KRİPTO {sym}: {e}")
+                finally:
+                    if API_SLEEP_CRYPTO > 0:
+                        await asyncio.sleep(API_SLEEP_CRYPTO)
+                return []
+
+        tasks = [fetch_and_analyze_crypto(sym) for sym in TOP_CRYPTO]
+        results = await asyncio.gather(*tasks)
+        for sigs in results:
+            all_signals.extend(sigs)
 
         logging.info(f"[scan_all_markets] Kripto tarama: {_time.time()-t0:.1f}s")
 
@@ -167,22 +182,33 @@ def scan_all_markets():
         logging.info("[scan_all_markets] ⏳ Makro haber saati (15:00-16:30) - Emtia taraması atlandı.")
     else:
         t0 = _time.time()
-        dxy_bullish = _check_dxy_shield()
+        dxy_bullish = await asyncio.to_thread(_check_dxy_shield)
         if dxy_bullish:
             logging.info("[scan_all_markets] 🛡️ DXY yükseliş trendinde - Altın/Gümüş LONG sinyalleri engellenecek.")
 
-        for sym in TOP_EMTIA:
-            try:
-                df_1d, df_4h = get_emtia_data(sym)
-                if df_1d is not None:
-                    # DG-05: MTF hizalama kontrolü
-                    if df_4h is not None and not guard_mtf_bundle(sym, df_1d, df_4h):
-                        continue
-                    sigs = analyze_strategies_emtia(sym, df_1d, df_4h, dxy_bullish, metrics_collector=scan_metrics)
-                    all_signals.extend(sigs)
-            except Exception as e:
-                logging.warning(f"[scan_all_markets] EMTİA {sym}: {e}")
-            _time.sleep(API_SLEEP_EMTIA)
+        semaphore_emtia = asyncio.Semaphore(5)
+
+        async def fetch_and_analyze_emtia(sym):
+            async with semaphore_emtia:
+                try:
+                    df_1d, df_4h = await asyncio.to_thread(get_emtia_data, sym)
+                    if df_1d is not None:
+                        # DG-05: MTF hizalama kontrolü
+                        if df_4h is not None and not guard_mtf_bundle(sym, df_1d, df_4h):
+                            return []
+                        return analyze_strategies_emtia(sym, df_1d, df_4h, dxy_bullish, metrics_collector=scan_metrics)
+                except Exception as e:
+                    logging.warning(f"[scan_all_markets] EMTİA {sym}: {e}")
+                finally:
+                    if API_SLEEP_EMTIA > 0:
+                        await asyncio.sleep(API_SLEEP_EMTIA)
+                return []
+
+        tasks = [fetch_and_analyze_emtia(sym) for sym in TOP_EMTIA]
+        results = await asyncio.gather(*tasks)
+        for sigs in results:
+            all_signals.extend(sigs)
+
         logging.info(f"[scan_all_markets] Emtia tarama: {_time.time()-t0:.1f}s")
 
     # 4. 🐻 AYI AVCISI (Cycle Cache → duplikasyon 0)
@@ -193,7 +219,7 @@ def scan_all_markets():
     if bypass_bear_hunter:
         logging.info("[scan_all_markets] 🛑 Kullanıcı isteği: AYI AVCISI taraması geçici olarak atlandı.")
     else:
-        btc_bullish = _is_btc_bullish_for_shorts()
+        btc_bullish = await asyncio.to_thread(_is_btc_bullish_for_shorts)
         if btc_bullish:
             logging.info("[scan_all_markets] 👑 BTC güçlü yükselişte - Tüm altcoin SHORT'lar engellendi.")
         else:
@@ -210,7 +236,6 @@ def scan_all_markets():
                         all_signals.extend(sigs)
                 except Exception as e:
                     logging.warning(f"[scan_all_markets] AYI_AVCISI {sym}: {e}")
-                # Cache hit → sleep gereksiz, cache miss → zaten get_crypto_data içinde sleep var
 
     logging.info(f"[scan_all_markets] Ayı Avcısı: {_time.time()-t0:.1f}s")
 
