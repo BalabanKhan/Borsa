@@ -11,6 +11,7 @@ import logging
 import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from typing import Optional
 from config import (
     SWING_MIN_AMPLITUDE_PCT, DIVERGENCE_MAX_AGE_CANDLES, SQUEEZE_CONFIRM_CANDLES,
     ENGULFING_MIN_BODY_RATIO, CMF_PERIOD, CMF_WASH_TRADE_THRESHOLD,
@@ -1069,3 +1070,165 @@ def calculate_time_specific_rvol(df_15m, target_hour: int, target_minute: int, p
     except Exception as e:
         logging.warning(f"[calculate_time_specific_rvol] Hata: {e}")
         return 0.0
+
+# ════════════════════════════════════════
+# BIST 11: Mum Formasyonları Tespiti & Destek Kontrolleri
+# ════════════════════════════════════════
+def detect_bullish_candlestick_pattern(df_4h) -> tuple[Optional[str], dict]:
+    """
+    4H grafik üzerinde en son tamamlanan mumda (veya son 3 mumda) 8 adet 
+    yükseliş (bullish) formasyonundan birinin olup olmadığını kontrol eder.
+    Returns:
+        (pattern_name, details_dict) - Bulunduysa pattern ismi ve detayları, yoksa (None, {})
+    """
+    from typing import Optional
+    import pandas as pd
+    if df_4h is None or len(df_4h) < 10:
+        return None, {}
+
+    o = df_4h['open'].values
+    h = df_4h['high'].values
+    l = df_4h['low'].values
+    c = df_4h['close'].values
+    
+    # ATR hesapla (formasyon boyları ve fitil kontrolleri için referans)
+    atr_series = df_4h.ta.atr(length=14) if 'ATR_14' not in df_4h.columns else df_4h['ATR_14']
+    atr = float(atr_series.iloc[-1]) if atr_series is not None and not atr_series.empty and not pd.isna(atr_series.iloc[-1]) else (h[-1] - l[-1])
+    if atr <= 0:
+        atr = 1e-8
+
+    idx = len(df_4h) - 1
+
+    # Yardımcı değişkenler (Index idx için)
+    open_curr = float(o[idx])
+    high_curr = float(h[idx])
+    low_curr = float(l[idx])
+    close_curr = float(c[idx])
+    body_curr = abs(close_curr - open_curr)
+    tot_curr = high_curr - low_curr if high_curr - low_curr > 0 else 1e-8
+    upper_shadow_curr = high_curr - max(open_curr, close_curr)
+    lower_shadow_curr = min(open_curr, close_curr) - low_curr
+    is_green_curr = close_curr > open_curr
+
+    # Önceki mum değişkenleri (Index idx - 1)
+    open_prev = float(o[idx - 1])
+    high_prev = float(h[idx - 1])
+    low_prev = float(l[idx - 1])
+    close_prev = float(c[idx - 1])
+    body_prev = abs(close_prev - open_prev)
+    is_green_prev = close_prev > open_prev
+
+    # İki önceki mum değişkenleri (Index idx - 2)
+    open_prev2 = float(o[idx - 2])
+    high_prev2 = float(h[idx - 2])
+    low_prev2 = float(l[idx - 2])
+    close_prev2 = float(c[idx - 2])
+    body_prev2 = abs(close_prev2 - open_prev2)
+    is_green_prev2 = close_prev2 > open_prev2
+
+    # 1. HAMMER (Çekiç)
+    # Alt fitil gövdenin en az 2 katı olmalı, üst fitil çok küçük olmalı
+    if lower_shadow_curr >= 2.0 * body_curr and upper_shadow_curr <= 0.1 * tot_curr and body_curr > 0:
+        # Fiyatın düşüş trendinde olduğunu veya son 5 mumun en düşüğü olduğunu teyit et
+        if low_curr <= min(l[idx-5:idx]):
+            return "Hammer (Çekiç)", {"pattern": "Hammer", "body": body_curr, "lower_shadow": lower_shadow_curr}
+
+    # 2. INVERTED HAMMER (Ters Çekiç)
+    # Üst fitil gövdenin en az 2 katı olmalı, alt fitil çok küçük olmalı
+    if upper_shadow_curr >= 2.0 * body_curr and lower_shadow_curr <= 0.1 * tot_curr and body_curr > 0:
+        if low_curr <= min(l[idx-5:idx]):
+            return "Inverted Hammer (Ters Çekiç)", {"pattern": "Inverted Hammer", "body": body_curr, "upper_shadow": upper_shadow_curr}
+
+    # 3. DRAGONFLY DOJI (Yusufçuk Doji)
+    # Gövde neredeyse yok, alt fitil çok uzun, üst fitil neredeyse yok
+    if body_curr <= 0.05 * tot_curr and lower_shadow_curr >= 0.7 * tot_curr and upper_shadow_curr <= 0.1 * tot_curr:
+        if low_curr <= min(l[idx-5:idx]):
+            return "Dragonfly Doji (Yusufçuk Doji)", {"pattern": "Dragonfly Doji", "lower_shadow": lower_shadow_curr}
+
+    # 4. BULLISH ENGULFING (Yutan Boğa)
+    # İlk mum kırmızı, ikinci yeşil ve gövdesi ilkini tamamen içine alıyor
+    if not is_green_prev and is_green_curr:
+        if open_curr <= close_prev and close_curr >= open_prev and (open_curr < close_prev or close_curr > open_prev):
+            if close_curr > close_prev:
+                return "Bullish Engulfing (Yutan Boğa)", {"pattern": "Bullish Engulfing", "body_prev": body_prev, "body_curr": body_curr}
+
+    # 5. PIERCING LINE (Delen Hat)
+    # İlk mum kırmızı, ikinci yeşil, açılışı eskinin altında, kapanışı eskinin gövdesinin en az yarısının üstünde ama açılışının altında
+    if not is_green_prev and is_green_curr:
+        half_body_prev = close_prev + 0.5 * (open_prev - close_prev)
+        if open_curr < close_prev and close_curr >= half_body_prev and close_curr < open_prev:
+            return "Piercing Line (Delen Hat)", {"pattern": "Piercing Line", "close_curr": close_curr, "half_prev": half_body_prev}
+
+    # 6. TWEEZER BOTTOM (Cımbız Dip)
+    # İki mumun dipleri neredeyse eşit, ikinci yeşil, ve dipler son 10 mumun alt yarısında
+    diff_lows = abs(low_curr - low_prev) / min(low_curr, low_prev) * 100
+    if diff_lows <= 0.05 and is_green_curr:
+        if low_curr <= min(l[idx-8:idx]):
+            return "Tweezer Bottom (Cımbız Dip)", {"pattern": "Tweezer Bottom", "low_diff_pct": diff_lows}
+
+    # 7. MORNING STAR (Sabah Yıldızı)
+    # Mum 1: kırmızı, Mum 2: küçük gövdeli kararsızlık, Mum 3: yeşil ve 1'in gövde yarısının üzerinde kapatıyor
+    if not is_green_prev2 and is_green_curr:
+        # Mum 2 gövdesi küçük (Mum 1 gövdesinin %30'undan az)
+        if body_prev <= 0.3 * body_prev2:
+            half_body_prev2 = close_prev2 + 0.5 * (open_prev2 - close_prev2)
+            if close_curr >= half_body_prev2 and open_curr >= close_prev:
+                return "Morning Star (Sabah Yıldızı)", {"pattern": "Morning Star"}
+
+    # 8. THREE WHITE SOLDIERS (Üç Beyaz Asker)
+    # Peş peşe üç yeşil mum, kapanışlar yükseliyor, gövdeler sağlıklı, üst fitiller kısa
+    if is_green_prev2 and is_green_prev and is_green_curr:
+        if close_curr > close_prev > close_prev2:
+            if body_curr > 0.1 * atr and body_prev > 0.1 * atr and body_prev2 > 0.1 * atr:
+                # Üst fitiller kısa
+                if upper_shadow_curr <= 0.2 * body_curr and (high_prev - close_prev) <= 0.2 * body_prev and (high_prev2 - close_prev2) <= 0.2 * body_prev2:
+                    return "Three White Soldiers (Üç Beyaz Asker)", {"pattern": "Three White Soldiers"}
+
+    return None, {}
+
+def check_near_support(current_price: float, df_4h, df_1d, tolerance_pct: float = 2.0) -> tuple[bool, str]:
+    """
+    Fiyatın önemli destek seviyelerine yakınlığını kontrol eder.
+    Destekler:
+    - 4H EMA_8, EMA_21
+    - 1D EMA_21, SMA_50, SMA_200
+    - 4H Bollinger Alt Bandı
+    """
+    import pandas as pd
+    if df_4h is None or len(df_4h) < 10 or df_1d is None or len(df_1d) < 10:
+        return False, "Yetersiz veri"
+
+    supports = {}
+    
+    # 4H EMA'lar
+    for length in [8, 21]:
+        col = f"EMA_{length}"
+        if col in df_4h.columns:
+            supports[f"4H {col}"] = float(df_4h[col].iloc[-1])
+            
+    # 1D EMA & SMA'lar
+    for col in ["EMA_21", "SMA_50", "SMA_200"]:
+        if col in df_1d.columns:
+            supports[f"1D {col}"] = float(df_1d[col].iloc[-1])
+
+    # 4H Bollinger Alt Bandı
+    bbl_cols = [c for c in df_4h.columns if 'BBL' in c]
+    if bbl_cols:
+        supports["4H BBL"] = float(df_4h[bbl_cols[0]].iloc[-1])
+
+    closest_support = None
+    min_dist_pct = float('inf')
+    
+    for name, val in supports.items():
+        if pd.isna(val) or val <= 0:
+            continue
+        dist_pct = (current_price - val) / val * 100
+        if -0.5 <= dist_pct <= tolerance_pct:
+            if abs(dist_pct) < abs(min_dist_pct):
+                min_dist_pct = dist_pct
+                closest_support = name
+
+    if closest_support:
+        return True, f"{closest_support} desteğine yakın (Mesafe: %{min_dist_pct:.2f})"
+        
+    return False, "Hiçbir önemli desteğe yakın değil"

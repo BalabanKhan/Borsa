@@ -572,6 +572,7 @@ TIME_STOP_STRATEGIES: list = [                # Zaman stopu uygulanacak kırıl�
     "BIST 3: SQUEEZE KIRILIMI",
     "BIST 5: HACİMLİ KIRILIM",
     "BIST 9: ZAMAN KAFESİ (ORB)",
+    "BIST 11: MUM FORMASYONLARI (CANDLESTICK)",
     "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
     "EMTİA 3: VOLATİLİTE SIKIŞMASI (SQUEEZE)",
     "BEAR 3: YAPI KIRILIMI"
@@ -595,4 +596,12 @@ VBT_INITIAL_CASH: float = 10000.0             # Başlangıç portföy büyüklü
 
 # --- 16. Hibrit Piyasa Zamanlayıcı (Test Modu) ---
 BYPASS_TIME_ROUTING: bool = False             # Zamanlayıcıyı tamamen devre dışı bırakıp her şeyi aynı anda taratmak için True yapın
+
+# --- 17. BIST 11: Mum Formasyonları (Candlestick) ---
+BIST11_ATR_MULTIPLIER: float = 2.0            # ATR tabanlı trailing stop çarpanı
+BIST11_VOLUME_SMA_PERIOD: int = 10            # Hacim teyidi için geriye dönük SMA periyodu
+BIST11_VOLUME_MULT: float = 1.2               # Formasyon mumunun hacminin ortalama hacme oranı
+BIST11_SUPPORT_TOLERANCE_PCT: float = 2.0     # Destek seviyelerine maksimum yakınlık yüzdesi
+BIST11_DIVERGENCE_REQUIRED: bool = True       # RSI/MACD uyumsuzluğu zorunlu mu
+
 

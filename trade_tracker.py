@@ -11,6 +11,7 @@ import csv
 import tempfile
 import threading
 from datetime import datetime, timezone
+from typing import Optional
 from data_sources import get_funding_rate
 from data_guard import validate_signal_output
 from circuit_breaker import cb_observer
@@ -980,6 +981,90 @@ def _write_trade_journal_csv(trade):
 
 
 # ---------------------------------------------------------------------------
+# Yardımcı Fonksiyonlar - Mum Kapanış Stopu
+# ---------------------------------------------------------------------------
+def _get_last_completed_candle_close(ticker: str, timeframe: str) -> Optional[float]:
+    """
+    Belirtilen ticker ve timeframe için son tamamlanan mumun kapanış fiyatını döner.
+    Intraday fitil sarkmalarını (wicks) elemek için SMC (Smart Money Concepts) tarzı kapanış stopu sağlar.
+    """
+    from data_sources import get_bist_data, get_crypto_data, get_crypto_1h_data
+    import pandas as pd
+    from datetime import datetime, timezone
+
+    timeframe_lower = timeframe.lower()
+    df = None
+
+    try:
+        if ".IS" in ticker:
+            # BIST ticker
+            df_1d, df_4h, df_1h = get_bist_data(ticker)
+            if timeframe_lower == "1d":
+                df = df_1d
+            elif timeframe_lower == "1h":
+                df = df_1h
+            else:
+                df = df_4h
+        else:
+            # Kripto veya Emtia ticker
+            if timeframe_lower == "1h":
+                df = get_crypto_1h_data(ticker)
+            elif timeframe_lower == "1d":
+                df_1d, _ = get_crypto_data(ticker)
+                df = df_1d
+            else:
+                _, df_4h = get_crypto_data(ticker)
+                df = df_4h
+    except Exception as e:
+        logging.warning(f"[_get_last_completed_candle_close] Veri çekme hatası ({ticker}, {timeframe}): {e}")
+        return None
+
+    if df is None or df.empty:
+        logging.warning(f"[_get_last_completed_candle_close] Veri boş döndü ({ticker}, {timeframe})")
+        return None
+
+    # Zaman diliminin süresini hesapla
+    if timeframe_lower == "1d":
+        duration = pd.Timedelta(days=1)
+    elif timeframe_lower == "1h":
+        duration = pd.Timedelta(hours=1)
+    else:
+        duration = pd.Timedelta(hours=4) # Varsayılan 4h
+
+    try:
+        last_time = df.index[-1]
+        now = datetime.now(timezone.utc)
+
+        # Timezone mismatch engelleme
+        if last_time.tzinfo is not None:
+            now_compare = now.astimezone(last_time.tzinfo)
+        else:
+            now_compare = datetime.now() # Naive karşılaştırma
+
+        age = now_compare - last_time
+
+        # Eğer son mumun yaşı periyot süresinden küçükse, mum henüz tamamlanmamıştır (active/live candle).
+        # Bu durumda bir önceki tamamlanmış mumu (iloc[-2]) kullanırız.
+        if age < duration:
+            if len(df) >= 2:
+                completed_val = float(df['close'].iloc[-2])
+                logging.info(f"[_get_last_completed_candle_close] {ticker} ({timeframe}): Son mum henüz tamamlanmadı ({age} < {duration}). iloc[-2] kapanışı kullanılıyor: {completed_val}")
+                return completed_val
+            else:
+                completed_val = float(df['close'].iloc[-1])
+                logging.warning(f"[_get_last_completed_candle_close] {ticker} ({timeframe}): Veri boyutu yetersiz. iloc[-1] kapanışı kullanılıyor: {completed_val}")
+                return completed_val
+        else:
+            # Son mum tamamlanmıştır
+            completed_val = float(df['close'].iloc[-1])
+            logging.info(f"[_get_last_completed_candle_close] {ticker} ({timeframe}): Son mum tamamlandı ({age} >= {duration}). iloc[-1] kapanışı kullanılıyor: {completed_val}")
+            return completed_val
+    except Exception as e:
+        logging.warning(f"[_get_last_completed_candle_close] İşleme hatası ({ticker}, {timeframe}): {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Ana Kontrol Döngüsü
 # ---------------------------------------------------------------------------
 def check_active_trades(current_prices_dict):
@@ -1014,16 +1099,28 @@ def check_active_trades(current_prices_dict):
         if "trailing_dist" not in t:
             t["trailing_dist"] = entry_price - sl if signal == "AL" else sl - entry_price
 
-        # Kâr yüzdesi
+        # Gövde Kapanış Stopu (SMC-style body close stop) Kontrolü
+        body_close_stop_required = t.get("body_close_stop_required", False)
+        timeframe = t.get("timeframe", "4h")
+
+        check_price = current_price
+        if body_close_stop_required:
+            completed_close = _get_last_completed_candle_close(ticker, timeframe)
+            if completed_close is not None:
+                check_price = completed_close
+
+        # Kâr yüzdeleri (Fitil ve Gövde için ayrı hesaplama)
         if signal == "AL":
-            profit_pct = ((current_price - entry_price) / entry_price) * 100
+            profit_pct_wick = ((current_price - entry_price) / entry_price) * 100
+            profit_pct_body = ((check_price - entry_price) / entry_price) * 100
         else:
-            profit_pct = ((entry_price - current_price) / entry_price) * 100
+            profit_pct_wick = ((entry_price - current_price) / entry_price) * 100
+            profit_pct_body = ((entry_price - check_price) / entry_price) * 100
 
         # WATCH kontrolü
         is_watch = t.get("is_watch", False)
 
-        # === 1. KARA KUĞU KONTROLÜ (en önce, fiyat patlayınca hemen çık) ===
+        # === 1. KARA KUĞU KONTROLÜ (en önce, fiyat patlayınca hemen çık - wicks) ===
         t, bs_notifs, is_black_swan = _check_black_swan(t, current_price, signal)
         if not is_watch: notifications.extend(bs_notifs)
         if is_black_swan:
@@ -1031,41 +1128,39 @@ def check_active_trades(current_prices_dict):
             continue
 
         if not is_watch:
-            # === 2. KADEMELİ KÂR AL (Scale-Out) ===
-            t, so_notifs = _check_scale_out(t, profit_pct, signal, strategy_name, current_price)
+            # === 2. KADEMELİ KÂR AL (Scale-Out - wicks) ===
+            t, so_notifs = _check_scale_out(t, profit_pct_wick, signal, strategy_name, current_price)
             notifications.extend(so_notifs)
 
-            # === 3. DİNAMİK İZLEYEN STOP (Trailing Stop) ===
-            t, ts_notifs = _update_trailing_stop(t, current_price, profit_pct, signal, strategy_name)
+            # === 3. DİNAMİK İZLEYEN STOP (Trailing Stop - body close if required) ===
+            t, ts_notifs = _update_trailing_stop(t, check_price, profit_pct_body, signal, strategy_name)
             notifications.extend(ts_notifs)
 
-            # === 4. FONLAMA ORANI KALKANI (Funding Shield) ===
-            t, fs_notifs, funding_close = _check_funding_shield(t, current_price, profit_pct, signal)
+            # === 4. FONLAMA ORANI KALKANI (Funding Shield - wicks) ===
+            t, fs_notifs, funding_close = _check_funding_shield(t, current_price, profit_pct_wick, signal)
             notifications.extend(fs_notifs)
             if funding_close:
                 _stamp_exit_data(t, current_price)
                 closed_trades.append(t)
                 continue
 
-            # === 5. TEHLİKE BÖLGESİ (Danger Zone) ===
-            t, dz_notifs = _check_danger_zone(t, current_price, signal)
+            # === 5. TEHLİKE BÖLGESİ (Danger Zone - body close if required) ===
+            t, dz_notifs = _check_danger_zone(t, check_price, signal)
             notifications.extend(dz_notifs)
 
-            # === 5.5. SFP MFE / ZAMAN FİLTRESİ ===
-            t, sfp_notifs, sfp_close = _check_sfp_mfe_time_filter(t, current_price, profit_pct)
+            # === 5.5. SFP MFE / ZAMAN FİLTRESİ (body close if required) ===
+            t, sfp_notifs, sfp_close = _check_sfp_mfe_time_filter(t, check_price, profit_pct_body)
             if sfp_close:
                 notifications.extend(sfp_notifs)
-                _stamp_exit_data(t, current_price)
+                _stamp_exit_data(t, check_price)
                 closed_trades.append(t)
                 continue
 
-            # 99 yapılmıştır
-            # === 5.6. ZAMAN STOPU (Time Stop) ===
-            # Kırılım işlemlerinde sahte kırılım tespiti durumunda pozisyon zaman stopuyla sonlandırılır.
-            t, time_stop_notifs, time_stop_close = _check_time_stop(t, current_price, profit_pct)
+            # === 5.6. ZAMAN STOPU (Time Stop - body close if required) ===
+            t, time_stop_notifs, time_stop_close = _check_time_stop(t, check_price, profit_pct_body)
             if time_stop_close:
                 notifications.extend(time_stop_notifs)
-                _stamp_exit_data(t, current_price)
+                _stamp_exit_data(t, check_price)
                 closed_trades.append(t)
                 continue
 
@@ -1078,10 +1173,11 @@ def check_active_trades(current_prices_dict):
                 if not is_watch: notifications.append(close_msg)
                 _stamp_exit_data(t, current_price)
                 t["status"] = "CLOSED_TP"
-            elif current_price <= sl:
-                close_msg = _format_close_message(t, current_price, signal, "SL")
+            elif check_price <= sl:
+                # Gövde stopu tetiklendiğinde candle close (check_price) exit price olarak damgalanır.
+                close_msg = _format_close_message(t, check_price, signal, "SL")
                 if not is_watch: notifications.append(close_msg)
-                _stamp_exit_data(t, current_price)
+                _stamp_exit_data(t, check_price)
                 t["status"] = "CLOSED_SL"
 
         elif signal == "SAT":
@@ -1090,10 +1186,11 @@ def check_active_trades(current_prices_dict):
                 if not is_watch: notifications.append(close_msg)
                 _stamp_exit_data(t, current_price)
                 t["status"] = "CLOSED_TP"
-            elif current_price >= sl:
-                close_msg = _format_close_message(t, current_price, signal, "SL")
+            elif check_price >= sl:
+                # Gövde stopu tetiklendiğinde candle close (check_price) exit price olarak damgalanır.
+                close_msg = _format_close_message(t, check_price, signal, "SL")
                 if not is_watch: notifications.append(close_msg)
-                _stamp_exit_data(t, current_price)
+                _stamp_exit_data(t, check_price)
                 t["status"] = "CLOSED_SL"
 
         # Duruma göre listeye ekle

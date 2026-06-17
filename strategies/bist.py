@@ -50,6 +50,7 @@ from indicators import (
     detect_bullish_divergence, detect_squeeze, calculate_relative_strength,
     calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation, detect_obv_accumulation_bist,
     calculate_orb_cage, calculate_time_specific_rvol,
+    detect_bullish_candlestick_pattern, check_near_support,
     # AM Serisi
     check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
     sniper_calculate_ote_body,
@@ -94,6 +95,8 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
     df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
     df_4h.ta.ema(length=config.IND_EMA_21, append=True)
+    df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
 
     df_1h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
     df_1h.ta.ema(length=config.IND_EMA_FAST, append=True)
@@ -659,6 +662,90 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                         f"SL: Bollinger Alt Band Altı ({sl:.2f})"
                     ) + _conv_sn.to_reason_suffix()
                 })
+
+    # BIST 11: MUM FORMASYONLARI (CANDLESTICK) - 4H Grafik
+    try:
+        if len(df_4h) >= 20:
+            pattern_name, pattern_details = detect_bullish_candlestick_pattern(df_4h)
+            if pattern_name:
+                near_support, support_reason = check_near_support(current_price, df_4h, df_1d, tolerance_pct=config.BIST11_SUPPORT_TOLERANCE_PCT)
+                
+                # Hacim teyidi: son mumun hacmi, son 10 tamamlanan mumun (idx-10'dan idx-1'e) hacim ortalamasının 1.2 katından büyük/eşit olmalı
+                vol_4h = df_4h['volume'].values
+                vol_sma_period = config.BIST11_VOLUME_SMA_PERIOD
+                recent_vols = vol_4h[-(vol_sma_period+1):-1]
+                avg_vol_prev = recent_vols.mean() if len(recent_vols) > 0 else 0
+                vol_ratio = vol_4h[-1] / avg_vol_prev if avg_vol_prev > 0 else 0
+                volume_ok = vol_ratio >= config.BIST11_VOLUME_MULT
+
+                div_ok = True
+                if config.BIST11_DIVERGENCE_REQUIRED:
+                    div_ok, _, _, _, _ = detect_bullish_divergence(df_4h, neighbors=3)
+
+                # Destek ve Hacim teyidi geçerlilik şartıdır
+                if near_support and volume_ok:
+                    atr_series_4h = df_4h['ATR_14'] if 'ATR_14' in df_4h.columns else df_4h.ta.atr(length=14)
+                    atr_4h = float(atr_series_4h.iloc[-1]) if atr_series_4h is not None and not atr_series_4h.empty and not pd.isna(atr_series_4h.iloc[-1]) else (df_4h['high'].iloc[-1] - df_4h['low'].iloc[-1])
+                    if atr_4h <= 0:
+                        atr_4h = 1e-8
+                        
+                    sl = current_price - (atr_4h * config.BIST11_ATR_MULTIPLIER)
+                    tp = current_price + 3.0 * (current_price - sl)
+                    rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+
+                    # Conviction Scorer
+                    rsi_d = df_1d['RSI_14'].iloc[-1] if 'RSI_14' in df_1d.columns else 50.0
+                    rsi_h = df_4h['RSI_14'].iloc[-1] if 'RSI_14' in df_4h.columns else 50.0
+                    rsi_p = df_4h['RSI_14'].iloc[-2] if len(df_4h) >= 2 and 'RSI_14' in df_4h.columns else rsi_h
+                    
+                    _scores_cand = build_dip_scores(
+                        rsi_daily=rsi_d,
+                        rsi_hourly=rsi_h,
+                        rsi_prev=rsi_p,
+                        price=current_price,
+                        ema_fast=df_4h['EMA_8'].iloc[-1] if 'EMA_8' in df_4h.columns else None,
+                        ema_mid=df_4h['EMA_21'].iloc[-1] if 'EMA_21' in df_4h.columns else None,
+                        volume=vol_4h[-1],
+                        vol_sma=avg_vol_prev,
+                        dollar_vol=vol_4h[-1] * current_price,
+                        rr=rr,
+                        has_engulfing=True,
+                        regime=bist_regime,
+                        macro_aligned=not xu100_down,
+                        consecutive_sl=_get_consecutive_sl(symbol),
+                        market="BIST"
+                    )
+                    
+                    if div_ok:
+                        _scores_cand['rsi'] = 100.0
+                        _scores_cand['rsi_direction'] = 100.0
+
+                    _conv_cand = calculate_conviction(_scores_cand)
+                    if _conv_cand.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                        signals.append({
+                            "raw_indicators": _extract_raw_indicators(locals()),
+                            "ticker": symbol, 
+                            "market": "BIST",
+                            "strategy": "BIST 11: MUM FORMASYONLARI (CANDLESTICK)", 
+                            "signal": "AL",
+                            "entry_price": current_price, 
+                            "sl": sl, 
+                            "tp": tp,
+                            "conviction_score": _conv_cand.total_score, 
+                            "conviction_grade": _conv_cand.grade, 
+                            "conviction_details": _conv_cand.component_scores,
+                            "position_size_pct": _conv_cand.position_size_pct,
+                            "body_close_stop_required": True,
+                            "timeframe": "4h",
+                            "reason": (
+                                f"🕯️ 4H Mum Formasyonu: {pattern_name}\n"
+                                f"🛡️ Destek Teyidi: {support_reason}\n"
+                                f"📊 Hacim Teyidi: {vol_ratio:.1f}x (Eşik: {config.BIST11_VOLUME_MULT:.1f}x)\n"
+                                f"📈 Uyumsuzluk Teyidi: {'Evet' if div_ok else 'Hayır'}"
+                            ) + _conv_cand.to_reason_suffix()
+                        })
+    except Exception as e:
+        logging.warning(f"[analyze_strategies_bist] BIST 11 Hata: {e}", exc_info=True)
 
     return signals
 
