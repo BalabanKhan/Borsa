@@ -1437,15 +1437,30 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
         if norm_slope_p < -0.05 and norm_slope_v < -0.05:
             if norm_slope_p < norm_slope_v - config.BIST12_WEDGE_CONVERGENCE_FACTOR:
                 resistance_at_last = slope_p * (len(close_arr) - 1) + intercept_p
-                if current_price > resistance_at_last:
-                    current_hour = df_4h.index[-1].hour
-                    if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
-                        return "Alçalan Takoz Yukarı Kırılımı", {
-                            "pattern": "Falling Wedge",
-                            "signal": "AL",
-                            "sl": close_arr[v_idx[-1]] * 0.99,
-                            "details": f"Direnç Eğimi: %{norm_slope_p:.2f}, Destek Eğimi: %{norm_slope_v:.2f}"
-                        }
+                
+                # SMC Filtresi: CHoCH ve FVG kontrolü
+                last_peak_val = close_arr[p_idx[-1]]
+                choch_ok = current_price > last_peak_val
+                fvg_ok = len(low_arr) >= 3 and (low_arr[-1] > high_arr[-3])
+                
+                # Liquidity Sweep: Vadilerin (destek bölgesi) fitille ihlal edilip temizlenmesi
+                support_level = min(low_arr[v_idx[-3]], low_arr[v_idx[-2]])
+                sweep_ok = False
+                for idx in range(v_idx[-2], len(close_arr)):
+                    if low_arr[idx] < support_level and close_arr[idx] >= support_level:
+                        sweep_ok = True
+                        break
+                
+                if choch_ok and fvg_ok and sweep_ok:
+                    if current_price > resistance_at_last:
+                        current_hour = df_4h.index[-1].hour
+                        if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
+                            return "Alçalan Takoz Yukarı Kırılımı", {
+                                "pattern": "Falling Wedge",
+                                "signal": "AL",
+                                "sl": close_arr[v_idx[-1]] * 0.99,
+                                "details": f"Direnç Eğimi: %{norm_slope_p:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, FVG: Evet, Sweep: Evet"
+                            }
 
     # ----------------------------------------------------
     # 6. Yükselen Üçgen (Ascending Triangle) - Bullish Breakout
@@ -1467,55 +1482,27 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                 p_var = (max_p - min_p) / min_p * 100.0
                 
                 if p_var <= 2.5:
-                    if current_price > max_p:
+                    # SMC Filtresi: CHoCH ve FVG kontrolü
+                    choch_ok = current_price > max_p
+                    fvg_ok = len(low_arr) >= 3 and (low_arr[-1] > high_arr[-3])
+                    
+                    # Liquidity Sweep: Destek seviyelerinin fitille ihlali ve geri toparlanması
+                    support_level = min(low_arr[v_idx[-3]], low_arr[v_idx[-2]])
+                    sweep_ok = False
+                    for idx in range(v_idx[-2], len(close_arr)):
+                        if low_arr[idx] < support_level and close_arr[idx] >= support_level:
+                            sweep_ok = True
+                            break
+                    
+                    if choch_ok and fvg_ok and sweep_ok:
                         current_hour = df_4h.index[-1].hour
                         if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
                             return "Yükselen Üçgen Yukarı Kırılımı", {
                                 "pattern": "Ascending Triangle",
                                 "signal": "AL",
                                 "sl": close_arr[v_idx[-1]] * 0.99,
-                                "details": f"Direnç Varyansı: %{p_var:.2f}, Destek Eğimi: %{norm_slope_v:.2f}"
+                                "details": f"Direnç Varyansı: %{p_var:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, FVG: Evet, Sweep: Evet"
                             }
-
-    # ----------------------------------------------------
-    # 7. Elmas Dip (Diamond Bottom) - Bullish Reversal
-    # ----------------------------------------------------
-    if len(valleys) >= 4 and len(peaks) >= 4:
-        p_idx = list(peaks[-4:])
-        v_idx = list(valleys[-4:])
-        
-        combined_pivots = sorted(
-            [(idx, 'P', close_arr[idx]) for idx in p_idx] + 
-            [(idx, 'V', close_arr[idx]) for idx in v_idx], 
-            key=lambda x: x[0]
-        )
-        
-        alternates = True
-        for i in range(len(combined_pivots) - 1):
-            if combined_pivots[i][1] == combined_pivots[i+1][1]:
-                alternates = False
-                break
-                
-        if alternates and len(combined_pivots) >= 8:
-            hp1, hp2, hp3, hp4 = close_arr[p_idx[0]], close_arr[p_idx[1]], close_arr[p_idx[2]], close_arr[p_idx[3]]
-            lv1, lv2, lv3, lv4 = close_arr[v_idx[0]], close_arr[v_idx[1]], close_arr[v_idx[2]], close_arr[v_idx[3]]
-            
-            if hp2 > hp1 and hp3 > hp4 and lv2 < lv1 and lv3 < lv4:
-                if max(hp2, hp3) > max(hp1, hp4) and min(lv2, lv3) < min(lv1, lv4):
-                    slope_r, intercept_r = np.polyfit(p_idx[-2:], close_arr[p_idx[-2:]], 1)
-                    norm_slope_r = slope_r / current_price * 100.0
-                    
-                    if norm_slope_r < -0.01:
-                        resistance_at_last = slope_r * (len(close_arr) - 1) + intercept_r
-                        if current_price > resistance_at_last:
-                            current_hour = df_4h.index[-1].hour
-                            if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
-                                return "Elmas Dip Yukarı Kırılımı", {
-                                    "pattern": "Diamond Bottom",
-                                    "signal": "AL",
-                                    "sl": min(lv2, lv3) * 0.99,
-                                    "details": f"Elmas Zirvesi: {max(hp2,hp3):.2f}, Elmas Dibi: {min(lv2,lv3):.2f}"
-                                }
 
     # ----------------------------------------------------
     # 8. Harmonik Formasyonlar (AB=CD, Gartley, Bat)
@@ -1529,6 +1516,10 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
             [(idx, 'V', close_arr[idx]) for idx in v_candidates],
             key=lambda x: x[0]
         )
+        
+        # Calculate RSI safely for cross-verification
+        rsi_col = f'RSI_{config.IND_RSI_LENGTH}'
+        rsi_series = df_4h[rsi_col] if rsi_col in df_4h.columns else ta.rsi(df_4h['close'], length=config.IND_RSI_LENGTH)
         
         if len(all_pivots) >= 5:
             pivots_5 = all_pivots[-5:]
@@ -1557,30 +1548,43 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                 
                 tol = config.BIST12_HARMONIC_TOLERANCE
                 
-                if abs(ratio_ab_xa - 0.618) <= tol:
-                    if 0.382 - tol <= ratio_bc_ab <= 0.886 + tol:
-                        if 1.272 - tol <= ratio_cd_bc <= 1.618 + tol:
-                            if abs(ratio_ad_xa - 0.786) <= tol:
-                                if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
-                                    return "Harmonik Gartley Formasyonu (Boğa)", {
-                                        "pattern": "Harmonic Gartley",
-                                        "signal": "AL",
-                                        "sl": d_val * 0.99,
-                                        "details": f"D Noktası: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}"
-                                    }
-                                    
-                if 0.382 - tol <= ratio_ab_xa <= 0.50 + tol:
-                    if 0.382 - tol <= ratio_bc_ab <= 0.886 + tol:
-                        if 1.618 - tol <= ratio_cd_bc <= 2.618 + tol:
-                            if abs(ratio_ad_xa - 0.886) <= tol:
-                                if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
-                                    return "Harmonik Bat Formasyonu (Boğa)", {
-                                        "pattern": "Harmonic Bat",
-                                        "signal": "AL",
-                                        "sl": d_val * 0.99,
-                                        "details": f"D Noktası: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}"
-                                    }
-
+                # Verify Bullish RSI Divergence: D price < B price, and D RSI > B RSI
+                rsi_b = float(rsi_series.iloc[idx_b]) if rsi_series is not None and len(rsi_series) > idx_b else None
+                rsi_d = float(rsi_series.iloc[idx_d]) if rsi_series is not None and len(rsi_series) > idx_d else None
+                has_rsi_div = (
+                    rsi_b is not None and 
+                    rsi_d is not None and 
+                    not np.isnan(rsi_b) and 
+                    not np.isnan(rsi_d) and 
+                    d_val < b_val and 
+                    rsi_d > rsi_b
+                )
+                
+                if has_rsi_div:
+                    if abs(ratio_ab_xa - 0.618) <= tol:
+                        if 0.382 - tol <= ratio_bc_ab <= 0.886 + tol:
+                            if 1.272 - tol <= ratio_cd_bc <= 1.618 + tol:
+                                if abs(ratio_ad_xa - 0.786) <= tol:
+                                    if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
+                                        return "Harmonik Gartley Formasyonu (Boğa)", {
+                                            "pattern": "Harmonic Gartley",
+                                            "signal": "AL",
+                                            "sl": d_val * 0.99,
+                                            "details": f"D Noktası: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}, RSI Div: {rsi_d:.1f} > {rsi_b:.1f}"
+                                        }
+                                        
+                    if 0.382 - tol <= ratio_ab_xa <= 0.50 + tol:
+                        if 0.382 - tol <= ratio_bc_ab <= 0.886 + tol:
+                            if 1.618 - tol <= ratio_cd_bc <= 2.618 + tol:
+                                if abs(ratio_ad_xa - 0.886) <= tol:
+                                    if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
+                                        return "Harmonik Bat Formasyonu (Boğa)", {
+                                            "pattern": "Harmonic Bat",
+                                            "signal": "AL",
+                                            "sl": d_val * 0.99,
+                                            "details": f"D Noktası: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}, RSI Div: {rsi_d:.1f} > {rsi_b:.1f}"
+                                        }
+ 
         if len(all_pivots) >= 4:
             pivots_4 = all_pivots[-4:]
             is_alt_4 = True
@@ -1604,15 +1608,28 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                 
                 tol = config.BIST12_HARMONIC_TOLERANCE
                 
-                if 0.618 - tol <= ratio_bc_ab <= 0.786 + tol:
-                    if 1.272 - tol <= ratio_cd_bc <= 1.618 + tol:
-                        if abs(ab - cd) / max(ab, cd) <= tol:
-                            if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
-                                return "Harmonik AB=CD Formasyonu (Boğa)", {
-                                    "pattern": "Harmonic ABCD",
-                                    "signal": "AL",
-                                    "sl": d_val * 0.99,
-                                    "details": f"AB: {ab:.2f}, CD: {cd:.2f}"
-                                }
+                # Verify Bullish RSI Divergence: D price < B price, and D RSI > B RSI
+                rsi_b = float(rsi_series.iloc[idx_b]) if rsi_series is not None and len(rsi_series) > idx_b else None
+                rsi_d = float(rsi_series.iloc[idx_d]) if rsi_series is not None and len(rsi_series) > idx_d else None
+                has_rsi_div = (
+                    rsi_b is not None and 
+                    rsi_d is not None and 
+                    not np.isnan(rsi_b) and 
+                    not np.isnan(rsi_d) and 
+                    d_val < b_val and 
+                    rsi_d > rsi_b
+                )
+                
+                if has_rsi_div:
+                    if 0.618 - tol <= ratio_bc_ab <= 0.786 + tol:
+                        if 1.272 - tol <= ratio_cd_bc <= 1.618 + tol:
+                            if abs(ab - cd) / max(ab, cd) <= tol:
+                                if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
+                                    return "Harmonik AB=CD Formasyonu (Boğa)", {
+                                        "pattern": "Harmonic ABCD",
+                                        "signal": "AL",
+                                        "sl": d_val * 0.99,
+                                        "details": f"AB: {ab:.2f}, CD: {cd:.2f}, RSI Div: {rsi_d:.1f} > {rsi_b:.1f}"
+                                    }
 
     return None, {}
