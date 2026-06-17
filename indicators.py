@@ -1267,6 +1267,22 @@ def check_near_support(current_price: float, df_4h, df_1d, tolerance_pct: float 
         return True, f"{closest_support} yakinlarinda (Mesafe: %{min_dist_pct:.2f})"
     return False, "Destek bolgesine yakin degil"
 
+def _check_session_aware_volume(df_4h, current_volume: float, current_hour: int) -> bool:
+    """
+    Kırılım mumunun seans saatine göre seans-hacim (RVOL) teyidi.
+    Aynı seans saatine ait geçmiş mumların ortalama hacminin config.BIST12_VOLUME_MULT katı olup olmadığını doğrular.
+    """
+    session_bars = df_4h[df_4h.index.hour == current_hour]
+    if len(session_bars) >= 2:
+        avg_vol = float(session_bars.iloc[:-1]['volume'].mean())
+    else:
+        avg_vol = float(df_4h['volume'].rolling(config.BIST_CHART_RVOL_LOOKBACK).mean().iloc[-1])
+        
+    if avg_vol <= 0:
+        avg_vol = 1.0
+        
+    return current_volume >= (avg_vol * config.BIST12_VOLUME_MULT)
+
 def _check_rectangle_breakout(df_4h, close_arr, high_arr, low_arr, volume_arr, current_price):
     box_len = 20
     if len(close_arr) >= box_len:
