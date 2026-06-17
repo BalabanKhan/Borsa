@@ -77,9 +77,9 @@ def _check_crypto_1_liquidation(ctx):
         oi_crash = fetch_crypto_oi_crash(symbol)
         if oi_crash:
             lowest_wick = last_4h['low']
-            sl = lowest_wick * 0.99
+            sl = lowest_wick * config.CRYPTO_DIP_SL_MULT
             sl_dist = abs(current_price - sl)
-            tp = current_price + (sl_dist * 3.0)
+            tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
             _prev_4h = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
             dm_ratio = _get_darth_maul_ratio(last_4h)
@@ -123,7 +123,7 @@ def _check_mega_trend_1d_squeeze(last_1d, df_1d):
     bbm = last_1d[bb_mid[0]]
     if bbm == 0:
         return True
-    return (bbu - bbl) / bbm >= 0.15
+    return (bbu - bbl) / bbm >= config.CRYPTO_SQUEEZE_WIDTH_LIMIT
 
 
 def _check_mega_trend_1d_trend(last_1d):
@@ -138,7 +138,7 @@ def _check_mega_trend_4h_indicators(last_4h, current_price):
     atr_col = 'ATRr_14' if 'ATRr_14' in last_4h.index else 'ATR_14'
     if pd.isna(last_4h.get('ADX_14')) or pd.isna(last_4h.get('EMA_20')) or pd.isna(last_4h.get(atr_col)):
         return False
-    if last_4h['ADX_14'] <= 25:
+    if last_4h['ADX_14'] <= config.CRYPTO_TREND_ADX_MIN:
         return False
     ema_mid_4h = last_4h.get(f'EMA_{config.IND_EMA_MID}')
     if ema_mid_4h is None or pd.isna(ema_mid_4h):
@@ -184,14 +184,14 @@ def _check_crypto_2_mega_trend(ctx):
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
-        atr_val = current_price * 0.02
+        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
     raw_atr_sl = ATR_MULTIPLIER_CRYPTO * atr_val
     capped_sl_dist = min(raw_atr_sl, current_price * ATR_CAP_CRYPTO)
     sl_atr = current_price - capped_sl_dist
-    sl_ema = last_4h.get('EMA_50', current_price) * 0.98
+    sl_ema = last_4h.get('EMA_50', current_price) * config.CRYPTO_TREND_SL_EMA_MULT
     sl = max(sl_atr, sl_ema)
     sl_dist = abs(current_price - sl)
-    _tp_c2 = current_price + (sl_dist * 3.0)
+    _tp_c2 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c2 = abs(_tp_c2 - current_price) / max(abs(current_price - sl), 1e-8)
     _adx_prev_c2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
     _prev_4h_c2 = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
@@ -235,30 +235,30 @@ def _is_breakout_setup(symbol, last_4h, current_price, df_1d, df_4h):
         return False, 0.0
 
     df_1d['bb_width'] = (df_1d[bb_upper_col[0]] - df_1d[bb_lower_col[0]]) / df_1d[bb_mid_col[0]]
-    min_width_30d = df_1d['bb_width'].tail(30).min()
+    min_width_30d = df_1d['bb_width'].tail(config.CRYPTO_BREAKOUT_LOOKBACK).min()
     last_width = df_1d['bb_width'].iloc[-1]
 
-    if last_width > min_width_30d * 1.20:
+    if last_width > min_width_30d * config.CRYPTO_BREAKOUT_WIDTH_MULT:
         return False, 0.0
 
     vol_sma = last_4h.get('vol_sma_20')
     if pd.isna(vol_sma):
         return False, 0.0
-    if last_4h['volume'] <= 2.0 * vol_sma:
+    if last_4h['volume'] <= config.CRYPTO_BREAKOUT_VOLUME_MULT * vol_sma:
         return False, 0.0
 
     return True, last_width
 
 
 def _is_breakout_retest_valid(symbol, last_4h, current_price, df_4h):
-    local_high = df_4h['high'].tail(15).max()
+    local_high = df_4h['high'].tail(config.CRYPTO_BREAKOUT_RETEST_LOOKBACK).max()
     if config.BREAKOUT_RETEST_REQUIRED:
         if not (local_high <= current_price <= local_high * (1.0 + (config.BREAKOUT_RETEST_TOLERANCE_PCT / 100.0))):
             return False, 0.0
     
     if current_price <= local_high:
         return False, 0.0
-    if last_4h['low'] > local_high * 0.99:
+    if last_4h['low'] > local_high * config.CRYPTO_BREAKOUT_RETEST_SL_MULT:
         return False, 0.0
     if current_price <= last_4h['open']:
         return False, 0.0
@@ -296,11 +296,11 @@ def _check_crypto_3_breakout(ctx):
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
-        atr_val = current_price * 0.02
+        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
     raw_atr_sl = config.ATR_MULTIPLIER_CRYPTO * atr_val
-    sl_dist = min(max(raw_atr_sl, current_price * 0.04), current_price * 0.07)
+    sl_dist = min(max(raw_atr_sl, current_price * config.CRYPTO_BREAKOUT_MIN_SL), current_price * config.CRYPTO_BREAKOUT_MAX_SL)
     sl = current_price - sl_dist
-    _tp_c3 = current_price + (sl_dist * 3.0)
+    _tp_c3 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c3 = abs(_tp_c3 - current_price) / max(abs(current_price - sl), 1e-8)
     dm_ratio = _get_darth_maul_ratio(last_4h)
     
@@ -362,9 +362,9 @@ def _check_crypto_short_1_fomo(ctx):
     if not (div_found or msb_ok):
         return signals
 
-    sl = last_4h['high'] * 1.02
+    sl = last_4h['high'] * config.CRYPTO_SHORT1_SL_MULT
     sl_dist = abs(sl - current_price)
-    tp = current_price - (sl_dist * 3.0)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     trigger_reason = "Negatif Uyuşmazlık" if div_found else "Market Structure Break (Düşük Dip)"
     _rr_s1 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
     _adx_prev_s1 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
@@ -404,7 +404,7 @@ def _check_crypto_short_2_waterfall(ctx):
     if not (last_1d[f'EMA_{config.IND_EMA_MID}'] < last_1d[f'EMA_{config.IND_EMA_SLOW}'] and current_price < last_1d[f'EMA_{config.IND_EMA_MID}']):
         return signals
 
-    if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= 30:
+    if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.ADX_STRONG_TREND:
         return signals
 
     if not (last_4h['high'] >= last_4h['EMA_20'] and current_price < last_4h['EMA_20'] and current_price < last_4h['open']):
@@ -416,12 +416,12 @@ def _check_crypto_short_2_waterfall(ctx):
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
-        atr_val = current_price * 0.02
+        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
     raw_atr_sl = ATR_MULTIPLIER_CRYPTO * atr_val
     capped_sl_dist = min(raw_atr_sl, current_price * ATR_CAP_CRYPTO)
     sl = current_price + capped_sl_dist
     sl_dist = abs(sl - current_price)
-    tp = current_price - (sl_dist * 3.0)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_s2 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
     _adx_prev_s2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
     
@@ -457,11 +457,11 @@ def _check_crypto_short_3_cliff(ctx):
     df_4h = ctx["df_4h"]
     btc_ok = ctx["btc_ok"]
 
-    if len(df_4h) < 90:
+    if len(df_4h) < (config.CRYPTO_SHORT3_SUPPORT_LOOKBACK + config.CRYPTO_SHORT3_BREAKOUT_ZONE):
         return signals
 
-    support_lookback = df_4h['low'].iloc[-75:-15].min()
-    breakout_zone = df_4h.iloc[-15:-1]
+    support_lookback = df_4h['low'].iloc[-config.CRYPTO_SHORT3_SUPPORT_LOOKBACK:-config.CRYPTO_SHORT3_BREAKOUT_ZONE].min()
+    breakout_zone = df_4h.iloc[-config.CRYPTO_SHORT3_BREAKOUT_ZONE:-1]
     breakout_happened = breakout_zone['low'].min() < support_lookback
 
     if not breakout_happened:
@@ -483,12 +483,12 @@ def _check_crypto_short_3_cliff(ctx):
         return signals
 
     funding_rate = get_funding_rate(symbol)
-    if funding_rate is None or funding_rate < 0.0001:
+    if funding_rate is None or funding_rate < config.SHORT1_CRYPTO_FUNDING_RATE_MIN:
         return signals
 
-    sl = support_lookback * 1.03
+    sl = support_lookback * config.CRYPTO_SHORT3_SL_MULT
     sl_dist = abs(sl - current_price)
-    tp = current_price - (sl_dist * 2.5)
+    tp = current_price - (sl_dist * config.CRYPTO_SHORT3_TP_RR)
     _rr_s3 = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
     _adx_prev_s3 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
     
@@ -579,9 +579,9 @@ def _check_crypto_4_sniper_ote_long(ctx):
     if funding_rate > 0.0:
         return signals
 
-    sl = sweep_low * 0.995
+    sl = sweep_low * config.CRYPTO_LONG4_SL_MULT
     sl_dist = max(current_price - sl, 1e-8)
-    tp = current_price + (sl_dist * 3.0)
+    tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
     _rr_c4l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
     
@@ -677,9 +677,9 @@ def _check_crypto_4_sniper_ote_short(ctx):
     if funding_rate < 0.0:
         return signals
 
-    sl = sweep_high * 1.005
+    sl = sweep_high * config.CRYPTO_SHORT4_SL_MULT
     sl_dist = max(sl - current_price, 1e-8)
-    tp = current_price - (sl_dist * 3.0)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
     _rr_c4s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
     _adx_prev_c4s = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
@@ -755,12 +755,12 @@ def _check_crypto_5_vol_squeeze(ctx):
             if sq_dir == "up":
                 sl = min(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
                 sl_dist = abs(current_price - sl)
-                tp = current_price + (sl_dist * 3.0)
+                tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "AL"
             else:
                 sl = max(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
                 sl_dist = abs(sl - current_price)
-                tp = current_price - (sl_dist * 3.0)
+                tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "SAT"
             _rr_c5 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8) if sig_type == "AL" else abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
             
@@ -803,9 +803,9 @@ def _check_crypto_6_vwap(ctx):
     if vwap_val is not None:
         bounce_ok, wick_low = detect_vwap_bounce(df_4h, vwap_val)
         if bounce_ok and wick_low is not None:
-            sl = wick_low * 0.99
+            sl = wick_low * config.CRYPTO_VWAP_SL_MULT
             sl_dist = abs(current_price - sl)
-            _tp_c6 = current_price + (sl_dist * 3.0)
+            _tp_c6 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr_c6 = abs(_tp_c6 - current_price) / max(abs(current_price - sl), 1e-8)
             
             raw_vars = locals()
@@ -843,7 +843,7 @@ def _check_crypto_7_obv(ctx):
     current_price = ctx["current_price"]
     df_1d = ctx["df_1d"]
 
-    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation(df_1d, max_change_pct=5.0)
+    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation(df_1d, max_change_pct=config.CRYPTO_OBV_ACC_MAX_CHANGE_PCT)
     if obv_ok and obv_box_high is not None:
         btcdom_trend = get_btc_dominance_trend()
         if btcdom_trend != "UP":
@@ -851,7 +851,7 @@ def _check_crypto_7_obv(ctx):
             cmf_val = calculate_cmf(df_1d)
             cmf_label = f"CMF: {cmf_val:.3f} ✅" if cmf_val is not None else "CMF: N/A"
             sl_dist = abs(current_price - sl)
-            _tp_c7 = current_price + (sl_dist * 3.0)
+            _tp_c7 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr_c7 = abs(_tp_c7 - current_price) / max(abs(current_price - sl), 1e-8)
             
             raw_vars = locals()
@@ -902,7 +902,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
     sweep_ok_long, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
     has_sfp_long = sweep_ok_long
     
-    sl_long = max(bbl * 0.98, current_price * 0.93)
+    sl_long = max(bbl * config.CRYPTO_SQUEEZE_SL_BBL_MULT, current_price * config.CRYPTO_SQUEEZE_SL_MIN_MULT)
     _tp_sn_long = current_price + 2.0 * (current_price - sl_long)
     _rr_sn_long = abs(_tp_sn_long - current_price) / max(abs(current_price - sl_long), 1e-8)
     
@@ -956,7 +956,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
     sweep_ok_short, _ = sniper_detect_sweep(df_1h_sniper, swing_highs_s, point_type="high")
     has_sfp_short = sweep_ok_short
     
-    sl_short = max(bbu * 1.01, current_price * 1.07)
+    sl_short = max(bbu * config.CRYPTO_SQUEEZE_SHORT_SL_BBU_MULT, current_price * config.CRYPTO_SQUEEZE_SHORT_SL_MAX_MULT)
     _tp_sn_short = current_price - 2.0 * (sl_short - current_price)
     _rr_sn_short = abs(_tp_sn_short - current_price) / max(abs(sl_short - current_price), 1e-8)
     

@@ -48,7 +48,7 @@ def _check_bist_1_dip_hunter(ctx):
     dynamic_sl_dist = ctx["dynamic_sl_dist"]
     sl_pct = ctx["sl_pct"]
 
-    if pd.isna(last_1d.get('RSI_14')) or last_1d['RSI_14'] >= 35:
+    if pd.isna(last_1d.get('RSI_14')) or last_1d['RSI_14'] >= config.BIST_DIP_HUNTER_RSI_1D_LIMIT:
         return signals
 
     sma_200 = last_1d.get('SMA_200')
@@ -89,7 +89,7 @@ def _check_bist_1_dip_hunter(ctx):
 
     if last_1h['RSI_14'] > prev_1h['RSI_14']:
         sl = current_price - dynamic_sl_dist
-        tp = last_1d.get('EMA_21', current_price * 1.05)
+        tp = last_1d.get('EMA_21', current_price * config.BIST_DIP_HUNTER_DEFAULT_TP_MULT)
         _rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
         
         # Extract variables dynamically from local context
@@ -152,9 +152,9 @@ def _check_bist_2_trend_following(ctx):
     if is_pullback:
         has_engulfing = check_bullish_engulfing_momentum(df_1h)
         sl = current_price - dynamic_sl_dist
-        _tp2 = current_price * 1.10
+        _tp2 = current_price * config.BIST_TREND_FOLLOW_TP_MULT
         _rr2 = abs(_tp2 - current_price) / max(abs(current_price - sl), 1e-8)
-        _adx_prev2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+        _adx_prev2 = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
         
         raw_vars = locals()
         
@@ -231,7 +231,7 @@ def _check_bist_3_squeeze_breakout(ctx):
     sl_pct = ctx["sl_pct"]
 
     bb_width_prev = _get_bist_3_bb_width_prev(df_1d, last_1d)
-    if bb_width_prev is None or bb_width_prev >= 0.25:
+    if bb_width_prev is None or bb_width_prev >= config.BIST_SQUEEZE_PREV_WIDTH_LIMIT:
         return signals
 
     if not _is_bist_3_retest_and_price_ok(current_price, month_high, xu100_down):
@@ -315,10 +315,10 @@ def _check_bist_4_sniper_ote(ctx):
             if fvg_ok and not pd.isna(last_1h.get('vol_sma_20')):
                 guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
                 if _has_absolute_hourly_volume(last_1h['volume'], current_price, "BIST") and \
-                   last_1h['volume'] <= guarded_vol_sma * 1.5:
-                    sl = sweep_low * 0.995
+                   last_1h['volume'] <= guarded_vol_sma * config.BIST_SMC_BREAKOUT_VOL_MULT:
+                    sl = sweep_low * config.BIST_SMC_BREAKOUT_SL_MULT
                     sl_dist = max(current_price - sl, 1e-8)
-                    tp = current_price + (sl_dist * 3.0)
+                    tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
                     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
                     _rr4 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
                     
@@ -354,7 +354,7 @@ def _check_bist_4_sniper_ote(ctx):
 
 
 def _get_bist_daily_squeeze_setup(df_1d):
-    df_1d.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=1.5, append=True)
+    df_1d.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=config.KC_SCALAR, append=True)
     bbu_cols = [c for c in df_1d.columns if 'BBU' in c]
     bbl_cols = [c for c in df_1d.columns if 'BBL' in c]
     kcu_cols = [c for c in df_1d.columns if 'KCU' in c]
@@ -405,9 +405,9 @@ def _check_bist_5_vol_squeeze_long(ctx, prev_bbu_1d, guarded_vol_sma):
         return None
         
     sq_mid = (last_1h['high'] + last_1h['low']) / 2
-    ema21_1h = last_1h.get('EMA_21', current_price * 0.95)
+    ema21_1h = last_1h.get('EMA_21', current_price * config.BIST_VWAP_EMA_SL_FALLBACK_LONG)
     sl = min(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid
-    _tp5u = current_price + (dynamic_sl_dist * 3.0)
+    _tp5u = current_price + (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr5u = abs(_tp5u - current_price) / max(abs(current_price - sl), 1e-8)
     
     raw_vars = locals()
@@ -461,9 +461,9 @@ def _check_bist_5_vol_squeeze_short(ctx, prev_bbl_1d, guarded_vol_sma):
         return None
         
     sq_mid = (last_1h['high'] + last_1h['low']) / 2
-    ema21_1h = last_1h.get('EMA_21', current_price * 1.05)
+    ema21_1h = last_1h.get('EMA_21', current_price * config.BIST_VWAP_EMA_SL_FALLBACK_SHORT)
     sl = max(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid
-    _tp5d = current_price - (dynamic_sl_dist * 3.0)
+    _tp5d = current_price - (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr5d = abs(current_price - _tp5d) / max(abs(sl - current_price), 1e-8)
     
     raw_vars = locals()
@@ -615,7 +615,7 @@ def _check_bist_7_vwap(ctx):
         return signals
 
     sl = wick_low * (1.0 - config.VWAP_SL_BUFFER_PCT / 100.0)
-    _tp7 = current_price + (dynamic_sl_dist * 3.0)
+    _tp7 = current_price + (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr7 = abs(_tp7 - current_price) / max(abs(current_price - sl), 1e-8)
     
     raw_vars = locals()
@@ -658,12 +658,12 @@ def _check_bist_8_obv(ctx):
     xu100_down = ctx["xu100_down"]
     dynamic_sl_dist = ctx["dynamic_sl_dist"]
 
-    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation_bist(df_1d, max_change_pct=7.0)
+    obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation_bist(df_1d, max_change_pct=config.BIST_OBV_ACC_MAX_CHANGE_PCT)
     if obv_ok and obv_box_high is not None:
         cmf_val = calculate_cmf(df_1d)
-        if cmf_val is not None and not pd.isna(cmf_val) and cmf_val >= 0.05:
+        if cmf_val is not None and not pd.isna(cmf_val) and cmf_val >= config.BIST_OBV_CMF_THRESHOLD:
             sl = (obv_box_high + obv_box_low) / 2
-            _tp8 = current_price + (dynamic_sl_dist * 3.0)
+            _tp8 = current_price + (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr8 = abs(_tp8 - current_price) / max(abs(current_price - sl), 1e-8)
             
             raw_vars = locals()
@@ -711,11 +711,11 @@ def _get_bist_10_sniper_setup(df_1h_sniper):
     bbm_s = df_1h_sniper[bb_mid_col[0]]
     
     bbw_series = (bbu_s - bbl_s) / bbm_s
-    bbw_lowest_30 = bbw_series.rolling(10).quantile(0.3)
+    bbw_lowest_30 = bbw_series.rolling(config.BIST_SQUEEZE_ROLLING_WINDOW).quantile(config.BIST_SQUEEZE_QUANTILE)
     is_squeeze = bbw_series.iloc[-1] <= bbw_lowest_30.iloc[-1]
     
     bb_pct_series = (df_1h_sniper['close'] - bbl_s) / (bbu_s - bbl_s)
-    has_bb_pct_touch = (bb_pct_series.iloc[-3:] <= 0.1).any()
+    has_bb_pct_touch = (bb_pct_series.iloc[-3:] <= config.BIST_SQUEEZE_BB_PCT_TOUCH_LIMIT).any()
     
     if not (is_squeeze or has_bb_pct_touch):
         return None
@@ -748,8 +748,8 @@ def _check_bist_10_sniper(ctx):
     xu100_down = ctx["xu100_down"]
 
     df_1h_sniper = df_1h.copy()
-    df_1h_sniper.ta.kc(length=20, scalar=1.5, append=True)
-    df_1h_sniper.ta.bbands(length=20, std=2.0, append=True)
+    df_1h_sniper.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=config.KC_SCALAR, append=True)
+    df_1h_sniper.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
     
     setup = _get_bist_10_sniper_setup(df_1h_sniper)
     if setup is None:
@@ -766,7 +766,7 @@ def _check_bist_10_sniper(ctx):
     sweep_ok, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
     has_sfp = sweep_ok
     
-    sl = max(bbl_s_last * 0.985, current_price * 0.95)
+    sl = max(bbl_s_last * config.BIST_SQUEEZE_SL_BBL_MULT, current_price * config.BIST_SQUEEZE_SL_MIN_MULT)
     _tp_sn = current_price + 2.0 * (current_price - sl)
     _rr_sn = abs(_tp_sn - current_price) / max(abs(current_price - sl), 1e-8)
     guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h.get('vol_sma_20', 0))
@@ -807,11 +807,11 @@ def _detect_bist11_pattern(df_4h, df_1d):
     rsi_d_filter = df_1d['RSI_14'].iloc[-1] if 'RSI_14' in df_1d.columns else 50.0
     pattern_type = pattern_details.get("pattern", "")
     pattern_ok = True
-    if pattern_type in ["Hammer", "Inverted Hammer", "Dragonfly Doji", "Tweezer Bottom"] and rsi_d_filter >= 45:
+    if pattern_type in ["Hammer", "Inverted Hammer", "Dragonfly Doji", "Tweezer Bottom"] and rsi_d_filter >= config.BIST_CANDLE_RSI_D_LIMIT_HAMMER:
         pattern_ok = False
-    elif pattern_type in ["Bullish Engulfing", "Piercing Line", "Morning Star"] and 45 <= rsi_d_filter <= 52:
+    elif pattern_type in ["Bullish Engulfing", "Piercing Line", "Morning Star"] and config.BIST_CANDLE_RSI_D_LIMIT_ENGULFING_MIN <= rsi_d_filter <= config.BIST_CANDLE_RSI_D_LIMIT_ENGULFING_MAX:
         pattern_ok = False
-    elif pattern_type == "Three White Soldiers" and rsi_d_filter >= 70:
+    elif pattern_type == "Three White Soldiers" and rsi_d_filter >= config.BIST_CANDLE_RSI_D_LIMIT_SOLDIERS:
         pattern_ok = False
         
     return pattern_name, pattern_details, pattern_ok
@@ -840,7 +840,7 @@ def _build_bist11_signal(ctx, pattern_name, support_reason, vol_ratio, avg_vol_p
         atr_4h = 1e-8
         
     sl = current_price - (atr_4h * config.BIST11_ATR_MULTIPLIER)
-    tp = current_price + 3.0 * (current_price - sl)
+    tp = current_price + config.BEAR_HUNTER_TP_RR * (current_price - sl)
     rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
 
     rsi_d = df_1d['RSI_14'].iloc[-1] if 'RSI_14' in df_1d.columns else 50.0
@@ -919,7 +919,7 @@ def _check_bist12_timing_filters(df_1d, df_4h, current_price):
     ema_21_4h = df_4h['EMA_21'].iloc[-1] if 'EMA_21' in df_4h.columns else current_price
     dist_to_ema21 = abs(current_price - ema_21_4h) / ema_21_4h * 100 if ema_21_4h > 0 else 0
     
-    if rsi_1d >= 60.0 or dist_to_ema21 >= 6.0:
+    if rsi_1d >= config.BIST_CHART_RSI_D_LIMIT or dist_to_ema21 >= config.BIST_CHART_EMA21_DIST_LIMIT:
         return False
     return True
 
@@ -947,13 +947,13 @@ def _build_bist12_signal(ctx, pattern_name, pattern_details):
     final_sl_dist = max(pattern_sl_dist, atr_sl_dist, min_sl_dist)
     
     sl = current_price - final_sl_dist
-    tp = current_price + 3.0 * (current_price - sl)
+    tp = current_price + config.BEAR_HUNTER_TP_RR * (current_price - sl)
     rr = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
     
     vol_4h = df_4h['volume'].values
     current_hour = df_4h.index[-1].hour
     session_bars = df_4h[df_4h.index.hour == current_hour]
-    avg_vol_prev = float(session_bars.iloc[:-1]['volume'].mean()) if len(session_bars) >= 2 else float(np.mean(vol_4h[-11:-1]))
+    avg_vol_prev = float(session_bars.iloc[:-1]['volume'].mean()) if len(session_bars) >= 2 else float(np.mean(vol_4h[-config.BIST_CHART_RVOL_LOOKBACK:-1]))
     if avg_vol_prev <= 0:
         avg_vol_prev = 1.0
     
@@ -1033,7 +1033,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
     df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
 
-    month_high = df_1d['high'].tail(30).max() if len(df_1d) >= 30 else df_1d['high'].max()
+    month_high = df_1d['high'].tail(config.BIST_MONTH_HIGH_LOOKBACK).max() if len(df_1d) >= config.BIST_MONTH_HIGH_LOOKBACK else df_1d['high'].max()
 
     df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
     df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
@@ -1057,19 +1057,19 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
 
     # 1. HARD BLOCK - Likidite ve Fiyat Filtreleri
     volume_ma20_tl = (df_1d['close'] * df_1d['volume']).rolling(20).mean()
-    if volume_ma20_tl.empty or pd.isna(volume_ma20_tl.iloc[-1]) or volume_ma20_tl.iloc[-1] < 20_000_000:
+    if volume_ma20_tl.empty or pd.isna(volume_ma20_tl.iloc[-1]) or volume_ma20_tl.iloc[-1] < config.BIST_SWING_MIN_VOLUME_TL:
         return signals
-    if current_price < 3.0:
+    if current_price < config.BIST_MIN_STOCK_PRICE_TL:
         return signals
 
     atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
-        atr_val = current_price * 0.02
+        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
         
     raw_sl_dist = ATR_MULTIPLIER_BIST * atr_val
     dynamic_sl_dist = max(
         min(raw_sl_dist, current_price * ATR_CAP_BIST),
-        current_price * 0.03
+        current_price * config.MIN_SL_PCT
     )
     sl_pct = (dynamic_sl_dist / current_price) * 100
     bist_regime = _get_bist_regime(xu100_daily)
@@ -1123,7 +1123,7 @@ def _check_orb_long(symbol, current_price, cage_high, cage_low, cage_mid, today_
         vol_ok = last['volume'] >= rvol * config.ORB_VOLUME_MULT
              
         if body_ok and vol_ok:
-            entry_price = cage_high * 1.001 if not config.ORB_BODY_CLOSE_REQUIRED else current_price
+            entry_price = cage_high * config.BIST_ORB_LONG_ENTRY_OFFSET if not config.ORB_BODY_CLOSE_REQUIRED else current_price
             _sl9u = cage_mid
             _risk9u = entry_price - _sl9u
             _tp9u = entry_price + (_risk9u * 2.0)
@@ -1171,7 +1171,7 @@ def _check_orb_short(symbol, current_price, cage_high, cage_low, cage_mid, today
         vol_ok = last['volume'] >= rvol * config.ORB_VOLUME_MULT
              
         if body_ok and vol_ok:
-            entry_price = cage_low * 0.999 if not config.ORB_BODY_CLOSE_REQUIRED else current_price
+            entry_price = cage_low * config.BIST_ORB_SHORT_ENTRY_OFFSET if not config.ORB_BODY_CLOSE_REQUIRED else current_price
             _sl9d = cage_mid
             _risk9d = _sl9d - entry_price
             _tp9d = entry_price - (_risk9d * 2.0)

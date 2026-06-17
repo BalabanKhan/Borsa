@@ -108,7 +108,7 @@ def _is_meaningful_volume(volume, vol_sma_20, price, market="KRIPTO"):
     min_dollar = MIN_DOLLAR_VOL_CRYPTO if market == "KRIPTO" else MIN_DOLLAR_VOL_BIST
     if dollar_volume < min_dollar:
         return False
-    return volume > (1.5 * vol_sma_20)
+    return volume > (config.MEANINGFUL_VOLUME_MULT * vol_sma_20)
 
 
 def _adx_momentum_ok(df, last_row):
@@ -116,7 +116,7 @@ def _adx_momentum_ok(df, last_row):
     adx_current = last_row.get('ADX_14')
     if adx_current is None or pd.isna(adx_current):
         return False
-    if adx_current <= 25:
+    if adx_current <= config.EMTIA_TREND_ADX_MIN:
         return False
     if adx_current > ADX_TOO_LATE:
         return False  # Trend olgunlaşmış, geç kaldın
@@ -132,10 +132,10 @@ def _apply_volume_sma_guard(df, vol_sma_20):
     """RED-01: Volume SMA(20) manipülasyona açık mı? SMA(50) ile çapraz kontrol."""
     if pd.isna(vol_sma_20) or vol_sma_20 <= 0:
         return vol_sma_20
-    vol_sma_50 = df['volume'].rolling(50).mean().iloc[-1] if len(df) >= 50 else None
+    vol_sma_50 = df['volume'].rolling(config.IND_VOL_SMA_SLOW).mean().iloc[-1] if len(df) >= config.IND_VOL_SMA_SLOW else None
     if vol_sma_50 is not None and not pd.isna(vol_sma_50) and vol_sma_50 > 0:
         if vol_sma_20 < (vol_sma_50 * VOL_SMA_LONG_RATIO):
-            return vol_sma_50 * 0.7  # Baskılanmış SMA'yı yukarı düzelt
+            return vol_sma_50 * config.VOL_SMA_FLOOR_MULT  # Baskılanmış SMA'yı yukarı düzelt
     return vol_sma_20
 
 
@@ -153,9 +153,9 @@ def _is_unclosed_candle(df, timeframe="1d"):
     if timeframe == "1d":
         return last_ts_utc.date() == now_utc.date()
     elif timeframe == "4h":
-        return (now_utc - last_ts_utc).total_seconds() < 4 * 3600
+        return (now_utc - last_ts_utc).total_seconds() < 4 * config.COOLDOWN_SECONDS_1H
     elif timeframe == "1h":
-        return (now_utc - last_ts_utc).total_seconds() < 3600
+        return (now_utc - last_ts_utc).total_seconds() < config.COOLDOWN_SECONDS_1H
     return False
 
 

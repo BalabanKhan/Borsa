@@ -96,7 +96,7 @@ def inject_smart_indicators(df):
         df_copy.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
         
     # Keltner Channels
-    df_copy.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=1.5, append=True) # TA-Lib has no native KC, use pandas-ta
+    df_copy.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=config.KC_SCALAR, append=True) # TA-Lib has no native KC, use pandas-ta
     
     return df_copy
 
@@ -220,11 +220,11 @@ def sniper_calculate_ote_body(df, sweep_idx, msb_idx, direction="long"):
         return 0, 0
 
     if sweep_body < msb_body:  # LONG
-        ote_top = msb_body - (fib_range * 0.618)
-        ote_bottom = msb_body - (fib_range * 0.786)
+        ote_top = msb_body - (fib_range * config.FIB_618)
+        ote_bottom = msb_body - (fib_range * config.FIB_786)
     else:  # SHORT
-        ote_bottom = msb_body + (fib_range * 0.618)
-        ote_top = msb_body + (fib_range * 0.786)
+        ote_bottom = msb_body + (fib_range * config.FIB_618)
+        ote_top = msb_body + (fib_range * config.FIB_786)
 
     return ote_top, ote_bottom
 
@@ -348,11 +348,11 @@ def sniper_calculate_ote(sweep_price, msb_price):
         return 0, 0
 
     if sweep_price < msb_price:
-        ote_top = msb_price - (fib_range * 0.618)
-        ote_bottom = msb_price - (fib_range * 0.786)
+        ote_top = msb_price - (fib_range * config.FIB_618)
+        ote_bottom = msb_price - (fib_range * config.FIB_786)
     else:
-        ote_bottom = msb_price + (fib_range * 0.618)
-        ote_top = msb_price + (fib_range * 0.786)
+        ote_bottom = msb_price + (fib_range * config.FIB_618)
+        ote_top = msb_price + (fib_range * config.FIB_786)
     return ote_top, ote_bottom
 
 
@@ -424,7 +424,7 @@ def detect_sfp(df_4h, neighbors=3):
         if body_close_ok and last_candle['close'] < last_candle['open']:
             body = abs(last_candle['close'] - last_candle['open'])
             upper_wick = last_candle['high'] - max(last_candle['close'], last_candle['open'])
-            if body > 0 and upper_wick > (2 * body):
+            if body > 0 and upper_wick > (config.CANDLE_HAMMER_LOWER_SHADOW_MULT * body):
                 # SFP Hacim Teyidi Kontrolü
                 # SFP barındaki hacmin, son 20 mumun ortalama hacminin config.SFP_VOLUME_CONFIRMATION_MULT katı olmasını şart koşar.
                 if config.SFP_VOLUME_CONFIRMATION_MULT > 0:
@@ -493,8 +493,8 @@ def detect_premium_rejection(df_4h, df_1d):
     if fib_width_pct > 15:
         return False, None, None, None
 
-    fib_618 = swing_low_val + 0.618 * leg_range
-    fib_786 = swing_low_val + 0.786 * leg_range
+    fib_618 = swing_low_val + config.FIB_618 * leg_range
+    fib_786 = swing_low_val + config.FIB_786 * leg_range
 
     last_4h = df_4h.iloc[-1]
     current_close = float(last_4h['close'])
@@ -889,14 +889,14 @@ def detect_vwap_bounce(df, vwap_val):
     if math.isclose(body, 0.0, abs_tol=1e-10):
         body = last['close'] * 0.0001
     lower_wick = min(last['close'], last['open']) - last['low']
-    if lower_wick < body * 2:
+    if lower_wick < body * config.CANDLE_HAMMER_LOWER_SHADOW_MULT:
         return False, None
 
     return True, float(last['low'])
 
 
 
-def detect_obv_accumulation(df, max_change_pct=8.0):
+def detect_obv_accumulation(df, max_change_pct=config.OBV_ACC_MAX_CHANGE_PCT):
     """Fiyat yatayda + OBV yükseliyor + kutu kırılımı → sinyal.
     Returns: (breakout_confirmed, box_high, box_low)
     """
@@ -950,7 +950,7 @@ def detect_obv_accumulation(df, max_change_pct=8.0):
     return True, box_high, box_low
 
 
-def detect_obv_accumulation_bist(df, max_change_pct=8.0):
+def detect_obv_accumulation_bist(df, max_change_pct=config.OBV_ACC_MAX_CHANGE_PCT):
     """BIST 8 için özel yeni matematiksel mantık:
     1. 18/20 Yatay Kutu: Son 20 mumdan en az 18'i dar bir kutu (max_change_pct) içinde kalmalı.
     2. Kutu Zirvesinin %1-3.5 Yukarı Kırılımı: Son kapanış kutu zirvesinin %1.0 ile %3.5 üstünde olmalı.
@@ -1086,19 +1086,19 @@ def calculate_time_specific_rvol(df_15m, target_hour: int, target_minute: int, p
 # BIST 11: Mum Formasyonları Tespiti & Destek Kontrolleri
 # ════════════════════════════════════════
 def _check_pattern_hammer(ctx):
-    if ctx['lower_shadow_curr'] >= 2.0 * ctx['body_curr'] and ctx['upper_shadow_curr'] <= 0.1 * ctx['tot_curr'] and ctx['body_curr'] > 0:
+    if ctx['lower_shadow_curr'] >= config.CANDLE_HAMMER_LOWER_SHADOW_MULT * ctx['body_curr'] and ctx['upper_shadow_curr'] <= config.CANDLE_HAMMER_UPPER_SHADOW_LIMIT * ctx['tot_curr'] and ctx['body_curr'] > 0:
         if ctx['low_curr'] <= min(ctx['l'][ctx['idx']-5:ctx['idx']]):
             return "Hammer (Çekiç)", {"pattern": "Hammer", "body": ctx['body_curr'], "lower_shadow": ctx['lower_shadow_curr']}
     return None, {}
 
 def _check_pattern_inverted_hammer(ctx):
-    if ctx['upper_shadow_curr'] >= 2.0 * ctx['body_curr'] and ctx['lower_shadow_curr'] <= 0.1 * ctx['tot_curr'] and ctx['body_curr'] > 0:
+    if ctx['upper_shadow_curr'] >= config.CANDLE_HAMMER_LOWER_SHADOW_MULT * ctx['body_curr'] and ctx['lower_shadow_curr'] <= config.CANDLE_HAMMER_UPPER_SHADOW_LIMIT * ctx['tot_curr'] and ctx['body_curr'] > 0:
         if ctx['low_curr'] <= min(ctx['l'][ctx['idx']-5:ctx['idx']]):
             return "Inverted Hammer (Ters Çekiç)", {"pattern": "Inverted Hammer", "body": ctx['body_curr'], "upper_shadow": ctx['upper_shadow_curr']}
     return None, {}
 
 def _check_pattern_dragonfly_doji(ctx):
-    if ctx['body_curr'] <= 0.05 * ctx['tot_curr'] and ctx['lower_shadow_curr'] >= 0.7 * ctx['tot_curr'] and ctx['upper_shadow_curr'] <= 0.1 * ctx['tot_curr']:
+    if ctx['body_curr'] <= config.CANDLE_DRAGONFLY_BODY_LIMIT * ctx['tot_curr'] and ctx['lower_shadow_curr'] >= config.CANDLE_DRAGONFLY_LOWER_SHADOW_MULT * ctx['tot_curr'] and ctx['upper_shadow_curr'] <= config.CANDLE_HAMMER_UPPER_SHADOW_LIMIT * ctx['tot_curr']:
         if ctx['low_curr'] <= min(ctx['l'][ctx['idx']-5:ctx['idx']]):
             return "Dragonfly Doji (Yusufçuk Doji)", {"pattern": "Dragonfly Doji", "lower_shadow": ctx['lower_shadow_curr']}
     return None, {}
@@ -1126,7 +1126,7 @@ def _check_pattern_tweezer_bottom(ctx):
 
 def _check_pattern_morning_star(ctx):
     if not ctx['is_green_prev2'] and ctx['is_green_curr']:
-        if ctx['body_prev'] <= 0.3 * ctx['body_prev2']:
+        if ctx['body_prev'] <= config.CANDLE_MORNING_STAR_BODY_LIMIT * ctx['body_prev2']:
             half_body_prev2 = ctx['close_prev2'] + 0.5 * (ctx['open_prev2'] - ctx['close_prev2'])
             if ctx['close_curr'] >= half_body_prev2 and ctx['open_curr'] >= ctx['close_prev']:
                 return "Morning Star (Sabah Yıldızı)", {"pattern": "Morning Star"}
@@ -1135,8 +1135,8 @@ def _check_pattern_morning_star(ctx):
 def _check_pattern_three_white_soldiers(ctx):
     if ctx['is_green_prev2'] and ctx['is_green_prev'] and ctx['is_green_curr']:
         if ctx['close_curr'] > ctx['close_prev'] > ctx['close_prev2']:
-            if ctx['body_curr'] > 0.1 * ctx['atr'] and ctx['body_prev'] > 0.1 * ctx['atr'] and ctx['body_prev2'] > 0.1 * ctx['atr']:
-                if ctx['upper_shadow_curr'] <= 0.2 * ctx['body_curr'] and (ctx['high_prev'] - ctx['close_prev']) <= 0.2 * ctx['body_prev'] and (ctx['high_prev2'] - ctx['close_prev2']) <= 0.2 * ctx['body_prev2']:
+            if ctx['body_curr'] > config.CANDLE_SOLDIERS_BODY_MIN * ctx['atr'] and ctx['body_prev'] > config.CANDLE_SOLDIERS_BODY_MIN * ctx['atr'] and ctx['body_prev2'] > config.CANDLE_SOLDIERS_BODY_MIN * ctx['atr']:
+                if ctx['upper_shadow_curr'] <= config.CANDLE_SOLDIERS_SHADOW_LIMIT * ctx['body_curr'] and (ctx['high_prev'] - ctx['close_prev']) <= config.CANDLE_SOLDIERS_SHADOW_LIMIT * ctx['body_prev'] and (ctx['high_prev2'] - ctx['close_prev2']) <= config.CANDLE_SOLDIERS_SHADOW_LIMIT * ctx['body_prev2']:
                     return "Three White Soldiers (Üç Beyaz Asker)", {"pattern": "Three White Soldiers"}
     return None, {}
 
@@ -1327,7 +1327,7 @@ def _check_tobo(df_4h, close_arr, volume_arr, rsi_arr, peaks, valleys, current_p
                             return "Ters Omuz Baş Omuz (TOBO) Kırılımı", {
                                 "pattern": "TOBO",
                                 "signal": "AL",
-                                "sl": val_v3 * 0.99,
+                                "sl": val_v3 * (1.0 - config.PATTERN_SL_BUFFER),
                                 "details": f"Sol: {val_v1:.2f}, Baş: {val_v2:.2f}, Sağ: {val_v3:.2f}"
                             }
     return None, {}
@@ -1357,7 +1357,7 @@ def _check_double_bottom(df_4h, close_arr, volume_arr, rsi_arr, peaks, valleys, 
                         vol_ok = _check_session_aware_volume(df_4h, volume_arr[-1], current_hour)
 
                         if (not config.BIST12_RSI_DIVERGENCE_REQUIRED or rsi_divergence) and vol_ok:
-                            sl_level = min(val_v1, val_v2) * 0.99
+                            sl_level = min(val_v1, val_v2) * (1.0 - config.PATTERN_SL_BUFFER)
                             return "İkili Dip Kırılımı", {
                                 "pattern": "Double Bottom",
                                 "signal": "AL",
@@ -1393,7 +1393,7 @@ def _check_bull_flag(df_4h, close_arr, high_arr, low_arr, volume_arr, current_pr
                             return "Boğa Bayrağı Kırılımı", {
                                 "pattern": "Bull Flag",
                                 "signal": "AL",
-                                "sl": flag_min_low * 0.99,
+                                "sl": flag_min_low * (1.0 - config.PATTERN_SL_BUFFER),
                                 "details": f"Bayrak Direği: %{pole_pct:.1f}, Dinlenme Hacmi: {flag_avg_vol:.0f}"
                             }
     return None, {}
@@ -1409,7 +1409,7 @@ def _check_falling_wedge(df_4h, close_arr, high_arr, low_arr, volume_arr, peaks,
         norm_slope_p = slope_p / current_price * 100.0
         norm_slope_v = slope_v / current_price * 100.0
         
-        if norm_slope_p < -0.05 and norm_slope_v < -0.05:
+        if norm_slope_p < config.WEDGE_SLOPE_THRESHOLD and norm_slope_v < config.WEDGE_SLOPE_THRESHOLD:
             if norm_slope_p < norm_slope_v - config.BIST12_WEDGE_CONVERGENCE_FACTOR:
                 resistance_at_last = slope_p * (len(close_arr) - 1) + intercept_p
                 last_peak_val = close_arr[p_idx[-1]]
@@ -1432,7 +1432,7 @@ def _check_falling_wedge(df_4h, close_arr, high_arr, low_arr, volume_arr, peaks,
                             return "Alçalan Takoz Yukarı Kırılımı", {
                                 "pattern": "Falling Wedge",
                                 "signal": "AL",
-                                "sl": close_arr[v_idx[-1]] * 0.99,
+                                "sl": close_arr[v_idx[-1]] * (1.0 - config.PATTERN_SL_BUFFER),
                                 "details": f"Direnç Eğimi: %{norm_slope_p:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, SMC Strict: {config.BIST12_SMC_STRICT_MODE}"
                             }
     return None, {}
@@ -1454,7 +1454,7 @@ def _check_ascending_triangle(df_4h, close_arr, high_arr, low_arr, volume_arr, p
                 min_p = np.min(close_arr[p_idx])
                 p_var = (max_p - min_p) / min_p * 100.0
                 
-                if p_var <= 2.5:
+                if p_var <= config.TRIANGLE_HEIGHT_VAR_LIMIT:
                     choch_ok = current_price > max_p
                     fvg_ok = len(low_arr) >= 3 and (low_arr[-1] > high_arr[-3])
                     
@@ -1473,7 +1473,7 @@ def _check_ascending_triangle(df_4h, close_arr, high_arr, low_arr, volume_arr, p
                             return "Yükselen Üçgen Yukarı Kırılımı", {
                                 "pattern": "Ascending Triangle",
                                 "signal": "AL",
-                                "sl": close_arr[v_idx[-1]] * 0.99,
+                                "sl": close_arr[v_idx[-1]] * (1.0 - config.PATTERN_SL_BUFFER),
                                 "details": f"Direnç Varyansı: %{p_var:.2f}, Destek Eğimi: %{norm_slope_v:.2f}, SMC Strict: {config.BIST12_SMC_STRICT_MODE}"
                             }
     return None, {}
@@ -1495,7 +1495,7 @@ def _check_diamond_bottom(df_4h, close_arr, volume_arr, rsi_arr, peaks, valleys,
                 m_desc = (val_v3 - val_p2) / max(1, (v3 - p2))
                 resistance_at_last = val_p2 + m_desc * (len(close_arr) - 1 - p2)
                 
-                if val_v3 > val_v2 and val_p2 < val_p1 * 1.05:
+                if val_v3 > val_v2 and val_p2 < val_p1 * config.DOUBLE_TOP_HIGH_TOLERANCE:
                     if current_price > resistance_at_last:
                         rsi_divergence = False
                         if rsi_arr[v3] > rsi_arr[v2] or rsi_arr[v2] > rsi_arr[v1]:
@@ -1508,7 +1508,7 @@ def _check_diamond_bottom(df_4h, close_arr, volume_arr, rsi_arr, peaks, valleys,
                             return "Elmas Dip Yukarı Kırılımı", {
                                 "pattern": "Diamond Bottom",
                                 "signal": "AL",
-                                "sl": val_v2 * 0.99,
+                                "sl": val_v2 * (1.0 - config.PATTERN_SL_BUFFER),
                                 "details": f"Orta Dip: {val_v2:.2f}, Kırılım Direnci: {resistance_at_last:.2f}"
                             }
     return None, {}
@@ -1523,7 +1523,7 @@ def _check_gartley(x_val, a_val, b_val, c_val, d_val, ratio_ab_xa, ratio_bc_ab, 
                         return "Harmonik Gartley Formasyonu (Boğa)", {
                             "pattern": "Harmonic Gartley",
                             "signal": "AL",
-                            "sl": d_val * 0.99,
+                            "sl": d_val * (1.0 - config.PATTERN_SL_BUFFER),
                             "details": f"D Noktasi: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}, RSI Div: {rsi_d:.1f} > {rsi_b:.1f}"
                         }
     return None, {}
@@ -1537,7 +1537,7 @@ def _check_bat(x_val, a_val, b_val, c_val, d_val, ratio_ab_xa, ratio_bc_ab, rati
                         return "Harmonik Bat Formasyonu (Boğa)", {
                             "pattern": "Harmonic Bat",
                             "signal": "AL",
-                            "sl": d_val * 0.99,
+                            "sl": d_val * (1.0 - config.PATTERN_SL_BUFFER),
                             "details": f"D Noktasi: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}, RSI Div: {rsi_d:.1f} > {rsi_b:.1f}"
                         }
     return None, {}
@@ -1550,7 +1550,7 @@ def _check_abcd(ab, cd, ratio_bc_ab, ratio_cd_bc, tol, current_price, idx_d, clo
                     return "Harmonik AB=CD Formasyonu (Boğa)", {
                         "pattern": "Harmonic ABCD",
                         "signal": "AL",
-                        "sl": d_val * 0.99,
+                        "sl": d_val * (1.0 - config.PATTERN_SL_BUFFER),
                         "details": f"AB: {ab:.2f}, CD: {cd:.2f}, RSI Div: {rsi_d:.1f} > {rsi_b:.1f}"
                     }
     return None, {}

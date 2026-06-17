@@ -53,7 +53,8 @@ from config import (
     SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_CRYPTO_MAX,
     SOFT_DOLLAR_VOL_EMTIA_MIN, SOFT_DOLLAR_VOL_EMTIA_MAX,
     SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX,
-    RR_MINIMUM, SOFT_UNCERTAINTY_PENALTY
+    RR_MINIMUM, SOFT_UNCERTAINTY_PENALTY,
+    SNIPER_NO_SETUP_PENALTY, BIST_SNIPER_CONFLUENCE_BONUS
 )
 
 
@@ -1268,7 +1269,7 @@ def _calculate_sniper_base_scores(
         
         base_points = sfp_val + fvg_val + squeeze_val + pb_val
         if sfp_present and fvg_present:
-            total_setup = base_points * 1.5
+            total_setup = base_points * BIST_SNIPER_CONFLUENCE_BONUS
         else:
             total_setup = base_points
         total_setup = min(total_setup, 100.0)
@@ -1332,7 +1333,7 @@ def build_sniper_scores(
     # Hiçbiri yoksa yumuşak ceza puanı uygulayarak puanı düşür (-12 puan)
     has_squeeze_breakout = bbw >= (kcw * 0.90)
     if not fvg_present and not sfp_present and not has_squeeze_breakout:
-        conflict_penalty -= 12.0
+        conflict_penalty -= SNIPER_NO_SETUP_PENALTY
 
     # ════════════════════════════════════════
     # Dinamik Confluence (Ödül / Ceza) Mekanizması

@@ -64,8 +64,8 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
         df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
         df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
         df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
-        if len(df_1d) >= 200:
-            df_1d.ta.sma(length=200, append=True)
+        if len(df_1d) >= config.IND_SMA_TREND:
+            df_1d.ta.sma(length=config.IND_SMA_TREND, append=True)
 
     df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
     # Bear Hunter: EMA/ADX/RSI/vol_sma hesapla (1F fix — NaN sorunu çözümü)
@@ -73,34 +73,37 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     df_4h.ta.ema(length=config.IND_EMA_SLOW, append=True)
     df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
     df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
-    df_4h['vol_sma_20'] = df_4h['volume'].rolling(20).mean()
+    df_4h['vol_sma_20'] = df_4h['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean()
     last_4h = df_4h.iloc[-1]
     current_price = float(last_4h['close'])
+
+    ema_mid_col = f"EMA_{config.IND_EMA_MID}"
+    ema_slow_col = f"EMA_{config.IND_EMA_SLOW}"
 
     if metrics_collector is not None and symbol not in metrics_collector:
         metrics_collector[symbol] = {
             "Symbol": symbol,
             "Market": "KRIPTO (Ayı)",
             "Price": current_price,
-            "1D RSI": round(df_1d.iloc[-1].get("RSI_14", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get("RSI_14")) else None,
-            "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
+            "1D RSI": round(df_1d.iloc[-1].get(f"RSI_{config.IND_RSI_LENGTH}", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get(f"RSI_{config.IND_RSI_LENGTH}")) else None,
+            "4H ADX": round(last_4h.get(f"ADX_{config.IND_ADX_LENGTH}", 0), 2) if pd.notna(last_4h.get(f"ADX_{config.IND_ADX_LENGTH}")) else None,
             "1H RSI": None,
-            "1D SMA 50": round(df_1d.iloc[-1].get("EMA_50", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get("EMA_50")) else None,
-            "1D SMA 200": round(df_1d.iloc[-1].get("SMA_200", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get("SMA_200")) else None,
-            "Trend": "Bullish" if df_1d is not None and not df_1d.empty and df_1d.iloc[-1].get("EMA_20", 0) > df_1d.iloc[-1].get("EMA_50", float('inf')) else "Bearish",
+            "1D SMA 50": round(df_1d.iloc[-1].get(ema_slow_col, 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get(ema_slow_col)) else None,
+            "1D SMA 200": round(df_1d.iloc[-1].get(f"SMA_{config.IND_SMA_TREND}", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get(f"SMA_{config.IND_SMA_TREND}")) else None,
+            "Trend": "Bullish" if df_1d is not None and not df_1d.empty and df_1d.iloc[-1].get(ema_mid_col, 0) > df_1d.iloc[-1].get(ema_slow_col, float('inf')) else "Bearish",
             "1H Volume": last_4h.get("volume")
         }
 
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
-        atr_val = current_price * 0.02
+        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
 
     funding_rate = get_funding_rate(symbol)
     funding_ok = True
     funding_note = ""
     if funding_rate is not None:
-        if funding_rate < -0.01:
+        if funding_rate < config.FUNDING_SHORT_BLOCK:
             funding_ok = False
         elif funding_rate >= 0:
             funding_note = f"\n🧲 Funding: +{funding_rate:.4f}% (Shortçu az) ✅"
@@ -116,19 +119,19 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     # SHORT 1: ZİRVE TUZAĞI (SFP)
     sfp_found, swing_high, sfp_candle = detect_sfp(df_4h)
     if sfp_found and sfp_candle is not None:
-        sl = float(sfp_candle['high']) + (atr_val * 0.3)
+        sl = float(sfp_candle['high']) + (atr_val * config.BEAR_HUNTER_SFP_ATR_SL_MULT)
         sl_dist = max(sl - current_price, 1e-8)
-        tp = current_price - (sl_dist * 3.0)
+        tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
         risk = sl - current_price
         reward = current_price - tp
-        if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
+        if risk > 0 and reward > 0 and (reward / risk) >= config.RR_MINIMUM:
             rr_ratio = reward / risk
             sl_pct = (risk / current_price) * 100
-            _adx_prev_bh1 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+            _adx_prev_bh1 = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
             _scores_bh1 = build_short_scores(
-                adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_bh1,
-                price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
-                rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
+                adx=last_4h.get(f'ADX_{config.IND_ADX_LENGTH}'), adx_prev=_adx_prev_bh1,
+                price=current_price, ema_fast=last_4h.get(ema_mid_col), ema_mid=last_4h.get(ema_slow_col), ema_slow=None,
+                rsi=last_4h.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=df_4h.iloc[-2].get(f'RSI_{config.IND_RSI_LENGTH}') if len(df_4h) >= 2 else None,
                 volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
                 dollar_vol=last_4h.get('volume', 0) * current_price,
                 rr=rr_ratio, has_engulfing=False, regime="BEAR",
@@ -155,19 +158,19 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     # SHORT 2: PAHALI BÖLGE REDDİ (SMC Premium)
     prem_found, fib_618, fib_786, prem_candle = detect_premium_rejection(df_4h, df_1d)
     if prem_found:
-        sl = fib_786 + (atr_val * 0.5)
+        sl = fib_786 + (atr_val * config.BEAR_HUNTER_PREMIUM_ATR_SL_MULT)
         sl_dist = max(sl - current_price, 1e-8)
-        tp = current_price - (sl_dist * 3.0)
+        tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
         risk = sl - current_price
         reward = current_price - tp
-        if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
+        if risk > 0 and reward > 0 and (reward / risk) >= config.RR_MINIMUM:
             rr_ratio = reward / risk
             sl_pct = (risk / current_price) * 100
-            _adx_prev_bh2 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+            _adx_prev_bh2 = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
             _scores_bh2 = build_short_scores(
-                adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_bh2,
-                price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
-                rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
+                adx=last_4h.get(f'ADX_{config.IND_ADX_LENGTH}'), adx_prev=_adx_prev_bh2,
+                price=current_price, ema_fast=last_4h.get(ema_mid_col), ema_mid=last_4h.get(ema_slow_col), ema_slow=None,
+                rsi=last_4h.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=df_4h.iloc[-2].get(f'RSI_{config.IND_RSI_LENGTH}') if len(df_4h) >= 2 else None,
                 volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
                 dollar_vol=last_4h.get('volume', 0) * current_price,
                 rr=rr_ratio, has_engulfing=False, regime="BEAR",
@@ -195,7 +198,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     trend_aligned = True
     if config.SHORT_TREND_ALIGN_REQUIRED:
         ema_50_1d = df_1d.iloc[-1].get(f'EMA_{config.IND_EMA_SLOW}') if df_1d is not None and not df_1d.empty else None
-        sma_200_1d = df_1d.iloc[-1].get('SMA_200') if df_1d is not None and not df_1d.empty else None
+        sma_200_1d = df_1d.iloc[-1].get(f'SMA_{config.IND_SMA_TREND}') if df_1d is not None and not df_1d.empty else None
         if ema_50_1d is not None and not pd.isna(ema_50_1d) and current_price >= ema_50_1d:
             trend_aligned = False
         if sma_200_1d is not None and not pd.isna(sma_200_1d) and current_price >= sma_200_1d:
@@ -204,19 +207,19 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     if trend_aligned:
         div_found, sh_1, sh_2, rsi_1, rsi_2 = detect_bearish_divergence(df_4h)
         if div_found:
-            sl = sh_2 + (atr_val * 0.5)
+            sl = sh_2 + (atr_val * config.BEAR_HUNTER_DIV_ATR_SL_MULT)
             sl_dist = max(sl - current_price, 1e-8)
-            tp = current_price - (sl_dist * 3.0)
+            tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
             risk = sl - current_price
             reward = current_price - tp
-            if risk > 0 and reward > 0 and (reward / risk) >= 2.0:
+            if risk > 0 and reward > 0 and (reward / risk) >= config.RR_MINIMUM:
                 rr_ratio = reward / risk
                 sl_pct = (risk / current_price) * 100
-                _adx_prev_bh3 = df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None
+                _adx_prev_bh3 = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
                 _scores_bh3 = build_short_scores(
-                    adx=last_4h.get('ADX_14'), adx_prev=_adx_prev_bh3,
-                    price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'), ema_slow=None,
-                    rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
+                    adx=last_4h.get(f'ADX_{config.IND_ADX_LENGTH}'), adx_prev=_adx_prev_bh3,
+                    price=current_price, ema_fast=last_4h.get(ema_mid_col), ema_mid=last_4h.get(ema_slow_col), ema_slow=None,
+                    rsi=last_4h.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=df_4h.iloc[-2].get(f'RSI_{config.IND_RSI_LENGTH}') if len(df_4h) >= 2 else None,
                     volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
                     dollar_vol=last_4h.get('volume', 0) * current_price,
                     rr=rr_ratio, has_engulfing=False, regime="BEAR",

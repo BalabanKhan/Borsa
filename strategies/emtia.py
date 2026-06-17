@@ -60,7 +60,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
     if is_weekend_fakeout_time():
         return signals
 
-    if df_1d is None or len(df_1d) < 30:
+    if df_1d is None or len(df_1d) < config.EMTIA_LOOKBACK_LIMIT:
         return signals
 
     # Pandas Mutability koruması: kaynak DataFrame'leri kirletme
@@ -85,7 +85,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
         df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
         df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
         # Emtia vol_sma hesapla (1E fix)
-        df_4h['vol_sma_20'] = df_4h['volume'].rolling(20).mean()
+        df_4h['vol_sma_20'] = df_4h['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean()
 
     last_1d = df_1d.iloc[-1]
     current_price = float(last_1d['close'])
@@ -108,12 +108,12 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
     atr_mult = EMTIA_ATR_MULT.get(symbol, 2.5)
     atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
-        atr_val = current_price * 0.02
+        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
     # RED-08: Emtia ATR Cap — flash crash koruması
     raw_sl_dist = atr_mult * atr_val
     dynamic_sl_dist = max(
         min(raw_sl_dist, current_price * ATR_CAP_EMTIA),
-        current_price * 0.03
+        current_price * config.MIN_SL_PCT
     )
     sl_pct = (dynamic_sl_dist / current_price) * 100
 
@@ -139,7 +139,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                 bbl = last_1d[bb_lower_col[0]]
                 bbm = last_1d[bb_mid_col[0]]
                 bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
-                if bb_width < 0.15:
+                if bb_width < config.EMTIA_SQUEEZE_WIDTH_LIMIT:
                     in_squeeze = True
 
         last_4h = df_4h.iloc[-1]
@@ -154,7 +154,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                         and last_4h['close'] > last_4h['open']):
                     if not dxy_block_long:
                         sl = current_price - dynamic_sl_dist
-                        tp = current_price + (dynamic_sl_dist * 3)
+                        tp = current_price + (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
                         dxy_note = "\n🛡️ DXY Kontrolü: Dolar zayıf ✅" if is_dxy_sensitive else ""
                         _rr_e1l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
                         _scores_e1l = build_trend_scores(
@@ -182,11 +182,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                                 ) + _conv_e1l.to_reason_suffix()
                             })
 
-            elif not in_squeeze and adx_4h > 25 and ema8_4h < ema21_4h:
+            elif not in_squeeze and adx_4h > config.EMTIA_TREND_ADX_MIN and ema8_4h < ema21_4h:
                 if (last_4h['high'] >= ema21_4h and last_4h['close'] < ema21_4h
                         and last_4h['close'] < last_4h['open']):
                     sl = current_price + dynamic_sl_dist
-                    tp = current_price - (dynamic_sl_dist * 3)
+                    tp = current_price - (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
                     _rr_e1s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                     _scores_e1s = build_short_scores(
                         adx=adx_4h, adx_prev=df_4h.iloc[-2].get('ADX_14') if len(df_4h) >= 2 else None,
@@ -214,7 +214,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                         })
 
     # EMTİA 2: KESKİN NİŞANCI (SMC / OTE)
-    if df_4h is not None and len(df_4h) >= 30:
+    if df_4h is not None and len(df_4h) >= config.EMTIA_LOOKBACK_LIMIT:
         htf_bias = sniper_get_htf_bias(df_1d)
 
         if htf_bias == 1 and not dxy_block_long:
@@ -247,9 +247,9 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                                     ltf_confirm = False
 
                             if ltf_confirm:
-                                sl = sweep_low - (atr_val * 0.5)
+                                sl = sweep_low - (atr_val * config.EMTIA_SMC_LONG_ATR_SL_MULT)
                                 sl_dist = max(current_price - sl, 1e-8)
-                                tp = current_price + (sl_dist * 3.0)
+                                tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
                                 fvg_label = " + FVG ✅" if has_fvg else ""
                                 dxy_note = "\n🛡️ DXY: Dolar zayıf ✅" if is_dxy_sensitive else ""
                                 _rr_e2l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -322,9 +322,9 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                                     ltf_confirm = False
 
                             if ltf_confirm:
-                                sl = sweep_high + (atr_val * 0.5)
+                                sl = sweep_high + (atr_val * config.EMTIA_SMC_SHORT_ATR_SL_MULT)
                                 sl_dist = max(sl - current_price, 1e-8)
-                                tp = current_price - (sl_dist * 3.0)
+                                tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
                                 fvg_label = " + FVG ✅" if has_fvg else ""
                                 _rr_e2s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
                                 
@@ -370,12 +370,12 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
     if squeeze_fired:
         if sq_dir == "up" and not dxy_block_long:
             sl = current_price - dynamic_sl_dist
-            tp = current_price + (dynamic_sl_dist * 3)
+            tp = current_price + (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
             dxy_note = "\n🛡️ DXY: Dolar zayıf ✅" if is_dxy_sensitive else ""
             _rr_e3l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
             _scores_e3l = build_breakout_scores(
                 bb_width=None, price=current_price, ema_fast=None, ema_mid=None, ema_slow=None,
-                volume=last_1d.get('volume', 0), vol_sma=df_1d['volume'].rolling(20).mean().iloc[-1] if len(df_1d) >= 20 else None,
+                volume=last_1d.get('volume', 0), vol_sma=df_1d['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean().iloc[-1] if len(df_1d) >= config.IND_VOL_SMA_LENGTH else None,
                 dollar_vol=last_1d.get('volume', 0) * current_price,
                 rr=_rr_e3l, regime="BULL",
                 macro_aligned=(not dxy_block_long), consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
@@ -397,11 +397,11 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                 })
         elif sq_dir == "down":
             sl = current_price + dynamic_sl_dist
-            tp = current_price - (dynamic_sl_dist * 3)
+            tp = current_price - (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr_e3s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
             _scores_e3s = build_breakout_scores(
                 bb_width=None, price=current_price, ema_fast=None, ema_mid=None, ema_slow=None,
-                volume=last_1d.get('volume', 0), vol_sma=df_1d['volume'].rolling(20).mean().iloc[-1] if len(df_1d) >= 20 else None,
+                volume=last_1d.get('volume', 0), vol_sma=df_1d['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean().iloc[-1] if len(df_1d) >= config.IND_VOL_SMA_LENGTH else None,
                 dollar_vol=last_1d.get('volume', 0) * current_price,
                 rr=_rr_e3s, regime="BEAR",
                 macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
