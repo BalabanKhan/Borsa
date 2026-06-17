@@ -490,21 +490,25 @@ def guard_dataframe(
     df['dg_staleness_reason'] = ""
     df['dg_anomaly_reason'] = ""
 
-    # DG-02: Bayatlık (Soft Penalty)
+    # DG-02: Bayatlık
     if check_freshness:
         ok, reason = check_data_freshness(df, symbol, timeframe)
         if not ok:
             logging.warning(reason)
+            # Kripto ve Emtia 7/24 aktif olduğu için bayat veri kesinlikle veri çekim hatasıdır -> Hard Block
+            is_bist = symbol.endswith('.IS') or symbol.endswith('.E')
+            if not is_bist:
+                return None
             df['dg_is_stale'] = True
             df['dg_staleness_reason'] = reason
 
-    # DG-04: Kurumsal Eylem Anomalisi (Soft Penalty)
+    # DG-04: Kurumsal Eylem Anomalisi (Split/Rollover)
     if check_anomaly:
         ok, reason = detect_corporate_action_anomaly(df, symbol)
         if not ok:
             logging.warning(reason)
-            df['dg_corporate_anomaly'] = True
-            df['dg_anomaly_reason'] = reason
+            # Bölünme, delist veya hatalı fiyat anomalilerinde indikatörlerin bozulmaması için kesin blok (Hard Block)
+            return None
 
     # Soft Penalty Ek Metrikleri Hesapla (Darth Maul, Gap)
     try:

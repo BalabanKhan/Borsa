@@ -20,7 +20,10 @@ class TaskScheduler:
     def __init__(self, scanner, notifier):
         self.scanner = scanner
         self.notifier = notifier
-        self.scheduler = AsyncIOScheduler(timezone=ZoneInfo("Europe/Istanbul"))
+        self.scheduler = AsyncIOScheduler(
+            timezone=ZoneInfo("Europe/Istanbul"),
+            job_defaults={'misfire_grace_time': 15}
+        )
         self._price_fail_count = 0
         self.setup_jobs()
 
