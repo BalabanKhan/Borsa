@@ -1232,3 +1232,194 @@ def check_near_support(current_price: float, df_4h, df_1d, tolerance_pct: float 
         return True, f"{closest_support} desteğine yakın (Mesafe: %{min_dist_pct:.2f})"
         
     return False, "Hiçbir önemli desteğe yakın değil"
+
+
+# ---------------------------------------------------------------------------
+# BIST 12: Grafik Formasyonları (Chart Patterns) Tespiti
+# ---------------------------------------------------------------------------
+def _check_session_aware_volume(df_4h, current_volume: float, current_hour: int) -> bool:
+    """
+    Kırılım mumu hacmini son 10 gündeki AYNI seans saatine denk gelen mumların hacim ortalamasıyla karşılaştırır.
+    BIST gün sonu karanlık oda veya açılış saati hacim anomalilerini engellemek için seans duyarlıdır.
+    """
+    import pandas as pd
+    import logging
+    
+    # Aynı saat dilimine sahip geçmiş barları filtrele (mevcut bar hariç)
+    session_bars = df_4h[df_4h.index.hour == current_hour]
+    if len(session_bars) < 2:
+        return True # Yetersiz geçmiş bar varsa geçişe izin ver
+        
+    past_session_bars = session_bars.iloc[:-1]
+    if past_session_bars.empty:
+        return True
+        
+    avg_session_vol = float(past_session_bars['volume'].mean())
+    if avg_session_vol <= 0:
+        return True
+        
+    vol_ratio = current_volume / avg_session_vol
+    logging.info(f"[_check_session_aware_volume] Seans Saati: {current_hour}:00 | Hacim Oranı: {vol_ratio:.2f}x (Ortalama: {avg_session_vol:.0f})")
+    return vol_ratio >= config.BIST12_VOLUME_MULT
+
+
+def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
+    """
+    Taramada son tamamlanan barda oluşmuş/kırılmış boğa (bullish) grafik formasyonlarını tespit eder.
+    OBO, TOBO, İkili Dip/Tepe, Bayrak/Flama ve Dikdörtgen Kırılımları.
+    NumPy tabanlı vektörel/indeks karşılaştırmaları kullanarak performansı korur.
+    """
+    from scipy.signal import find_peaks
+    import numpy as np
+    import pandas as pd
+    import logging
+    
+    if df_4h is None or len(df_4h) < 30:
+        return None, {}
+        
+    # NumPy dizilerine dönüştürme (RAM optimizasyonu)
+    close_arr = df_4h['close'].values.astype(np.float64)
+    high_arr = df_4h['high'].values.astype(np.float64)
+    low_arr = df_4h['low'].values.astype(np.float64)
+    open_arr = df_4h['open'].values.astype(np.float64)
+    volume_arr = df_4h['volume'].values.astype(np.float64)
+    
+    # Son bar fiyat ve volatilite verileri
+    current_price = close_arr[-1]
+    atr_series = df_4h.ta.atr(length=14) if 'ATR_14' not in df_4h.columns else df_4h['ATR_14']
+    atr = float(atr_series.iloc[-1]) if atr_series is not None and not atr_series.empty and not pd.isna(atr_series.iloc[-1]) else (high_arr[-1] - low_arr[-1])
+    if atr <= 0:
+        atr = 1e-8
+        
+    # Dinamik prominence ve esneklik toleransları (Volatilite uyumlu)
+    prominence = atr * config.BIST12_PROMINENCE_ATR_MULT
+    dynamic_double_tol = max(config.BIST12_DOUBLE_BASE_TOLERANCE_PCT, (atr / current_price) * 100.0 * config.BIST12_VOLATILITY_TOLERANCE_MULT) / 100.0
+    dynamic_obo_tol = max(config.BIST12_OBO_BASE_TOLERANCE_PCT, (atr / current_price) * 100.0 * config.BIST12_VOLATILITY_TOLERANCE_MULT) / 100.0
+    
+    # ----------------------------------------------------
+    # 1. Dikdörtgen Kırılımı (Darvas Box)
+    # ----------------------------------------------------
+    box_len = 20
+    if len(close_arr) >= box_len:
+        box_highs = high_arr[-box_len:-1]
+        box_lows = low_arr[-box_len:-1]
+        max_high = float(np.max(box_highs))
+        min_low = float(np.min(box_lows))
+        box_height_pct = (max_high - min_low) / min_low * 100.0
+        
+        # Sıkışma yeterince dar mı?
+        if box_height_pct <= config.BIST12_RECTANGLE_HEIGHT_PCT:
+            # En az ikişer kez test edilmiş mi?
+            upper_touches = np.sum((max_high - box_highs) / max_high * 100.0 <= 1.0)
+            lower_touches = np.sum((box_lows - min_low) / min_low * 100.0 <= 1.0)
+            
+            if upper_touches >= 2 and lower_touches >= 2:
+                # Yukarı yönlü kırılım (AL)
+                if current_price > max_high:
+                    current_hour = df_4h.index[-1].hour
+                    if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
+                        return "Dikdörtgen (Darvas Box) Yukarı Kırılımı", {
+                            "pattern": "Rectangle Breakout",
+                            "signal": "AL",
+                            "box_high": max_high,
+                            "box_low": min_low,
+                            "sl": min_low
+                        }
+                        
+    # Tepe ve Dip Noktalarının Bulunması (scipy.signal)
+    peaks, _ = find_peaks(close_arr, prominence=prominence, distance=4)
+    valleys, _ = find_peaks(-close_arr, prominence=prominence, distance=4)
+    
+    # ----------------------------------------------------
+    # 2. TOBO (Ters Omuz Baş Omuz) - Bullish Reversal
+    # ----------------------------------------------------
+    if len(valleys) >= 3 and len(peaks) >= 2:
+        v1, v2, v3 = valleys[-3], valleys[-2], valleys[-1]
+        p1_candidates = peaks[(peaks > v1) & (peaks < v2)]
+        p2_candidates = peaks[(peaks > v2) & (peaks < v3)]
+        
+        if len(p1_candidates) > 0 and len(p2_candidates) > 0:
+            idx_v1, idx_v2, idx_v3 = v1, v2, v3
+            idx_p1, idx_p2 = p1_candidates[-1], p2_candidates[-1]
+            
+            val_v1, val_v2, val_v3 = close_arr[idx_v1], close_arr[idx_v2], close_arr[idx_v3]
+            val_p1, val_p2 = close_arr[idx_p1], close_arr[idx_p2]
+            
+            # Baş en dipte olmalı
+            if val_v2 < val_v1 and val_v2 < val_v3:
+                shoulder_diff = abs(val_v1 - val_v3) / max(val_v1, val_v3)
+                neck_diff = abs(val_p1 - val_p2) / max(val_p1, val_p2)
+                
+                if shoulder_diff <= dynamic_obo_tol and neck_diff <= (config.BIST12_NECK_TOLERANCE_PCT / 100.0):
+                    # Boyun çizgisi (Neckline) hesabı
+                    m = (val_p2 - val_p1) / (idx_p2 - idx_p1)
+                    neck_price = val_p2 + m * (len(close_arr) - 1 - idx_p2)
+                    
+                    if current_price > neck_price:
+                        return "Ters Omuz Baş Omuz (TOBO) Kırılımı", {
+                            "pattern": "TOBO",
+                            "signal": "AL",
+                            "sl": val_v3 * 0.99,
+                            "details": f"Sol: {val_v1:.2f}, Baş: {val_v2:.2f}, Sağ: {val_v3:.2f}"
+                        }
+
+    # ----------------------------------------------------
+    # 3. İkili Dip (Double Bottom) - Bullish Reversal
+    # ----------------------------------------------------
+    if len(valleys) >= 2 and len(peaks) >= 1:
+        v1, v2 = valleys[-2], valleys[-1]
+        p_candidates = peaks[(peaks > v1) & (peaks < v2)]
+        
+        if len(p_candidates) > 0:
+            idx_v1, idx_v2 = v1, v2
+            idx_p = p_candidates[-1]
+            
+            val_v1, val_v2 = close_arr[idx_v1], close_arr[idx_v2]
+            val_p = close_arr[idx_p]
+            
+            if val_p > max(val_v1, val_v2):
+                dip_diff = abs(val_v1 - val_v2) / max(val_v1, val_v2)
+                if dip_diff <= dynamic_double_tol:
+                    if current_price > val_p:
+                        sl_level = min(val_v1, val_v2) * 0.99
+                        return "İkili Dip Kırılımı", {
+                            "pattern": "Double Bottom",
+                            "signal": "AL",
+                            "sl": sl_level,
+                            "details": f"Dip 1: {val_v1:.2f}, Dip 2: {val_v2:.2f}, Ara Tepe: {val_p:.2f}"
+                        }
+
+    # ----------------------------------------------------
+    # 4. Boğa Bayrağı (Bull Flag) - Bullish Continuation
+    # ----------------------------------------------------
+    consolidation_len = config.BIST12_FLAG_CONSOLIDATION_BARS
+    if len(close_arr) >= (15 + consolidation_len):
+        past_section = close_arr[-(15 + consolidation_len):-consolidation_len]
+        pole_low = float(np.min(past_section))
+        pole_high = float(np.max(past_section))
+        pole_pct = (pole_high - pole_low) / pole_low * 100.0
+        
+        if pole_pct >= config.BIST12_FLAG_POLE_MIN_PCT:
+            flag_section_close = close_arr[-consolidation_len:]
+            flag_section_volume = volume_arr[-consolidation_len:]
+            
+            flag_max_high = float(np.max(high_arr[-consolidation_len:]))
+            flag_min_low = float(np.min(low_arr[-consolidation_len:]))
+            
+            if flag_max_high <= pole_high and flag_min_low >= pole_low:
+                recent_avg_vol = float(np.mean(volume_arr[-(consolidation_len+10):-consolidation_len]))
+                flag_avg_vol = float(np.mean(flag_section_volume))
+                
+                if flag_avg_vol < recent_avg_vol * 1.1:
+                    flag_resistance = float(np.max(flag_section_close[:-1]))
+                    if current_price > flag_resistance:
+                        current_hour = df_4h.index[-1].hour
+                        if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
+                            return "Boğa Bayrağı Kırılımı", {
+                                "pattern": "Bull Flag",
+                                "signal": "AL",
+                                "sl": flag_min_low * 0.99,
+                                "details": f"Bayrak Direği: %{pole_pct:.1f}, Dinlenme Hacmi: {flag_avg_vol:.0f}"
+                            }
+
+    return None, {}

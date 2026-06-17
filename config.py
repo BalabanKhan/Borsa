@@ -574,6 +574,7 @@ TIME_STOP_STRATEGIES: list = [                # Zaman stopu uygulanacak kırıl�
     "BIST 5: HACİMLİ KIRILIM",
     "BIST 9: ZAMAN KAFESİ (ORB)",
     "BIST 11: MUM FORMASYONLARI (CANDLESTICK)",
+    "BIST 12: GRAFİK FORMASYONLARI (CHART PATTERNS)",
     "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)",
     "EMTİA 3: VOLATİLİTE SIKIŞMASI (SQUEEZE)",
     "BEAR 3: YAPI KIRILIMI"
@@ -601,8 +602,21 @@ BYPASS_TIME_ROUTING: bool = False             # Zamanlayıcıyı tamamen devre d
 # --- 17. BIST 11: Mum Formasyonları (Candlestick) ---
 BIST11_ATR_MULTIPLIER: float = 2.0            # ATR tabanlı trailing stop çarpanı
 BIST11_VOLUME_SMA_PERIOD: int = 10            # Hacim teyidi için geriye dönük SMA periyodu
-BIST11_VOLUME_MULT: float = 1.2               # Formasyon mumunun hacminin ortalama hacme oranı
+BIST11_VOLUME_MULT: float = 0.8               # Formasyon mumunun hacminin ortalama hacme oranı
 BIST11_SUPPORT_TOLERANCE_PCT: float = 2.0     # Destek seviyelerine maksimum yakınlık yüzdesi
-BIST11_DIVERGENCE_REQUIRED: bool = True       # RSI/MACD uyumsuzluğu zorunlu mu
+BIST11_DIVERGENCE_REQUIRED: bool = False      # RSI/MACD uyumsuzluğu zorunlu mu
+
+# --- 18. BIST 12: Grafik Formasyonları (Chart Patterns) ---
+BIST12_PROMINENCE_ATR_MULT: float = 0.5       # find_peaks için dinamik prominence (ATR oranı)
+BIST12_VOLATILITY_TOLERANCE_MULT: float = 1.0 # volatiliteye duyarlı tolerans katsayısı
+BIST12_OBO_BASE_TOLERANCE_PCT: float = 4.0    # OBO/TOBO omuzları arası taban tolerans yüzdesi (%)
+BIST12_NECK_TOLERANCE_PCT: float = 3.0       # OBO/TOBO boyun çizgisi hizalama toleransı (%)
+BIST12_DOUBLE_BASE_TOLERANCE_PCT: float = 2.5 # İkili dip/tepe taban tolerans yüzdesi (%)
+BIST12_RECTANGLE_HEIGHT_PCT: float = 4.0      # Dikdörtgen konsolidasyon kutusu maksimum yüksekliği (%)
+BIST12_FLAG_POLE_MIN_PCT: float = 10.0        # Bayrak direği minimum yükseliş/düşüş oranı (%)
+BIST12_FLAG_CONSOLIDATION_BARS: int = 6       # Bayrak konsolidasyon bar sayısı
+BIST12_VOLUME_MULT: float = 1.3               # Kırılım mumunun hacminin aynı seans ortalamasına oranı
+BIST12_ATR_MULTIPLIER: float = 2.0            # ATR tabanlı stop loss çarpanı
+
 
 
