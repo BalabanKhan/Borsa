@@ -682,8 +682,29 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 if config.BIST11_DIVERGENCE_REQUIRED:
                     div_ok, _, _, _, _ = detect_bullish_divergence(df_4h, neighbors=3)
 
-                # Destek ve Hacim teyidi geçerlilik şartıdır
-                if near_support and volume_ok:
+                rsi_d_filter = df_1d['RSI_14'].iloc[-1] if 'RSI_14' in df_1d.columns else 50.0
+                
+                # Formasyona Özel Optimizasyon Kuralları
+                pattern_type = pattern_details.get("pattern", "")
+                pattern_ok = True
+                
+                # 1. Sıkı Dip Kuralı (Dipten Dönüş Formasyonları)
+                if pattern_type in ["Hammer", "Inverted Hammer", "Dragonfly Doji", "Tweezer Bottom"]:
+                    if rsi_d_filter >= 45:
+                        pattern_ok = False
+                
+                # 2. Yutan Boğa Benzeri Kural (Güçlü Dönüş Kırılımları)
+                elif pattern_type in ["Bullish Engulfing", "Piercing Line", "Morning Star"]:
+                    if 45 <= rsi_d_filter <= 52:
+                        pattern_ok = False
+                        
+                # 3. Aşırı Alım Freni (Trend Devam Formasyonları)
+                elif pattern_type == "Three White Soldiers":
+                    if rsi_d_filter >= 70:
+                        pattern_ok = False
+
+                # Destek, Hacim ve Formasyona Özel RSI Filtresi (Tuzakları engeller)
+                if near_support and volume_ok and pattern_ok:
                     atr_series_4h = df_4h['ATR_14'] if 'ATR_14' in df_4h.columns else df_4h.ta.atr(length=14)
                     atr_4h = float(atr_series_4h.iloc[-1]) if atr_series_4h is not None and not atr_series_4h.empty and not pd.isna(atr_series_4h.iloc[-1]) else (df_4h['high'].iloc[-1] - df_4h['low'].iloc[-1])
                     if atr_4h <= 0:

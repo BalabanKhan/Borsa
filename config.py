@@ -617,6 +617,10 @@ BIST12_FLAG_POLE_MIN_PCT: float = 10.0        # Bayrak direği minimum yükseli�
 BIST12_FLAG_CONSOLIDATION_BARS: int = 6       # Bayrak konsolidasyon bar sayısı
 BIST12_VOLUME_MULT: float = 1.3               # Kırılım mumunun hacminin aynı seans ortalamasına oranı
 BIST12_ATR_MULTIPLIER: float = 2.0            # ATR tabanlı stop loss çarpanı
+BIST12_WEDGE_CONVERGENCE_FACTOR: float = 0.1  # Takoz formasyonlarında çizgilerin yakınsama oranı (fark)
+BIST12_TRIANGLE_SLOPE_TOLERANCE: float = 0.05 # Yönlü üçgenlerde direnç/destek çizgisinin maksimum eğimi
+BIST12_HARMONIC_TOLERANCE: float = 0.06       # Harmonik formasyonlarda Fibonacci oran toleransı (%)
+BIST12_DIAMOND_SYMMETRY_TOLERANCE: float = 0.08 # Elmas formasyonunda sol/sağ simetri toleransı (%)
 
 
 

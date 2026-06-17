@@ -1326,7 +1326,6 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                             "sl": min_low
                         }
                         
-    # Tepe ve Dip Noktalarının Bulunması (scipy.signal)
     peaks, _ = find_peaks(close_arr, prominence=prominence, distance=4)
     valleys, _ = find_peaks(-close_arr, prominence=prominence, distance=4)
     
@@ -1421,5 +1420,199 @@ def detect_chart_patterns(df_4h) -> tuple[Optional[str], dict]:
                                 "sl": flag_min_low * 0.99,
                                 "details": f"Bayrak Direği: %{pole_pct:.1f}, Dinlenme Hacmi: {flag_avg_vol:.0f}"
                             }
+
+    # ----------------------------------------------------
+    # 5. Alçalan Takoz (Falling Wedge) - Bullish Breakout
+    # ----------------------------------------------------
+    if len(valleys) >= 3 and len(peaks) >= 3:
+        p_idx = peaks[-3:]
+        v_idx = valleys[-3:]
+        
+        slope_p, intercept_p = np.polyfit(p_idx, close_arr[p_idx], 1)
+        slope_v, intercept_v = np.polyfit(v_idx, close_arr[v_idx], 1)
+        
+        norm_slope_p = slope_p / current_price * 100.0
+        norm_slope_v = slope_v / current_price * 100.0
+        
+        if norm_slope_p < -0.05 and norm_slope_v < -0.05:
+            if norm_slope_p < norm_slope_v - config.BIST12_WEDGE_CONVERGENCE_FACTOR:
+                resistance_at_last = slope_p * (len(close_arr) - 1) + intercept_p
+                if current_price > resistance_at_last:
+                    current_hour = df_4h.index[-1].hour
+                    if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
+                        return "Alçalan Takoz Yukarı Kırılımı", {
+                            "pattern": "Falling Wedge",
+                            "signal": "AL",
+                            "sl": close_arr[v_idx[-1]] * 0.99,
+                            "details": f"Direnç Eğimi: %{norm_slope_p:.2f}, Destek Eğimi: %{norm_slope_v:.2f}"
+                        }
+
+    # ----------------------------------------------------
+    # 6. Yükselen Üçgen (Ascending Triangle) - Bullish Breakout
+    # ----------------------------------------------------
+    if len(valleys) >= 3 and len(peaks) >= 3:
+        p_idx = peaks[-3:]
+        v_idx = valleys[-3:]
+        
+        slope_p, intercept_p = np.polyfit(p_idx, close_arr[p_idx], 1)
+        slope_v, intercept_v = np.polyfit(v_idx, close_arr[v_idx], 1)
+        
+        norm_slope_p = slope_p / current_price * 100.0
+        norm_slope_v = slope_v / current_price * 100.0
+        
+        if abs(norm_slope_p) <= config.BIST12_TRIANGLE_SLOPE_TOLERANCE:
+            if norm_slope_v > config.BIST12_TRIANGLE_SLOPE_TOLERANCE:
+                max_p = np.max(close_arr[p_idx])
+                min_p = np.min(close_arr[p_idx])
+                p_var = (max_p - min_p) / min_p * 100.0
+                
+                if p_var <= 2.5:
+                    if current_price > max_p:
+                        current_hour = df_4h.index[-1].hour
+                        if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
+                            return "Yükselen Üçgen Yukarı Kırılımı", {
+                                "pattern": "Ascending Triangle",
+                                "signal": "AL",
+                                "sl": close_arr[v_idx[-1]] * 0.99,
+                                "details": f"Direnç Varyansı: %{p_var:.2f}, Destek Eğimi: %{norm_slope_v:.2f}"
+                            }
+
+    # ----------------------------------------------------
+    # 7. Elmas Dip (Diamond Bottom) - Bullish Reversal
+    # ----------------------------------------------------
+    if len(valleys) >= 4 and len(peaks) >= 4:
+        p_idx = list(peaks[-4:])
+        v_idx = list(valleys[-4:])
+        
+        combined_pivots = sorted(
+            [(idx, 'P', close_arr[idx]) for idx in p_idx] + 
+            [(idx, 'V', close_arr[idx]) for idx in v_idx], 
+            key=lambda x: x[0]
+        )
+        
+        alternates = True
+        for i in range(len(combined_pivots) - 1):
+            if combined_pivots[i][1] == combined_pivots[i+1][1]:
+                alternates = False
+                break
+                
+        if alternates and len(combined_pivots) >= 8:
+            hp1, hp2, hp3, hp4 = close_arr[p_idx[0]], close_arr[p_idx[1]], close_arr[p_idx[2]], close_arr[p_idx[3]]
+            lv1, lv2, lv3, lv4 = close_arr[v_idx[0]], close_arr[v_idx[1]], close_arr[v_idx[2]], close_arr[v_idx[3]]
+            
+            if hp2 > hp1 and hp3 > hp4 and lv2 < lv1 and lv3 < lv4:
+                if max(hp2, hp3) > max(hp1, hp4) and min(lv2, lv3) < min(lv1, lv4):
+                    slope_r, intercept_r = np.polyfit(p_idx[-2:], close_arr[p_idx[-2:]], 1)
+                    norm_slope_r = slope_r / current_price * 100.0
+                    
+                    if norm_slope_r < -0.01:
+                        resistance_at_last = slope_r * (len(close_arr) - 1) + intercept_r
+                        if current_price > resistance_at_last:
+                            current_hour = df_4h.index[-1].hour
+                            if _check_session_aware_volume(df_4h, volume_arr[-1], current_hour):
+                                return "Elmas Dip Yukarı Kırılımı", {
+                                    "pattern": "Diamond Bottom",
+                                    "signal": "AL",
+                                    "sl": min(lv2, lv3) * 0.99,
+                                    "details": f"Elmas Zirvesi: {max(hp2,hp3):.2f}, Elmas Dibi: {min(lv2,lv3):.2f}"
+                                }
+
+    # ----------------------------------------------------
+    # 8. Harmonik Formasyonlar (AB=CD, Gartley, Bat)
+    # ----------------------------------------------------
+    if len(peaks) >= 2 and len(valleys) >= 2:
+        p_candidates = list(peaks[-3:])
+        v_candidates = list(valleys[-3:])
+        
+        all_pivots = sorted(
+            [(idx, 'P', close_arr[idx]) for idx in p_candidates] + 
+            [(idx, 'V', close_arr[idx]) for idx in v_candidates],
+            key=lambda x: x[0]
+        )
+        
+        if len(all_pivots) >= 5:
+            pivots_5 = all_pivots[-5:]
+            is_alt = True
+            for i in range(4):
+                if pivots_5[i][1] == pivots_5[i+1][1]:
+                    is_alt = False
+                    break
+                    
+            if is_alt and pivots_5[4][1] == 'V':
+                idx_x, x_val = pivots_5[0][0], pivots_5[0][2]
+                idx_a, a_val = pivots_5[1][0], pivots_5[1][2]
+                idx_b, b_val = pivots_5[2][0], pivots_5[2][2]
+                idx_c, c_val = pivots_5[3][0], pivots_5[3][2]
+                idx_d, d_val = pivots_5[4][0], pivots_5[4][2]
+                
+                xa = abs(a_val - x_val)
+                ab = abs(b_val - a_val)
+                bc = abs(c_val - b_val)
+                cd = abs(d_val - c_val)
+                
+                ratio_ab_xa = ab / max(xa, 1e-8)
+                ratio_bc_ab = bc / max(ab, 1e-8)
+                ratio_cd_bc = cd / max(bc, 1e-8)
+                ratio_ad_xa = (a_val - d_val) / max(xa, 1e-8)
+                
+                tol = config.BIST12_HARMONIC_TOLERANCE
+                
+                if abs(ratio_ab_xa - 0.618) <= tol:
+                    if 0.382 - tol <= ratio_bc_ab <= 0.886 + tol:
+                        if 1.272 - tol <= ratio_cd_bc <= 1.618 + tol:
+                            if abs(ratio_ad_xa - 0.786) <= tol:
+                                if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
+                                    return "Harmonik Gartley Formasyonu (Boğa)", {
+                                        "pattern": "Harmonic Gartley",
+                                        "signal": "AL",
+                                        "sl": d_val * 0.99,
+                                        "details": f"D Noktası: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}"
+                                    }
+                                    
+                if 0.382 - tol <= ratio_ab_xa <= 0.50 + tol:
+                    if 0.382 - tol <= ratio_bc_ab <= 0.886 + tol:
+                        if 1.618 - tol <= ratio_cd_bc <= 2.618 + tol:
+                            if abs(ratio_ad_xa - 0.886) <= tol:
+                                if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
+                                    return "Harmonik Bat Formasyonu (Boğa)", {
+                                        "pattern": "Harmonic Bat",
+                                        "signal": "AL",
+                                        "sl": d_val * 0.99,
+                                        "details": f"D Noktası: {d_val:.2f}, Retracement: {ratio_ad_xa:.3f}"
+                                    }
+
+        if len(all_pivots) >= 4:
+            pivots_4 = all_pivots[-4:]
+            is_alt_4 = True
+            for i in range(3):
+                if pivots_4[i][1] == pivots_4[i+1][1]:
+                    is_alt_4 = False
+                    break
+                    
+            if is_alt_4 and pivots_4[3][1] == 'V':
+                idx_a, a_val = pivots_4[0][0], pivots_4[0][2]
+                idx_b, b_val = pivots_4[1][0], pivots_4[1][2]
+                idx_c, c_val = pivots_4[2][0], pivots_4[2][2]
+                idx_d, d_val = pivots_4[3][0], pivots_4[3][2]
+                
+                ab = abs(b_val - a_val)
+                bc = abs(c_val - b_val)
+                cd = abs(d_val - c_val)
+                
+                ratio_bc_ab = bc / max(ab, 1e-8)
+                ratio_cd_bc = cd / max(bc, 1e-8)
+                
+                tol = config.BIST12_HARMONIC_TOLERANCE
+                
+                if 0.618 - tol <= ratio_bc_ab <= 0.786 + tol:
+                    if 1.272 - tol <= ratio_cd_bc <= 1.618 + tol:
+                        if abs(ab - cd) / max(ab, cd) <= tol:
+                            if current_price > d_val and (len(close_arr) - 1 - idx_d) <= 4:
+                                return "Harmonik AB=CD Formasyonu (Boğa)", {
+                                    "pattern": "Harmonic ABCD",
+                                    "signal": "AL",
+                                    "sl": d_val * 0.99,
+                                    "details": f"AB: {ab:.2f}, CD: {cd:.2f}"
+                                }
 
     return None, {}
