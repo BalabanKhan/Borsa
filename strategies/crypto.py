@@ -117,7 +117,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
 
 
     # KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI
-    if not is_weekend_fakeout_time():
+    if True:  # Weekend filter removed for crypto
         if not pd.isna(last_4h.get('RSI_14')) and not pd.isna(last_4h.get('EMA_20')) and not pd.isna(last_4h.get('vol_sma_20')):
             # DIP_RSI_1D_EMA50_ALIGN_ENABLED: Kripto 1G Fiyat > EMA50 trend hizalamasını sorgular (Long yönlü teyit)
             ema_50_1d = last_1d.get(f'EMA_{config.IND_EMA_SLOW}') if last_1d is not None else None
@@ -133,7 +133,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     volume_spike_ok = not config.DIP_VOLUME_SPIKE_REQUIRED or (last_4h['volume'] >= guarded_vol_sma * config.DIP_VOLUME_SPIKE_MULT)
                     
                     if volume_spike_ok and _is_meaningful_volume(last_4h['volume'], guarded_vol_sma, current_price, "KRIPTO"):
-                        if current_price > last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h['open']:
+                        if current_price > last_4h['open']:
                             oi_crash = fetch_crypto_oi_crash(symbol)
                             if oi_crash:
                                 lowest_wick = last_4h['low']
@@ -183,10 +183,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
             atr_col = 'ATRr_14' if 'ATRr_14' in last_4h.index else 'ATR_14'
             if not pd.isna(last_4h.get('ADX_14')) and not pd.isna(last_4h.get('EMA_20')) and not pd.isna(last_4h.get(atr_col)):
                 if last_4h['ADX_14'] > 25:
-                    # RED-02: ADX olgunlaşma kontrolü
-                    if last_4h['ADX_14'] > ADX_TOO_LATE:
-                        pass  # Trend olgunlaşmış, geç kaldın
-                    elif last_4h['low'] <= last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h['open']:
+                    # ADX_TOO_LATE check removed for crypto mega trend
+                    if last_4h['low'] <= last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price > last_4h['open']:
                         # RED-07: Anlamlı hacim kontrolü (tutarlılık: KRİPTO 1/3 ile aynı)
                         if not pd.isna(last_4h.get('vol_sma_20')):
                             guarded_vol_sma = _apply_volume_sma_guard(df_4h, last_4h['vol_sma_20'])
@@ -227,12 +225,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         })
 
     # KRİPTO 3: SAHTE KIRILIM FİLTRELİ BREAKOUT
-    if not is_weekend_fakeout_time():
+    if True:  # Weekend filter removed for crypto
         bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
         bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
         bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
 
-        if bb_upper_col and bb_lower_col and bb_mid_col and btc_ok:
+        if bb_upper_col and bb_lower_col and bb_mid_col:
             df_1d['bb_width'] = (df_1d[bb_upper_col[0]] - df_1d[bb_lower_col[0]]) / df_1d[bb_mid_col[0]]
             min_width_30d = df_1d['bb_width'].tail(30).min()
             last_width = df_1d['bb_width'].iloc[-1]
@@ -251,7 +249,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                         if retest_ok and current_price > local_high and last_4h['low'] <= local_high * 0.99 and current_price > last_4h['open']:
                             has_unlocks = check_token_unlocks(symbol)
                             funding_rate = get_funding_rate(symbol)
-                            if not has_unlocks and funding_rate <= 0.0:
+                            if not has_unlocks and (funding_rate is None or funding_rate <= config.BREAKOUT_CRYPTO_FUNDING_RATE_MAX):
                                 # AM-03: Mutlak saatlik hacim eşiği
                                 if _has_absolute_hourly_volume(last_4h['volume'], current_price, "KRIPTO"):
                                     # Dinamik ATR tabanlı stop: ATR * Çarpan (Kripto için 2.2), min %4, max %7 genişlik
@@ -301,7 +299,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
             if trend_aligned:
                 funding_rate = get_funding_rate(symbol)
                 # AM-04: Fonlama Vampiri Kalkanı — negatif fonlamada short YASAK
-                if funding_rate is not None and _is_funding_safe_for_short(funding_rate) and funding_rate >= 0.01:
+                if funding_rate is not None and _is_funding_safe_for_short(funding_rate) and funding_rate >= config.SHORT1_CRYPTO_FUNDING_RATE_MIN:
                     div_found, _, _, _, _ = detect_bearish_divergence(df_4h)
                     swing_lows = sniper_find_swing_points(df_4h, point_type="low")
                     msb_ok, msb_low, msb_idx = sniper_detect_msb(df_4h, swing_lows, point_type="low")
@@ -331,11 +329,9 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                 "reason": f"4S RSI>{config.SHORT_RSI_OVERBOUGHT_LIMIT:.0f} ve {trigger_reason}. Fonlama (+%{funding_rate:.4f}) pozitif." + _conv_s1.to_reason_suffix()
                             })
 
-        # SHORT 2: KANLI ŞELALE SÖRFÜ
-        if not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')):
             if last_1d[f'EMA_{config.IND_EMA_MID}'] < last_1d[f'EMA_{config.IND_EMA_SLOW}'] and current_price < last_1d[f'EMA_{config.IND_EMA_MID}']:
                 if not pd.isna(last_4h.get('ADX_14')) and last_4h['ADX_14'] > 30:
-                    if last_4h['high'] >= last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price < last_4h[f'EMA_{config.IND_EMA_MID}'] and current_price < last_4h['open']:
+                    if last_4h['high'] >= last_4h[f'EMA_{config.IND_EMA_FAST}'] and current_price < last_4h[f'EMA_{config.IND_EMA_FAST}'] and current_price < last_4h['open']:
                         btcdom_trend = get_btc_dominance_trend()
                         if btcdom_trend == "UP":
                             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
@@ -364,7 +360,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                     "entry_price": current_price, "sl": sl, "tp": tp,
                                     "conviction_score": _conv_s2.total_score, "conviction_grade": _conv_s2.grade, "conviction_details": _conv_s2.component_scores,
                                     "position_size_pct": _conv_s2.position_size_pct,
-                                    "reason": f"1G Ayı Trendi, 4S ADX>30. EMA20 Ret. BTC Dominans '{btcdom_trend}'." + _conv_s2.to_reason_suffix()
+                                    "reason": f"1G Ayı Trendi, 4S ADX>30. EMA8 Ret. BTC Dominans '{btcdom_trend}'." + _conv_s2.to_reason_suffix()
                                 })
 
         # SHORT 3: UÇURUM ÇÖKÜŞÜ
@@ -380,12 +376,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 cmf_4h_val = last_4h.get('CMF_20')
                 cmf_ok_s3 = cmf_4h_val is None or math.isnan(cmf_4h_val) or cmf_4h_val < 0.0
                 
-                if not btc_ok and cmf_ok_s3 and (current_price < support_lookback):
+                if cmf_ok_s3 and (current_price < support_lookback):
                     recent_high = max(last_4h['high'], df_4h.iloc[-2]['high'])
                     proximity = (support_lookback - recent_high) / support_lookback
 
-                    # RED-15: Proximity math düzeltmesi — yüzde aralık daraltıldı
-                    if -0.005 <= proximity <= 0.015:
+                    # RED-15: Proximity math düzeltmesi — genişletildi (KURAL 6 SSOT)
+                    if config.SHORT3_CANYON_PROXIMITY_MIN <= proximity <= config.SHORT3_CANYON_PROXIMITY_MAX:
                         if current_price < last_4h['open']:
                             funding_rate = get_funding_rate(symbol)
                             if funding_rate is not None and funding_rate >= 0.0001:
@@ -402,7 +398,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                     rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
                                     volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
                                     dollar_vol=last_4h['volume'] * current_price,
-                                    rr=_rr_s3, has_engulfing=False, regime="BEAR", macro_aligned=True,
+                                    rr=_rr_s3, has_engulfing=False, regime="BEAR", macro_aligned=not btc_ok,
                                     consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
                                 )
                                 _conv_s3 = calculate_conviction(_scores_s3)
@@ -417,8 +413,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                     })
 
     # KRİPTO 4: KESKİN NİŞANCI (SMC / OTE)
-    if not is_weekend_fakeout_time():
-        if btc_sniper_bias == 1:
+    if True:  # Weekend filter removed for crypto
+        if btc_sniper_bias in (1, 0):
             swing_lows_s = sniper_find_swing_points(df_4h, point_type="low")
             swing_highs_s = sniper_find_swing_points(df_4h, point_type="high")
             sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows_s, point_type="low")
@@ -497,7 +493,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                             ) + _conv_c4l.to_reason_suffix()
                                         })
 
-        elif btc_sniper_bias == -1:
+        if btc_sniper_bias in (-1, 0):
             swing_highs_s = sniper_find_swing_points(df_4h, point_type="high")
             swing_lows_s = sniper_find_swing_points(df_4h, point_type="low")
             sweep_ok, sweep_high = sniper_detect_sweep(df_4h, swing_highs_s, point_type="high")
@@ -578,7 +574,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                                         })
 
     # KRİPTO 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)
-    if not is_weekend_fakeout_time():
+    if True:  # Weekend filter removed for crypto
         sq_fired, sq_dir, sq_candle = detect_squeeze(df_4h)
         if sq_fired and sq_dir is not None:
             trend_up = (not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')) and
@@ -621,7 +617,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     })
 
     # KRİPTO 6: VWAP KURUMSAL MIKNATISI
-    if not is_weekend_fakeout_time() and btc_ok:
+    if True:  # Weekend filter and hard btc_ok removed
         vwap_val = calculate_anchored_vwap(df_4h, anchor_type="weekly")
         if vwap_val is not None:
             bounce_ok, wick_low = detect_vwap_bounce(df_4h, vwap_val)
@@ -763,32 +759,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                 })
 
             # 🎯 SHORT Keskin Nişancı (SHORT-4 in implementation_plan.md)
-            # Ekstra Güvenlik Önlemleri:
-            # 1. Altcoin kendi 1G EMA_50'sinin altında olmalı (düşüş trendi onayı).
-            # 2. 1S RSI aşırı satım (oversold) bölgesinde olmamalı (RSI >= 45) -> tepki yükselişi koruması.
-            # 3. Funding rate aşırı negatif olmamalı (funding_rate >= -0.0005) -> short-squeeze koruması.
-            # 4. 1S CMF < 0.0 olmalı (para çıkışı / kurumsal dağıtım onayı).
-            # 5. Fiyat 1S EMA_21'in altında olmalı (saatlik düşüş ivmesi teyidi).
-            # 6. Altcoin kendi 1G RSI_14 değeri 50'nin altında olmalı (günlük ayı trendi teyidi).
+            # Ekstra Güvenlik Önlemleri (Sert boolean filtreler kaldırıldı, soft skorlamaya aktarıldı):
             rsi_1h_val = last_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}')
-            rsi_1h_ok = rsi_1h_val is None or math.isnan(rsi_1h_val) or rsi_1h_val >= 45.0
-            
-            ema_slow_1d = last_1d.get('EMA_50', 0)
-            trend_ok = current_price < ema_slow_1d if ema_slow_1d > 0 else True
-            
             funding_rate = get_funding_rate(symbol)
-            funding_ok = funding_rate is None or funding_rate >= -0.0005
-            
             cmf_1h = last_1h_s.get('CMF_20')
-            cmf_ok = cmf_1h is None or math.isnan(cmf_1h) or cmf_1h < 0.0
             
-            ema21_1h = last_1h_s.get(f'EMA_{config.IND_EMA_21}')
-            ema_ok = ema21_1h is None or math.isnan(ema21_1h) or current_price < ema21_1h
-            
-            rsi_1d_val = last_1d.get('RSI_14', 50.0)
-            rsi_1d_ok = rsi_1d_val is None or math.isnan(rsi_1d_val) or rsi_1d_val < 50.0
-            
-            if not btc_ok and trend_ok and rsi_1h_ok and funding_ok and cmf_ok and ema_ok and rsi_1d_ok:
+            if True:  # Hard filters removed in compliance with KURAL 1
                 has_fvg_short, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bearish")
                 swing_highs_s = sniper_find_swing_points(df_1h_sniper, point_type="high")
                 sweep_ok_short, _ = sniper_detect_sweep(df_1h_sniper, swing_highs_s, point_type="high")
@@ -807,11 +783,12 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
                     rr=_rr_sn_short, regime="BEAR" if not btc_ok else "BULL",
                     macro_aligned=not btc_ok, consecutive_sl=_get_consecutive_sl(symbol),
                     bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg_short, sfp_present=has_sfp_short,
-                    market="KRIPTO", is_long=False, funding_rate=funding_rate
+                    market="KRIPTO", is_long=False, funding_rate=funding_rate,
+                    cmf=cmf_1h if cmf_1h is not None and not math.isnan(cmf_1h) else 0.0
                 )
                 _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS)
-                # Kripto SHORT sinyallerinde kaliteyi artırmak için sadece 80+ skorlu en güçlü sinyaller kabul edilir.
-                if _conv_sn_short.total_score >= 80.0:
+                # Kripto SHORT sinyallerinde kaliteyi artırmak için standarda uygun olarak grade in (CONVICTION_STRONG, CONVICTION_MEDIUM) olarak uyarlanmıştır.
+                if _conv_sn_short.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "KRIPTO",
                         "strategy": "KRİPTO SHORT 5: KESKİN NİŞANCI (SNIPER)", "signal": "SAT",
