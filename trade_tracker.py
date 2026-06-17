@@ -8,13 +8,13 @@ import logging
 import math
 import os
 import csv
-import tempfile
 import threading
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from data_sources import get_funding_rate
 from data_guard import validate_signal_output
 from circuit_breaker import cb_observer
+from core.defensive_engine import DefensiveStateGuard, DefensiveExceptionManager
 
 # V3.2 Kaos Çözümleri
 from penalty_box import record_asset_sl, record_asset_tp
@@ -26,28 +26,14 @@ _trade_file_lock = threading.Lock()  # Thread-Safety: JSON dosya erişimini koru
 
 
 # Y-05: İç kullanım — lock TUTULMADAN çağrılır, caller lock tutmalıdır
-def _load_trades_unlocked():
+def _load_trades_unlocked() -> List[Dict[str, Any]]:
     """Lock TUTULMADAN çağrılır — caller'ın _trade_file_lock tutması gerekir."""
-    if os.path.exists(TRACKER_FILE):
-        try:
-            with open(TRACKER_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError as e:
-            logging.warning(f"[load_trades] JSON bozuk, yedek alınıyor: {e}")
-            backup = TRACKER_FILE + f".corrupt.{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-            try:
-                os.rename(TRACKER_FILE, backup)
-                logging.warning(f"[load_trades] Bozuk dosya yedeklendi: {backup}")
-            except Exception as be:
-                logging.warning(f"[load_trades] Yedekleme başarısız: {be}")
-            return []
-        except Exception as e:
-            logging.warning(f"[load_trades] Dosya okuma hatası: {e}")
-            return []
-    return []
+    def _default_trades() -> List[Dict[str, Any]]:
+        return []
+    return DefensiveStateGuard.load_state_safe(TRACKER_FILE, _default_trades)
 
 
-def _sanitize_for_json(obj):
+def _sanitize_for_json(obj: Any) -> Any:
     """Recursively converts numpy and pandas types to standard Python types."""
     try:
         import numpy as np
@@ -76,32 +62,30 @@ def _sanitize_for_json(obj):
     return obj
 
 
-def _save_trades_unlocked(trades):
+def _save_trades_unlocked(trades: List[Dict[str, Any]]) -> None:
     """Lock TUTULMADAN çağrılır — caller'ın _trade_file_lock tutması gerekir."""
-    tmp_path = None
-    try:
-        tmp = tempfile.NamedTemporaryFile(mode='w', dir='.', suffix='.tmp', delete=False, encoding='utf-8')
-        tmp_path = tmp.name
-        sanitized = _sanitize_for_json(trades)
-        json.dump(sanitized, tmp, indent=4, ensure_ascii=False)
-        tmp.close()
-        os.replace(tmp_path, TRACKER_FILE)
-    except Exception as e:
-        logging.warning(f"[save_trades] Kayıt hatası: {e}")
-        if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    sanitized = _sanitize_for_json(trades)
+    success = DefensiveStateGuard.save_state_atomic(TRACKER_FILE, sanitized)
+    if not success:
+        logging.error("[trade_tracker] Aktif işlemler kaydedilemedi (DefensiveStateGuard başarısız).")
 
 
 def load_trades():
     """Thread-safe: Aktif işlemleri JSON dosyasından yükle."""
-    with _trade_file_lock:
+    _trade_file_lock.acquire()
+    try:
         return _load_trades_unlocked()
+    finally:
+        _trade_file_lock.release()
 
 
 def save_trades(trades):
     """Crash-safe atomic write: önce temp dosyaya yaz, sonra atomik replace."""
-    with _trade_file_lock:
+    _trade_file_lock.acquire()
+    try:
         _save_trades_unlocked(trades)
+    finally:
+        _trade_file_lock.release()
 
 
 # 99 yapılmıştır
@@ -232,7 +216,7 @@ def _get_structural_floor(ticker: str, signal: str) -> float:
     """
     import config
     try:
-        from data_sources import get_bist_data, get_crypto_data, get_emtia_data
+        from data_sources import get_bist_data
         df_1d = None
         df_4h = None
         df_1h = None
@@ -251,7 +235,6 @@ def _get_structural_floor(ticker: str, signal: str) -> float:
 
         if df_1h is not None and not df_1h.empty:
             # EMA_20 hesapla
-            import pandas_ta as ta
             df_1h.ta.ema(length=config.IND_EMA_MID, append=True)
             ema_col = f"EMA_{config.IND_EMA_MID}"
             if ema_col in df_1h.columns:
@@ -266,73 +249,136 @@ def _get_structural_floor(ticker: str, signal: str) -> float:
 # 99 yapılmıştır
 # İzleyen stop güncellemeleri; dinamik ATR çarpanı (Chandelier), yapısal trend desteği (EMA-20)
 # ve avcı tuzaklarından kaçınmak için asimetrik deterministik gürültü (Anti-Hunt) ile hesaplanır.
+def _calculate_long_trailing_stop(t, current_price, profit_pct, trailing_dist, atr_floor):
+    import config
+    ticker = t["ticker"]
+    sl = float(t["sl"])
+    
+    # Hibrit Dynamic Chandelier ATR Çarpanı
+    if config.HYBRID_STOP_ENABLED:
+        if profit_pct >= 15.0:
+            multiplier = 1.0
+        elif profit_pct >= 10.0:
+            multiplier = 1.5
+        elif profit_pct >= 5.0:
+            multiplier = 2.0
+        else:
+            multiplier = 2.5
+        current_trailing_dist = trailing_dist * (multiplier / 2.5)
+    else:
+        # Standart trailing sıkıştırması
+        if profit_pct >= 15.0:
+            current_trailing_dist = max(current_price * 0.005, atr_floor)
+        elif profit_pct >= 10.0:
+            current_trailing_dist = max(current_price * 0.015, atr_floor)
+        else:
+            current_trailing_dist = trailing_dist
+
+    current_trailing_dist = max(current_trailing_dist, atr_floor)
+
+    # Highest high güncelle
+    raw_hh = t.get("highest_high")
+    highest_high = float(t["entry_price"]) if raw_hh is None else float(raw_hh)
+    if current_price > highest_high:
+        highest_high = current_price
+        t["highest_high"] = highest_high
+
+    new_sl = highest_high - current_trailing_dist
+
+    # Yapısal Zemin (EMA-20 vb.) Koruması
+    if config.STRUCTURAL_STOP_ENABLED:
+        struct_floor = _get_structural_floor(ticker, "AL")
+        if struct_floor is not None:
+            struct_sl = struct_floor * 0.999  # Yapısal zemin altında %0.1 marj bırak
+            new_sl = max(new_sl, struct_sl)
+
+    # Anti-Hunt Offset (Stop Avı Koruması)
+    ticker_noise = (sum(ord(c) for c in ticker) % 100) / 100000.0  # Deterministik gürültü (örn: 0.00021)
+    asymmetric_offset = config.ANTI_HUNT_OFFSET_PCT + ticker_noise
+    new_sl = new_sl * (1.0 - asymmetric_offset)
+
+    # RED-09: Trailing stop zemin koruması — bir kez BE geçildiyse asla geri gitme
+    entry_price = float(t["entry_price"])
+    if sl >= entry_price:
+        new_sl = max(new_sl, entry_price)
+
+    return new_sl
+
+def _calculate_short_trailing_stop(t, current_price, profit_pct, trailing_dist, atr_floor_short, strategy_name):
+    import config
+    ticker = t["ticker"]
+    sl = float(t["sl"])
+    
+    # Hibrit Dynamic Chandelier ATR Çarpanı
+    if config.HYBRID_STOP_ENABLED:
+        if profit_pct >= 15.0:
+            multiplier = 1.0
+        elif profit_pct >= 10.0:
+            multiplier = 1.5
+        elif profit_pct >= 5.0:
+            multiplier = 2.0
+        else:
+            multiplier = 2.5
+        current_trailing_dist = trailing_dist * (multiplier / 2.5)
+    else:
+        if "ŞELALE SÖRFÜ" in strategy_name:
+            current_trailing_dist = trailing_dist
+        elif "UÇURUM ÇÖKÜŞÜ" in strategy_name:
+            if profit_pct >= 15.0:
+                current_trailing_dist = trailing_dist * 0.4
+            else:
+                current_trailing_dist = trailing_dist
+        else:
+            if profit_pct >= 15.0:
+                current_trailing_dist = max(current_price * 0.005, atr_floor_short)
+            elif profit_pct >= 10.0:
+                current_trailing_dist = max(current_price * 0.015, atr_floor_short)
+            else:
+                current_trailing_dist = trailing_dist
+
+    current_trailing_dist = max(current_trailing_dist, atr_floor_short)
+
+    # Lowest low güncelle
+    raw_ll = t.get("lowest_low")
+    lowest_low = float(t["entry_price"]) if raw_ll is None else float(raw_ll)
+    if current_price < lowest_low:
+        lowest_low = current_price
+        t["lowest_low"] = lowest_low
+
+    new_sl = lowest_low + current_trailing_dist
+
+    # Yapısal Zemin (EMA-20 vb.) Koruması
+    if config.STRUCTURAL_STOP_ENABLED:
+        struct_floor = _get_structural_floor(ticker, "SAT")
+        if struct_floor is not None:
+            struct_sl = struct_floor * 1.001  # Yapısal zemin üstünde %0.1 marj bırak
+            new_sl = min(new_sl, struct_sl)
+
+    # Anti-Hunt Offset (Stop Avı Koruması)
+    ticker_noise = (sum(ord(c) for c in ticker) % 100) / 100000.0
+    asymmetric_offset = config.ANTI_HUNT_OFFSET_PCT + ticker_noise
+    new_sl = new_sl * (1.0 + asymmetric_offset)
+
+    # RED-09: Short trailing stop zemin koruması
+    entry_price = float(t["entry_price"])
+    if sl <= entry_price:
+        new_sl = min(new_sl, entry_price)
+
+    return new_sl
+
 def _update_trailing_stop(t, current_price, profit_pct, signal, strategy_name):
     """
     Hibrit izleyen stop güncelleme motoru.
     Ters Mandal (Ratchet): LONG stop yalnızca YUKARI, SHORT stop yalnızca AŞAĞI gider.
     """
-    import config
     notifications = []
     ticker = t["ticker"]
     sl = float(t["sl"])
     trailing_dist = float(t.get("trailing_dist", abs(float(t["entry_price"]) - sl)))
 
     if signal == "AL":
-        raw_hh = t.get("highest_high")
-        if raw_hh is None:
-            highest_high = float(t["entry_price"])
-            t["highest_high"] = highest_high
-        else:
-            highest_high = float(raw_hh)
-
-        # ATR bazlı minimum trailing mesafe (hiçbir zaman bunun altına düşmez)
-        atr_floor = trailing_dist * 0.3  # Orijinal ATR mesafesinin %30'u
-
-        # Hibrit Dynamic Chandelier ATR Çarpanı
-        if config.HYBRID_STOP_ENABLED:
-            if profit_pct >= 15.0:
-                multiplier = 1.0
-            elif profit_pct >= 10.0:
-                multiplier = 1.5
-            elif profit_pct >= 5.0:
-                multiplier = 2.0
-            else:
-                multiplier = 2.5
-            current_trailing_dist = trailing_dist * (multiplier / 2.5)
-        else:
-            # Standart trailing sıkıştırması
-            if profit_pct >= 15.0:
-                current_trailing_dist = max(current_price * 0.005, atr_floor)
-            elif profit_pct >= 10.0:
-                current_trailing_dist = max(current_price * 0.015, atr_floor)
-            else:
-                current_trailing_dist = trailing_dist
-
-        current_trailing_dist = max(current_trailing_dist, atr_floor)
-
-        # Highest high güncelle
-        if current_price > highest_high:
-            highest_high = current_price
-            t["highest_high"] = highest_high
-
-        new_sl = highest_high - current_trailing_dist
-
-        # Yapısal Zemin (EMA-20 vb.) Koruması
-        if config.STRUCTURAL_STOP_ENABLED:
-            struct_floor = _get_structural_floor(ticker, signal)
-            if struct_floor is not None:
-                struct_sl = struct_floor * 0.999  # Yapısal zemin altında %0.1 marj bırak
-                new_sl = max(new_sl, struct_sl)
-
-        # Anti-Hunt Offset (Stop Avı Koruması)
-        ticker_noise = (sum(ord(c) for c in ticker) % 100) / 100000.0  # Deterministik gürültü (örn: 0.00021)
-        asymmetric_offset = config.ANTI_HUNT_OFFSET_PCT + ticker_noise
-        new_sl = new_sl * (1.0 - asymmetric_offset)
-
-        # RED-09: Trailing stop zemin koruması — bir kez BE geçildiyse asla geri gitme
-        entry_price = float(t["entry_price"])
-        if sl >= entry_price:
-            new_sl = max(new_sl, entry_price)
+        atr_floor = trailing_dist * 0.3
+        new_sl = _calculate_long_trailing_stop(t, current_price, profit_pct, trailing_dist, atr_floor)
 
         # Ters Mandal: LONG stop yalnızca YUKARI gider
         if new_sl > sl:
@@ -355,67 +401,8 @@ def _update_trailing_stop(t, current_price, profit_pct, signal, strategy_name):
                 )
 
     elif signal == "SAT":
-        raw_ll = t.get("lowest_low")
-        if raw_ll is None:
-            lowest_low = float(t["entry_price"])
-            t["lowest_low"] = lowest_low
-        else:
-            lowest_low = float(raw_ll)
-
         atr_floor_short = trailing_dist * 0.3
-
-        # Hibrit Dynamic Chandelier ATR Çarpanı
-        if config.HYBRID_STOP_ENABLED:
-            if profit_pct >= 15.0:
-                multiplier = 1.0
-            elif profit_pct >= 10.0:
-                multiplier = 1.5
-            elif profit_pct >= 5.0:
-                multiplier = 2.0
-            else:
-                multiplier = 2.5
-            current_trailing_dist = trailing_dist * (multiplier / 2.5)
-        else:
-            if "ŞELALE SÖRFÜ" in strategy_name:
-                current_trailing_dist = trailing_dist
-            elif "UÇURUM ÇÖKÜŞÜ" in strategy_name:
-                if profit_pct >= 15.0:
-                    current_trailing_dist = trailing_dist * 0.4
-                else:
-                    current_trailing_dist = trailing_dist
-            else:
-                if profit_pct >= 15.0:
-                    current_trailing_dist = max(current_price * 0.005, atr_floor_short)
-                elif profit_pct >= 10.0:
-                    current_trailing_dist = max(current_price * 0.015, atr_floor_short)
-                else:
-                    current_trailing_dist = trailing_dist
-
-        current_trailing_dist = max(current_trailing_dist, atr_floor_short)
-
-        # Lowest low güncelle
-        if current_price < lowest_low:
-            lowest_low = current_price
-            t["lowest_low"] = lowest_low
-
-        new_sl = lowest_low + current_trailing_dist
-
-        # Yapısal Zemin (EMA-20 vb.) Koruması
-        if config.STRUCTURAL_STOP_ENABLED:
-            struct_floor = _get_structural_floor(ticker, signal)
-            if struct_floor is not None:
-                struct_sl = struct_floor * 1.001  # Yapısal zemin üstünde %0.1 marj bırak
-                new_sl = min(new_sl, struct_sl)
-
-        # Anti-Hunt Offset (Stop Avı Koruması)
-        ticker_noise = (sum(ord(c) for c in ticker) % 100) / 100000.0
-        asymmetric_offset = config.ANTI_HUNT_OFFSET_PCT + ticker_noise
-        new_sl = new_sl * (1.0 + asymmetric_offset)
-
-        # RED-09: Short trailing stop zemin koruması
-        entry_price = float(t["entry_price"])
-        if sl <= entry_price:
-            new_sl = min(new_sl, entry_price)
+        new_sl = _calculate_short_trailing_stop(t, current_price, profit_pct, trailing_dist, atr_floor_short, strategy_name)
 
         # Ters Mandal: SHORT stop yalnızca AŞAĞI gider
         if new_sl < sl:
@@ -695,7 +682,8 @@ def _format_close_message(t, current_price, signal, close_type):
                 duration_str = f"{days}g {hours}s {minutes}dk"
             else:
                 duration_str = f"{hours}s {minutes}dk"
-        except Exception:
+        except Exception as e:
+            DefensiveExceptionManager.swallow_safely(e, "trade_tracker duration_str format parsing", threshold=100)
             duration_str = "Hesaplanamadı"
 
     # Kâr hesabı
@@ -768,27 +756,19 @@ def _stamp_exit_data(trade, current_price):
 # ---------------------------------------------------------------------------
 # Arşiv: Kapanan işlemleri trade_history.json'a taşı
 # ---------------------------------------------------------------------------
-def _archive_closed_trades(closed_trades):
+def _archive_closed_trades(closed_trades: List[Dict[str, Any]]) -> None:
     month_tag = datetime.now(timezone.utc).strftime('%Y_%m')
     history_file = f"trade_history_{month_tag}.json"
-    history = []
-    if os.path.exists(history_file):
-        try:
-            with open(history_file, 'r', encoding='utf-8') as f:
-                history = json.load(f)
-        except Exception:
-            history = []
+    
+    def _default_history() -> List[Dict[str, Any]]:
+        return []
+        
+    history = DefensiveStateGuard.load_state_safe(history_file, _default_history)
     history.extend(closed_trades)
-    # Y-06: Atomic archive write — crash-safe
-    try:
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(history_file) or '.', suffix='.tmp')
-        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp_f:
-            json.dump(history, tmp_f, indent=4, ensure_ascii=False)
-        os.replace(tmp_path, history_file)
-    except Exception as e:
-        logging.warning(f'[_archive_closed_trades] {e}')
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    
+    success = DefensiveStateGuard.save_state_atomic(history_file, history)
+    if not success:
+        logging.error(f"[_archive_closed_trades] Geçmiş işlemler arşivi kaydedilemedi: {history_file}")
 
     # FM-05: CSV Günlüğüne de yaz
     for t in closed_trades:
@@ -899,8 +879,8 @@ def _write_trade_journal_csv(trade):
             hours = int(delta.total_seconds()) // 3600
             mins = (int(delta.total_seconds()) % 3600) // 60
             duration_str = f"{hours}s {mins}dk"
-        except Exception:
-            pass
+        except Exception as e:
+            DefensiveExceptionManager.swallow_safely(e, "trade_tracker history exit duration parsing", threshold=100)
 
         # Sonuç
         if "TP" in status:
@@ -1067,6 +1047,197 @@ def _get_last_completed_candle_close(ticker: str, timeframe: str) -> Optional[fl
 # ---------------------------------------------------------------------------
 # Ana Kontrol Döngüsü
 # ---------------------------------------------------------------------------
+def _process_active_trade_checks(t, current_price, check_price, profit_pct_wick, profit_pct_body, signal, tp, sl, strategy_name, is_watch, notifications):
+    # === 1. KARA KUĞU KONTROLÜ ===
+    t, bs_notifs, is_black_swan = _check_black_swan(t, current_price, signal)
+    if not is_watch:
+        notifications.extend(bs_notifs)
+    if is_black_swan:
+        return True
+
+    if not is_watch:
+        # === 2. KADEMELİ KÂR AL ===
+        t, so_notifs = _check_scale_out(t, profit_pct_wick, signal, strategy_name, current_price)
+        notifications.extend(so_notifs)
+
+        # === 3. DİNAMİK İZLEYEN STOP ===
+        t, ts_notifs = _update_trailing_stop(t, check_price, profit_pct_body, signal, strategy_name)
+        notifications.extend(ts_notifs)
+
+        # === 4. FONLAMA ORANI KALKANI ===
+        t, fs_notifs, funding_close = _check_funding_shield(t, current_price, profit_pct_wick, signal)
+        notifications.extend(fs_notifs)
+        if funding_close:
+            _stamp_exit_data(t, current_price)
+            return True
+
+        # === 5. TEHLİKE BÖLGESİ ===
+        t, dz_notifs = _check_danger_zone(t, check_price, signal)
+        notifications.extend(dz_notifs)
+
+        # === 5.5. SFP MFE / ZAMAN FİLTRESİ ===
+        t, sfp_notifs, sfp_close = _check_sfp_mfe_time_filter(t, check_price, profit_pct_body)
+        if sfp_close:
+            notifications.extend(sfp_notifs)
+            _stamp_exit_data(t, check_price)
+            return True
+
+        # === 5.6. ZAMAN STOPU ===
+        t, time_stop_notifs, time_stop_close = _check_time_stop(t, check_price, profit_pct_body)
+        if time_stop_close:
+            notifications.extend(time_stop_notifs)
+            _stamp_exit_data(t, check_price)
+            return True
+
+    # === 6. ÇIKIŞ KONTROLLERI (TP & SL) ===
+    sl = float(t["sl"])  # Güncellenmiş SL'yi al
+
+    if signal == "AL":
+        if current_price >= tp and tp > 0:
+            close_msg = _format_close_message(t, current_price, signal, "TP")
+            if not is_watch:
+                notifications.append(close_msg)
+            _stamp_exit_data(t, current_price)
+            t["status"] = "CLOSED_TP"
+            return True
+        elif check_price <= sl:
+            close_msg = _format_close_message(t, check_price, signal, "SL")
+            if not is_watch:
+                notifications.append(close_msg)
+            _stamp_exit_data(t, check_price)
+            t["status"] = "CLOSED_SL"
+            return True
+
+    elif signal == "SAT":
+        if current_price <= tp and tp > 0:
+            close_msg = _format_close_message(t, current_price, signal, "TP")
+            if not is_watch:
+                notifications.append(close_msg)
+            _stamp_exit_data(t, current_price)
+            t["status"] = "CLOSED_TP"
+            return True
+        elif check_price >= sl:
+            close_msg = _format_close_message(t, check_price, signal, "SL")
+            if not is_watch:
+                notifications.append(close_msg)
+            _stamp_exit_data(t, check_price)
+            t["status"] = "CLOSED_SL"
+            return True
+
+    return False
+
+def _cb_on_trade_closed_helper(status, ticker_ct, strategy_ct, pnl_pct, hold_hours, entry_time_ct, ct, rr_achieved, cb_notifications):
+    if "SL" in status or "BLACK_SWAN" in status:
+        cb_observer.on_trade_closed({
+            "ticker": ticker_ct,
+            "strategy": strategy_ct,
+            "pnl_percent": -abs(pnl_pct) if pnl_pct != 0 else -0.01
+        })
+        
+        # Ceza Kutusu
+        penalty_msg = record_asset_sl(ticker_ct)
+        if penalty_msg:
+            cb_notifications.append(penalty_msg)
+        
+        # Strateji Karnesi
+        if strategy_ct:
+            record_trade_result(strategy_ct, {
+                "ticker": ticker_ct,
+                "outcome": "SL",
+                "pnl_pct": pnl_pct,
+                "hold_hours": hold_hours,
+                "entry_time": entry_time_ct,
+                "exit_time": ct.get("exit_time", ""),
+                "rr_achieved": round(rr_achieved, 2),
+            })
+        
+    elif "TP" in status:
+        cb_observer.on_trade_closed({
+            "ticker": ticker_ct,
+            "strategy": strategy_ct,
+            "pnl_percent": abs(pnl_pct) if pnl_pct != 0 else 0.01
+        })
+        
+        # Ceza Kutusu
+        penalty_msg = record_asset_tp(ticker_ct)
+        if penalty_msg:
+            cb_notifications.append(penalty_msg)
+            
+        # Strateji Karnesi
+        if strategy_ct:
+            record_trade_result(strategy_ct, {
+                "ticker": ticker_ct,
+                "outcome": "TP",
+                "pnl_pct": pnl_pct,
+                "hold_hours": hold_hours,
+                "entry_time": entry_time_ct,
+                "exit_time": ct.get("exit_time", ""),
+                "rr_achieved": round(rr_achieved, 2),
+            })
+    else:
+        # Manuel kapanış
+        if strategy_ct:
+            record_trade_result(strategy_ct, {
+                "ticker": ticker_ct,
+                "outcome": "MANUAL",
+                "pnl_pct": pnl_pct,
+                "hold_hours": hold_hours,
+                "entry_time": entry_time_ct,
+                "exit_time": ct.get("exit_time", ""),
+                "rr_achieved": round(rr_achieved, 2),
+            })
+
+def _handle_closed_trade_accounting(closed_trades, notifications):
+    _archive_closed_trades(closed_trades)
+    cb_notifications = []
+    
+    def _cb_listener(msg):
+        if msg:
+            cb_notifications.append(msg)
+            
+    cb_observer.subscribe(_cb_listener)
+    try:
+        for ct in closed_trades:
+            status = ct.get("status", "")
+            ticker_ct = ct.get("ticker", "?")
+            strategy_ct = ct.get("strategy", "")
+            entry_price_ct = float(ct.get("entry_price", 0))
+            exit_price_ct = float(ct.get("exit_price", ct.get("entry_price", 0)))
+            signal_ct = ct.get("signal", "AL")
+            
+            # PnL hesabı
+            if entry_price_ct > 0 and exit_price_ct > 0:
+                pnl_pct = ((exit_price_ct - entry_price_ct) / entry_price_ct) * 100 if signal_ct == "AL" else ((entry_price_ct - exit_price_ct) / entry_price_ct) * 100
+            else:
+                pnl_pct = 0.0
+            
+            # Tutma süresi
+            hold_hours = 0.0
+            entry_time_ct = ct.get("entry_time", "")
+            if entry_time_ct:
+                try:
+                    if '+' in entry_time_ct:
+                        entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M:%S+00:00').replace(tzinfo=timezone.utc)
+                    else:
+                        entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M').replace(tzinfo=timezone.utc)
+                    hold_hours = (datetime.now(timezone.utc) - entry_dt_ct).total_seconds() / 3600
+                except Exception as e:
+                    DefensiveExceptionManager.swallow_safely(e, "trade_tracker hold_hours calculation", threshold=100)
+            
+            # R:R hesabı
+            sl_ct = float(ct.get("sl", 0))
+            risk_ct = abs(entry_price_ct - sl_ct) if abs(entry_price_ct - sl_ct) > 0 else 1e-8
+            rr_achieved = abs(exit_price_ct - entry_price_ct) / risk_ct
+            if pnl_pct < 0:
+                rr_achieved = -rr_achieved
+            
+            _cb_on_trade_closed_helper(status, ticker_ct, strategy_ct, pnl_pct, hold_hours, entry_time_ct, ct, rr_achieved, cb_notifications)
+    finally:
+        cb_observer.unsubscribe(_cb_listener)
+        
+    if cb_notifications:
+        notifications.extend(cb_notifications)
+
 def check_active_trades(current_prices_dict):
     """
     current_prices_dict: {"BTC/USDT": 65000.5, "ETH/USDT": 3000.2} şeklinde güncel fiyat sözlüğü.
@@ -1079,21 +1250,41 @@ def check_active_trades(current_prices_dict):
     closed_trades = []
 
     for t in trades:
-        if t["status"] != "ACTIVE":
+        # AAA Kalite: Veri Yapısı ve Tip Doğrulama (Data validation guard)
+        if not isinstance(t, dict):
+            logging.error(f"[trade_tracker] Geçersiz trade objesi tipi: {type(t)}")
+            continue
+
+        status = t.get("status", "ACTIVE")
+        if status != "ACTIVE":
             closed_trades.append(t)
             continue
 
-        ticker = t["ticker"]
+        ticker = t.get("ticker")
+        if not ticker:
+            logging.error("[trade_tracker] Ticker bulunamadı, işlem atlanıyor.")
+            continue
+
         if ticker not in current_prices_dict:
             active_trades.append(t)
             continue
 
         current_price = current_prices_dict[ticker]
+        
+        # AAA Kalite: Alt fonksiyonlarda KeyError'ları önlemek için sözlük alanlarını mutasyona uğratarak doğrula
+        t["signal"] = t.get("signal", "AL")
+        t["sl"] = float(t.get("sl", 0.0))
+        t["tp"] = float(t.get("tp", 0.0))
+        
+        entry_price = float(t.get("entry_price", 0.0))
+        if entry_price <= 0:
+            logging.error(f"[trade_tracker] Geçersiz entry_price ({entry_price}) ticker: {ticker}. Güvenlik için 1e-8 olarak atandı.")
+            entry_price = 1e-8
+        t["entry_price"] = entry_price
+
         signal = t["signal"]
-        tp = float(t["tp"])
-        sl = float(t["sl"])
-        entry_price = float(t["entry_price"])
-        strategy_name = t.get("strategy", "")
+        tp = t["tp"]
+        sl = t["sl"]
 
         # Eğer trailing_dist yoksa hesapla (eski datalar için uyumluluk)
         if "trailing_dist" not in t:
@@ -1119,85 +1310,13 @@ def check_active_trades(current_prices_dict):
 
         # WATCH kontrolü
         is_watch = t.get("is_watch", False)
+        strategy_name = t.get("strategy", "")
 
-        # === 1. KARA KUĞU KONTROLÜ (en önce, fiyat patlayınca hemen çık - wicks) ===
-        t, bs_notifs, is_black_swan = _check_black_swan(t, current_price, signal)
-        if not is_watch: notifications.extend(bs_notifs)
-        if is_black_swan:
+        closed = _process_active_trade_checks(t, current_price, check_price, profit_pct_wick, profit_pct_body, signal, tp, sl, strategy_name, is_watch, notifications)
+        if closed:
             closed_trades.append(t)
-            continue
-
-        if not is_watch:
-            # === 2. KADEMELİ KÂR AL (Scale-Out - wicks) ===
-            t, so_notifs = _check_scale_out(t, profit_pct_wick, signal, strategy_name, current_price)
-            notifications.extend(so_notifs)
-
-            # === 3. DİNAMİK İZLEYEN STOP (Trailing Stop - body close if required) ===
-            t, ts_notifs = _update_trailing_stop(t, check_price, profit_pct_body, signal, strategy_name)
-            notifications.extend(ts_notifs)
-
-            # === 4. FONLAMA ORANI KALKANI (Funding Shield - wicks) ===
-            t, fs_notifs, funding_close = _check_funding_shield(t, current_price, profit_pct_wick, signal)
-            notifications.extend(fs_notifs)
-            if funding_close:
-                _stamp_exit_data(t, current_price)
-                closed_trades.append(t)
-                continue
-
-            # === 5. TEHLİKE BÖLGESİ (Danger Zone - body close if required) ===
-            t, dz_notifs = _check_danger_zone(t, check_price, signal)
-            notifications.extend(dz_notifs)
-
-            # === 5.5. SFP MFE / ZAMAN FİLTRESİ (body close if required) ===
-            t, sfp_notifs, sfp_close = _check_sfp_mfe_time_filter(t, check_price, profit_pct_body)
-            if sfp_close:
-                notifications.extend(sfp_notifs)
-                _stamp_exit_data(t, check_price)
-                closed_trades.append(t)
-                continue
-
-            # === 5.6. ZAMAN STOPU (Time Stop - body close if required) ===
-            t, time_stop_notifs, time_stop_close = _check_time_stop(t, check_price, profit_pct_body)
-            if time_stop_close:
-                notifications.extend(time_stop_notifs)
-                _stamp_exit_data(t, check_price)
-                closed_trades.append(t)
-                continue
-
-        # === 6. ÇIKIŞ KONTROLLERI (TP & SL) ===
-        sl = float(t["sl"])  # Güncellenmiş SL'yi al
-
-        if signal == "AL":
-            if current_price >= tp and tp > 0:
-                close_msg = _format_close_message(t, current_price, signal, "TP")
-                if not is_watch: notifications.append(close_msg)
-                _stamp_exit_data(t, current_price)
-                t["status"] = "CLOSED_TP"
-            elif check_price <= sl:
-                # Gövde stopu tetiklendiğinde candle close (check_price) exit price olarak damgalanır.
-                close_msg = _format_close_message(t, check_price, signal, "SL")
-                if not is_watch: notifications.append(close_msg)
-                _stamp_exit_data(t, check_price)
-                t["status"] = "CLOSED_SL"
-
-        elif signal == "SAT":
-            if current_price <= tp and tp > 0:
-                close_msg = _format_close_message(t, current_price, signal, "TP")
-                if not is_watch: notifications.append(close_msg)
-                _stamp_exit_data(t, current_price)
-                t["status"] = "CLOSED_TP"
-            elif check_price >= sl:
-                # Gövde stopu tetiklendiğinde candle close (check_price) exit price olarak damgalanır.
-                close_msg = _format_close_message(t, check_price, signal, "SL")
-                if not is_watch: notifications.append(close_msg)
-                _stamp_exit_data(t, check_price)
-                t["status"] = "CLOSED_SL"
-
-        # Duruma göre listeye ekle
-        if t["status"] == "ACTIVE":
-            active_trades.append(t)
         else:
-            closed_trades.append(t)
+            active_trades.append(t)
 
     # Fiyatı çekilemeyen aktif pozisyonları bildir
     missing_tickers = [t["ticker"] for t in trades
@@ -1212,118 +1331,7 @@ def check_active_trades(current_prices_dict):
 
     # Kapanan işlemleri arşivle + Circuit Breaker bildir
     if closed_trades:
-        _archive_closed_trades(closed_trades)
-        # FM-03: Lokal Devre Kesici (Circuit Breaker) — Hisse Bazlı İzolasyon
-        # Sistem global bir devre kesici yerine hisse bazlı (lokal) çalışır.
-        # Böylece bir hissede peş peşe stop olunursa, sadece o hisse cezalandırılır (penalty box),
-        # sistemin geri kalanı veya diğer hisseler/stratejiler çalışmaya devam eder.
-        # Bu yapı "cascading failure" (zincirleme çöküş) riskini önler.
-        cb_notifications = []
-        
-        def _cb_listener(msg):
-            if msg:
-                cb_notifications.append(msg)
-                
-        cb_observer.subscribe(_cb_listener)
-        try:
-            for ct in closed_trades:
-                status = ct.get("status", "")
-                ticker_ct = ct.get("ticker", "?")
-                strategy_ct = ct.get("strategy", "")
-                entry_price_ct = float(ct.get("entry_price", 0))
-                exit_price_ct = float(ct.get("exit_price", ct.get("entry_price", 0)))
-                signal_ct = ct.get("signal", "AL")
-                
-                # PnL hesabı
-                if entry_price_ct > 0 and exit_price_ct > 0:
-                    if signal_ct == "AL":
-                        pnl_pct = ((exit_price_ct - entry_price_ct) / entry_price_ct) * 100
-                    else:
-                        pnl_pct = ((entry_price_ct - exit_price_ct) / entry_price_ct) * 100
-                else:
-                    pnl_pct = 0.0
-                
-                # Tutma süresi
-                hold_hours = 0.0
-                entry_time_ct = ct.get("entry_time", "")
-                if entry_time_ct:
-                    try:
-                        if '+' in entry_time_ct:
-                            entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M:%S+00:00').replace(tzinfo=timezone.utc)
-                        else:
-                            entry_dt_ct = datetime.strptime(entry_time_ct, '%Y-%m-%d %H:%M').replace(tzinfo=timezone.utc)
-                        hold_hours = (datetime.now(timezone.utc) - entry_dt_ct).total_seconds() / 3600
-                    except Exception:
-                        pass
-                
-                # R:R hesabı
-                sl_ct = float(ct.get("sl", 0))
-                risk_ct = abs(entry_price_ct - sl_ct) if abs(entry_price_ct - sl_ct) > 0 else 1e-8
-                rr_achieved = abs(exit_price_ct - entry_price_ct) / risk_ct
-                if pnl_pct < 0:
-                    rr_achieved = -rr_achieved
-                
-                if "SL" in status or "BLACK_SWAN" in status:
-                    cb_observer.on_trade_closed({
-                        "ticker": ticker_ct,
-                        "strategy": strategy_ct,
-                        "pnl_percent": -abs(pnl_pct) if pnl_pct != 0 else -0.01
-                    })
-                    
-                    # V3.2 Kaos #4: Ceza Kutusu — SL kaydı
-                    penalty_msg = record_asset_sl(ticker_ct)
-                    if penalty_msg:
-                        cb_notifications.append(penalty_msg)
-                    
-                    # V3.2 Kaos #5: Strateji Karnesi — SL kaydı
-                    if strategy_ct:
-                        record_trade_result(strategy_ct, {
-                            "ticker": ticker_ct,
-                            "outcome": "SL",
-                            "pnl_pct": pnl_pct,
-                            "hold_hours": hold_hours,
-                            "entry_time": entry_time_ct,
-                            "exit_time": ct.get("exit_time", ""),
-                            "rr_achieved": round(rr_achieved, 2),
-                        })
-                    
-                elif "TP" in status:
-                    cb_observer.on_trade_closed({
-                        "ticker": ticker_ct,
-                        "strategy": strategy_ct,
-                        "pnl_percent": abs(pnl_pct) if pnl_pct != 0 else 0.01
-                    })
-                    
-                    # V3.2 Kaos #4: Ceza Kutusu — TP kaydı (SL sayacı düşer)
-                    record_asset_tp(ticker_ct)
-                    
-                    # V3.2 Kaos #5: Strateji Karnesi — TP kaydı
-                    if strategy_ct:
-                        record_trade_result(strategy_ct, {
-                            "ticker": ticker_ct,
-                            "outcome": "TP",
-                            "pnl_pct": pnl_pct,
-                            "hold_hours": hold_hours,
-                            "entry_time": entry_time_ct,
-                            "exit_time": ct.get("exit_time", ""),
-                            "rr_achieved": round(rr_achieved, 2),
-                        })
-                else:
-                    # Manuel kapanış
-                    if strategy_ct:
-                        record_trade_result(strategy_ct, {
-                            "ticker": ticker_ct,
-                            "outcome": "MANUAL",
-                            "pnl_pct": pnl_pct,
-                            "hold_hours": hold_hours,
-                            "entry_time": entry_time_ct,
-                            "exit_time": ct.get("exit_time", ""),
-                            "rr_achieved": round(rr_achieved, 2),
-                        })
-        finally:
-            cb_observer.unsubscribe(_cb_listener)
-                
-        notifications.extend(cb_notifications)
+        _handle_closed_trade_accounting(closed_trades, notifications)
 
     # Sadece aktif işlemleri kaydet
     save_trades(active_trades)

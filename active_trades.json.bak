@@ -1,0 +1,35 @@
+[
+    {
+        "id": "EUPWR.IS_0",
+        "ticker": "EUPWR.IS",
+        "signal": "AL",
+        "entry_price": 96.5,
+        "sl": 92.99839683610594,
+        "tp": 106.15,
+        "reason": "4S ADX>25 Güçlü Trend. 1S EMA13 pullback onayı.",
+        "provider": "Algorithm",
+        "status": "ACTIVE"
+    },
+    {
+        "id": "DOAS.IS_1781275410",
+        "ticker": "DOAS.IS",
+        "signal": "AL",
+        "entry_price": 203.3000030517578,
+        "sl": 198.30032075457788,
+        "tp": 223.6300033569336,
+        "reason": "4S ADX>25 Güçlü Trend. 1S EMA13 pullback onayı.",
+        "provider": "Algorithm",
+        "status": "ACTIVE"
+    },
+    {
+        "id": "KCAER.IS_1781276386",
+        "ticker": "KCAER.IS",
+        "signal": "AL",
+        "entry_price": 15.010000228881836,
+        "sl": 14.682405195854388,
+        "tp": 16.51100025177002,
+        "reason": "4S ADX>25 Güçlü Trend. 1S EMA13 pullback onayı.",
+        "provider": "Algorithm",
+        "status": "ACTIVE"
+    }
+]

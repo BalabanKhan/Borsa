@@ -3,7 +3,6 @@ conflict_resolver.py — Sinyal Çelişki Çözücü
 31 stratejinin aynı anda çalıştırılmasından doğan çelişki ve logic hatalarını engeller.
 """
 import logging
-import config
 
 logger = logging.getLogger("quant_bot.conflict_resolver")
 

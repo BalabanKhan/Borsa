@@ -1,0 +1,100 @@
+
+=== BIST-12 GRAFİK FORMASYONLARI (CHART PATTERNS) SİMÜLASYONU ===
+--- FAILURE ANALYSIS FOR AKSA.IS at 2026-06-08 00:00:00 ---
+Price: 11.16
+RSI 1D: 58.35 | RSI 4H: 61.45
+Vol Ratio: 3.67x (Avg Vol: 4,492,151)
+Dist to EMA21: 3.73% (EMA21: 10.76)
+Regime: BEAR
+-------------------------------------------------
+  -> Scorer Result: Total Score=37.8, Grade=WATCH
+--- FAILURE ANALYSIS FOR EUPWR.IS at 2026-06-10 00:00:00 ---
+Price: 96.60
+RSI 1D: 79.65 | RSI 4H: 71.90
+Vol Ratio: 2.76x (Avg Vol: 2,607,912)
+Dist to EMA21: 10.81% (EMA21: 87.18)
+Regime: BEAR
+-------------------------------------------------
+  -> Scorer Result: Total Score=37.4, Grade=WATCH
+--- FAILURE ANALYSIS FOR TURSG.IS at 2026-06-11 00:00:00 ---
+Price: 6.43
+RSI 1D: 47.18 | RSI 4H: 52.95
+Vol Ratio: 0.63x (Avg Vol: 9,448,219)
+Dist to EMA21: 0.99% (EMA21: 6.37)
+Regime: BEAR
+-------------------------------------------------
+--- FAILURE ANALYSIS FOR TURSG.IS at 2026-06-12 00:00:00 ---
+Price: 6.43
+RSI 1D: 47.18 | RSI 4H: 51.19
+Vol Ratio: 1.25x (Avg Vol: 9,431,132)
+Dist to EMA21: 0.47% (EMA21: 6.40)
+Regime: NEUTRAL
+-------------------------------------------------
+--- FAILURE ANALYSIS FOR TURSG.IS at 2026-06-15 00:00:00 ---
+Price: 6.66
+RSI 1D: 54.00 | RSI 4H: 64.45
+Vol Ratio: 2.08x (Avg Vol: 9,442,745)
+Dist to EMA21: 3.28% (EMA21: 6.45)
+Regime: BULL
+-------------------------------------------------
+  -> Scorer Result: Total Score=72.9, Grade=MEDIUM
+--- FAILURE ANALYSIS FOR BIOEN.IS at 2026-06-08 00:00:00 ---
+Price: 17.78
+RSI 1D: 48.54 | RSI 4H: 54.08
+Vol Ratio: 1.58x (Avg Vol: 1,223,470)
+Dist to EMA21: 2.02% (EMA21: 17.43)
+Regime: BEAR
+-------------------------------------------------
+--- FAILURE ANALYSIS FOR BIOEN.IS at 2026-06-09 00:00:00 ---
+Price: 17.64
+RSI 1D: 47.57 | RSI 4H: 51.60
+Vol Ratio: 1.22x (Avg Vol: 1,226,976)
+Dist to EMA21: 0.79% (EMA21: 17.50)
+Regime: BEAR
+-------------------------------------------------
+--- FAILURE ANALYSIS FOR BIOEN.IS at 2026-06-11 00:00:00 ---
+Price: 17.98
+RSI 1D: 50.77 | RSI 4H: 55.34
+Vol Ratio: 9.04x (Avg Vol: 1,238,766)
+Dist to EMA21: 3.07% (EMA21: 17.44)
+Regime: BEAR
+-------------------------------------------------
+  -> Scorer Result: Total Score=40.4, Grade=WATCH
+--- FAILURE ANALYSIS FOR ODAS.IS at 2026-06-15 00:00:00 ---
+Price: 7.75
+RSI 1D: 58.92 | RSI 4H: 65.50
+Vol Ratio: 2.41x (Avg Vol: 13,009,238)
+Dist to EMA21: 5.26% (EMA21: 7.36)
+Regime: BULL
+-------------------------------------------------
+  -> Scorer Result: Total Score=75.4, Grade=STRONG
+--- FAILURE ANALYSIS FOR NETAS.IS at 2026-06-16 00:00:00 ---
+Price: 71.15
+RSI 1D: 58.84 | RSI 4H: 63.19
+Vol Ratio: 5.07x (Avg Vol: 177,412)
+Dist to EMA21: 5.82% (EMA21: 67.24)
+Regime: BULL
+-------------------------------------------------
+  -> Scorer Result: Total Score=75.8, Grade=STRONG
+--- FAILURE ANALYSIS FOR KORDS.IS at 2026-06-10 00:00:00 ---
+Price: 84.45
+RSI 1D: 60.67 | RSI 4H: 64.38
+Vol Ratio: 6.92x (Avg Vol: 254,255)
+Dist to EMA21: 6.59% (EMA21: 79.23)
+Regime: BEAR
+-------------------------------------------------
+  -> Scorer Result: Total Score=37.8, Grade=WATCH
+
+=== BIST-12 GRAFİK FORMASYONLARI (CHART PATTERNS) SONUÇLARI ===
+Total Trades: 7
+TP (Başarılı): 0 | SL (Başarısız): 0 | Open: 7
+Win Rate (closed): %0.00
+Average PnL: %1.07
+Trade Details:
+  AKSA.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 11.16 | Exit: 12.44 | Outcome: FORCE_CLOSE | PnL: 11.47%
+  EUPWR.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 96.60 | Exit: 92.20 | Outcome: FORCE_CLOSE | PnL: -4.55%
+  TURSG.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 6.66 | Exit: 6.46 | Outcome: FORCE_CLOSE | PnL: -3.00%
+  BIOEN.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 17.98 | Exit: 18.22 | Outcome: FORCE_CLOSE | PnL: 1.33%
+  ODAS.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 7.75 | Exit: 8.54 | Outcome: FORCE_CLOSE | PnL: 10.19%
+  NETAS.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 71.15 | Exit: 71.85 | Outcome: FORCE_CLOSE | PnL: 0.98%
+  KORDS.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 84.45 | Exit: 76.90 | Outcome: FORCE_CLOSE | PnL: -8.94%

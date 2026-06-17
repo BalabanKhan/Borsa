@@ -7,13 +7,13 @@ trader'ın intikam işlemine (revenge trading) girmesini engellemek.
 Strateji ve Market bazlı devre kesici ile sadece zarar eden stratejiler susturulur.
 OOM ve I/O darboğazını önlemek için in-memory cache mekanizması (Lazy Write) kullanılır.
 """
-import json
 import logging
 import os
-import tempfile
 import threading
 from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
 from config import MAX_CONSECUTIVE_SL, COOLDOWN_HOURS, DAILY_MAX_SL
+from core.defensive_engine import DefensiveStateGuard
 
 # V3.3.4 Hibrit Şalter: Global günlük limit
 GLOBAL_DAILY_MAX_SL = 15
@@ -44,7 +44,7 @@ def _default_strategy_state() -> dict:
         "last_sl_tickers": []
     }
 
-def _load_state() -> dict:
+def _load_state() -> Dict[str, Any]:
     global _STATE_CACHE, _LAST_MTIME
     with _cb_lock:
         if not os.path.exists(CB_STATE_FILE):
@@ -54,40 +54,19 @@ def _load_state() -> dict:
 
         mtime = os.path.getmtime(CB_STATE_FILE)
         if _STATE_CACHE is None or mtime > _LAST_MTIME:
-            try:
-                with open(CB_STATE_FILE, 'r', encoding='utf-8') as f:
-                    state = json.load(f)
-                    if "strategies" not in state:
-                        state = _default_state()
-                    if "total_daily_sl" not in state:
-                        state["total_daily_sl"] = 0
-                    _STATE_CACHE = state
-                    _LAST_MTIME = mtime
-            except Exception as e:
-                logging.warning(f"[CircuitBreaker] State okunamadı, cache kullanılıyor: {e}")
-                if _STATE_CACHE is None:
-                    _STATE_CACHE = _default_state()
+            _STATE_CACHE = DefensiveStateGuard.load_state_safe(CB_STATE_FILE, _default_state)
+            _LAST_MTIME = mtime
         return _STATE_CACHE
 
-def _save_state(state: dict):
+def _save_state(state: Dict[str, Any]) -> None:
     global _STATE_CACHE, _LAST_MTIME
     with _cb_lock:
         _STATE_CACHE = state
-        tmp_path = None
-        try:
-            tmp = tempfile.NamedTemporaryFile(mode='w', dir='.', suffix='.tmp', delete=False, encoding='utf-8')
-            tmp_path = tmp.name
-            json.dump(state, tmp, indent=2, ensure_ascii=False)
-            tmp.close()
-            os.replace(tmp_path, CB_STATE_FILE)
+        success = DefensiveStateGuard.save_state_atomic(CB_STATE_FILE, state)
+        if success:
             _LAST_MTIME = os.path.getmtime(CB_STATE_FILE)
-        except Exception as e:
-            logging.warning(f"[CircuitBreaker] State kaydedilemedi: {e}")
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
+        else:
+            logging.error("[CircuitBreaker] State kaydedilemedi (DefensiveStateGuard başarısız).")
 
 def _reset_daily_if_needed(state: dict) -> dict:
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -241,6 +220,21 @@ def force_reset():
         _save_state(state)
         logging.info("[CircuitBreaker] ✅ Manuel sıfırlama yapıldı.")
         return "✅ Tüm Devre Kesiciler ve Global Sayaç sıfırlandı. Sessiz modlar kapatıldı."
+
+def force_global_trip(reason: str = "Sistem Hatası"):
+    with _cb_lock:
+        state = _load_state()
+        state = _reset_daily_if_needed(state)
+        state["total_daily_sl"] = max(state.get("total_daily_sl", 0), GLOBAL_DAILY_MAX_SL)
+        _save_state(state)
+        logging.critical(f"[CircuitBreaker] 🚨 SİSTEM HATASI NEDENİYLE ŞALTER İNDİRİLDİ: {reason}")
+        msg = (
+            f"🚨🚨 <b>HİBRİT ŞALTER ATTI (SİSTEM HATASI)</b> 🚨🚨\n"
+            f"Neden: <b>{reason}</b>\n"
+            f"Güvenlik protokolü gereği <b>TÜM SİSTEM</b> durduruldu!\n"
+        )
+        cb_observer.notify_all(msg)
+
 
 # --- Observer (Event-Driven) Pattern Implementation ---
 class CircuitBreakerObserver:

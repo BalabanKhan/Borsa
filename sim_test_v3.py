@@ -2,7 +2,6 @@ import pandas as pd
 import pandas_ta as ta
 import yfinance as yf
 import ccxt
-import time
 import json
 from datetime import datetime, timedelta
 import warnings

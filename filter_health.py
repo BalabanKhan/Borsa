@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import threading
-import time
 from datetime import datetime, timezone
 
 FILTER_STATS_FILE = "filter_health_state.json"

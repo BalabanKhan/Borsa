@@ -3,12 +3,11 @@ quarantine.py — Karantina Protokolü (V3.2 Kaos Çözümü #2)
 Siyah Kuğu ve veri kesilmesi senaryolarında açık pozisyonları korur.
 Stale/zombie işlemleri tespit eder ve otomatik karantinaya alır.
 """
-import json
 import logging
-import os
-import tempfile
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from typing import Any, Dict
+from core.defensive_engine import DefensiveStateGuard
 
 QUARANTINE_STATE_FILE = "quarantine_state.json"
 _quarantine_lock = threading.Lock()
@@ -22,33 +21,19 @@ AUTO_CLOSE_THRESHOLD_HOURS = getattr(config, 'QUARANTINE_AUTO_CLOSE_HOURS', 72)
 ZOMBIE_CHECK_INTERVAL_SEC = 900    # Her 15 dk'da bir zombie kontrolü
 
 
-def _load_state_unlocked() -> dict:
+def _load_state_unlocked() -> Dict[str, Any]:
     """Kilit olmadan karantina durumunu dosyadan yükle (dahili kullanım)."""
-    if os.path.exists(QUARANTINE_STATE_FILE):
-        try:
-            with open(QUARANTINE_STATE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logging.warning(f"[Quarantine] State okunamadı: {e}")
-    return {"quarantined": {}, "stale_alerts": {}, "stats": {"total_quarantines": 0}}
+    def _default_quarantine() -> Dict[str, Any]:
+        return {"quarantined": {}, "stale_alerts": {}, "stats": {"total_quarantines": 0}}
+    
+    return DefensiveStateGuard.load_state_safe(QUARANTINE_STATE_FILE, _default_quarantine)
 
 
-def _save_state_unlocked(state: dict):
+def _save_state_unlocked(state: Dict[str, Any]) -> None:
     """Kilit olmadan atomik yazma ile durumu kaydet (dahili kullanım)."""
-    tmp_path = None
-    try:
-        tmp = tempfile.NamedTemporaryFile(mode='w', dir='.', suffix='.tmp', delete=False, encoding='utf-8')
-        tmp_path = tmp.name
-        json.dump(state, tmp, indent=2, ensure_ascii=False)
-        tmp.close()
-        os.replace(tmp_path, QUARANTINE_STATE_FILE)
-    except Exception as e:
-        logging.warning(f"[Quarantine] State kaydedilemedi: {e}")
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
+    success = DefensiveStateGuard.save_state_atomic(QUARANTINE_STATE_FILE, state)
+    if not success:
+        logging.error("[Quarantine] State kaydedilemedi (DefensiveStateGuard başarısız).")
 
 
 def _load_state() -> dict:

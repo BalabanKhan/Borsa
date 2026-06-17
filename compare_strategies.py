@@ -1,6 +1,4 @@
-import ccxt
 import pandas as pd
-import pandas_ta as ta
 import time
 import random
 from data_fetcher import TOP_50_COINS, exchange

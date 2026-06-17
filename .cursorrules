@@ -1,0 +1,37 @@
+# Borsa / Kripto Trading Bot — Cursor / AI Rules
+
+Bu kurallar projenin yapısal bütünlüğünü, güvenliğini ve AAA kalite standardını korumak için tasarlanmıştır. Bu projede kod yazarken aşağıdaki anayasal kurallara kesinlikle uyun:
+
+## 1. Hata Yutma Yasağı (No Silent Exception Swallowing)
+- Asla bare `except: pass` veya `except Exception: pass` yazmayın.
+- Hataları mutlaka loglayın ya da `DefensiveExceptionManager.swallow_safely` (core/defensive_engine.py) aracılığıyla limitli şekilde yutulmasını sağlayın.
+
+## 2. Veri Bütünlüğü & NaN/None Koruması (Anti-Hallucination)
+- API/yfinance çıktılarında NaN veya None değerlerin bota işlem açtırmasını veya varsayılan değerlerle tahmin edilmesini engelleyin.
+- İşlem öncesinde mutlaka `data_guard` bütünlük kontrollerini (`validate_indicators_integrity`, `validate_ohlcv_integrity`) çağırın.
+
+## 3. Kaynak Sızıntılarını Önleme (Resource Leaks)
+- Dosya, socket veya veri tabanı işlemlerinde her zaman `with` (context manager) ifadesini kullanın.
+- Durum (state) dosyalarını diske yazarken kesinti anında verinin bozulmasını önlemek için `DefensiveStateGuard.save_state_atomic` (geçici dosya + os.replace) metodunu kullanın.
+
+## 4. Karmaşıklık Sınırı (Cyclomatic Complexity Limit)
+- Radon skoru E veya F olan devasa "God" fonksiyonlar yazmaktan kaçının.
+- Fonksiyonları tek bir mantıksal sorumlulukla sınırlandırarak Radon karmaşıklık notunu en fazla B (skor < 20) seviyesinde tutun.
+
+## 5. Karakter Kodlama (UTF-8 without BOM)
+- Kod dosyalarını her zaman BOM (Byte Order Mark) içermeyen standart UTF-8 formatında kaydedin.
+
+## 6. Regex ve Kaçış Karakterleri (Raw Strings)
+- Düzenli ifadeler (Regex) veya Windows dosya yolları tanımlarken `invalid escape sequence` uyarılarını önlemek için `r"..."` (raw string) yapısını kullanın.
+
+## 7. HTTP İstek Güvenliği (HTTP Timeout)
+- `requests` veya `urllib` ile yapılan tüm dış isteklerde mutlaka `timeout` parametresi belirtin (Örn: `requests.post(..., timeout=10)`).
+
+## 8. Güvenli Şifre Yönetimi (No Hardcoded Secrets)
+- Kod içine şifre, token veya API key hardcoded olarak yazmayın. Her zaman `.env` dosyasından yükleyin.
+
+## 9. Tek Kaynak Prensibi (SSOT)
+- Tüm sihirli sayılar, limitler, katsayılar ve strateji parametreleri `config.py` içinde tanımlanmalıdır. Kod içine sabit sayılar yazmayın.
+
+## 10. Test Odaklı Geliştirme (TDD)
+- Yeni bir işlev eklediğinizde veya refactor yaptığınızda birim testlerin (`python -m unittest discover`) kırılmadığını kontrol edin.

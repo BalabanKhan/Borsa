@@ -1,9 +1,6 @@
-import ccxt
 import pandas as pd
-import pandas_ta as ta
 import time
 import random
-import json
 from data_fetcher import TOP_50_COINS, exchange
 from ai_analyzer import get_ai_decisions_batch
 

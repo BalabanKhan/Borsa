@@ -1,5 +1,4 @@
 import pandas as pd
-import pandas_ta as ta
 import yfinance as yf
 from vbt_backtest import VectorBTBacktester
 

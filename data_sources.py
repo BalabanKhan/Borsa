@@ -4,15 +4,13 @@ Tüm API bağlantıları, veri çekme fonksiyonları ve cache yönetimi.
 """
 import ccxt
 import pandas as pd
-import pandas_ta as ta
 import yfinance as yf
 import time as _time
 import logging
 import gc
-import math
 import threading
 import warnings
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, time as dt_time
 from zoneinfo import ZoneInfo
 from typing import NamedTuple, Any, Optional
 
@@ -715,6 +713,97 @@ def _get_xu100_daily_data():
 # K-08: Son bilinen fiyatlar — Price Sanity Band için referans
 _last_known_prices: dict[str, float] = {}
 
+def _check_price_sanity(ticker: str, price: float) -> float:
+    """
+    K-08: Price Sanity Band — %50'den fazla sapma tespit edilirse eski fiyat korunur.
+    """
+    if ticker in _last_known_prices:
+        prev = _last_known_prices[ticker]
+        if prev > 0:
+            change_pct = abs(price - prev) / prev
+            if change_pct > 0.50:
+                logging.warning(
+                    f'[Price Sanity] {ticker}: Fiyat %{change_pct*100:.1f} sapma! '
+                    f'{prev:.4f} → {price:.4f} — ESKİ FİYAT KORUNUYOR'
+                )
+                return prev
+    _last_known_prices[ticker] = price
+    return price
+
+
+def _fetch_yf_prices(tickers: list[str], prices: dict[str, float]) -> None:
+    """
+    yfinance kullanarak BIST ve Emtia fiyatlarını çeker.
+    """
+    for ticker in tickers:
+        try:
+            t_obj = yf.Ticker(ticker)
+            try:
+                last_price = t_obj.fast_info.last_price
+            except Exception:
+                hist = t_obj.history(period="1d")
+                last_price = hist['Close'].iloc[-1] if not hist.empty else None
+
+            if last_price is not None:
+                prices[ticker] = _check_price_sanity(ticker, float(last_price))
+        except Exception as e:
+            logging.warning(f"[get_current_prices] BIST/Emtia {ticker}: {e}")
+
+
+def _fetch_crypto_prices(tickers: list[str], prices: dict[str, float]) -> None:
+    """
+    Crypto fiyatlarını Binance (varsayılan), Kraken (yedek) veya yfinance (son çare) ile çeker.
+    """
+    # 1. Binance toplu fiyat çekimi
+    if not IS_USA_SERVER:
+        try:
+            tickers_data = exchange.fetch_tickers(tickers)
+            for t in tickers:
+                if t in tickers_data and 'last' in tickers_data[t] and tickers_data[t]['last']:
+                    prices[t] = _check_price_sanity(t, float(tickers_data[t]['last']))
+        except Exception as e:
+            logging.info(f"[get_current_prices] Binance toplu fiyat hatası: {e}")
+
+    # Eksik kalan kripto ticker'lar için yedeklere (Kraken veya yfinance) geç
+    missing_crypto = [t for t in tickers if t not in prices]
+    if not missing_crypto:
+        return
+
+    # 2. Kraken yedek fiyat çekimi
+    try:
+        tickers_data = exchange_fallback.fetch_tickers()
+        for t in missing_crypto:
+            _price = None
+            if t in tickers_data and 'last' in tickers_data[t] and tickers_data[t]['last']:
+                _price = float(tickers_data[t]['last'])
+            else:
+                usd_t = t.replace("/USDT", "/USD")
+                if usd_t in tickers_data and 'last' in tickers_data[usd_t] and tickers_data[usd_t]['last']:
+                    _price = float(tickers_data[usd_t]['last'])
+            
+            if _price is not None:
+                prices[t] = _check_price_sanity(t, _price)
+    except Exception as ekr:
+        logging.warning(f"[get_current_prices] Kraken fiyat hatası: {ekr}, yfinance deneniyor...")
+
+    # Son kalan eksik kriptolar için 3. yfinance yedek fiyat çekimi
+    still_missing = [t for t in missing_crypto if t not in prices]
+    for t in still_missing:
+        try:
+            yf_ticker = t.replace("/USDT", "-USD")
+            t_obj = yf.Ticker(yf_ticker)
+            try:
+                last_price = t_obj.fast_info.last_price
+            except Exception:
+                hist = t_obj.history(period="1d")
+                last_price = hist['Close'].iloc[-1] if not hist.empty else None
+            
+            if last_price is not None:
+                prices[t] = _check_price_sanity(t, float(last_price))
+        except Exception as eyf:
+            logging.warning(f"[get_current_prices] Kripto {t} yfinance hatası: {eyf}")
+
+
 def get_current_prices(tickers):
     """
     Verilen ticker listesi için anlık fiyatları çeker.
@@ -729,100 +818,14 @@ def get_current_prices(tickers):
     # BIST + EMTİA Fiyatlarını Çek (yfinance)
     yf_tickers = bist_tickers + emtia_tickers
     if yf_tickers:
-        for ticker in yf_tickers:
-            try:
-                t_obj = yf.Ticker(ticker)
-                try:
-                    last_price = t_obj.fast_info.last_price
-                except Exception:
-                    hist = t_obj.history(period="1d")
-                    last_price = hist['Close'].iloc[-1] if not hist.empty else None
-
-                if last_price is not None:
-                    last_price = float(last_price)
-                    # K-08: Price Sanity Band — BIST/Emtia sahte fiyat koruması
-                    if ticker in _last_known_prices:
-                        prev = _last_known_prices[ticker]
-                        change_pct = abs(last_price - prev) / prev
-                        if change_pct > 0.50:  # %50'den fazla sapma → şüpheli
-                            logging.warning(f'[Price Sanity] {ticker}: Fiyat %{change_pct*100:.1f} sapma! {prev:.4f} → {last_price:.4f} — ESKİ FİYAT KORUNUYOR')
-                            prices[ticker] = prev
-                            continue
-                    prices[ticker] = last_price
-                    _last_known_prices[ticker] = last_price
-            except Exception as e:
-                logging.warning(f"[get_current_prices] BIST {ticker}: {e}")
+        _fetch_yf_prices(yf_tickers, prices)
 
     # KRIPTO Fiyatlarını Çek
     if crypto_tickers:
-        if not IS_USA_SERVER:
-            try:
-                tickers_data = exchange.fetch_tickers(crypto_tickers)
-                for t in crypto_tickers:
-                    if t in tickers_data and 'last' in tickers_data[t] and tickers_data[t]['last']:
-                        _price = float(tickers_data[t]['last'])
-                        # K-08: Price Sanity Band — Binance kripto sahte fiyat koruması
-                        if t in _last_known_prices:
-                            _prev = _last_known_prices[t]
-                            _chg = abs(_price - _prev) / _prev
-                            if _chg > 0.50:
-                                logging.warning(f'[Price Sanity] {t}: Fiyat %{_chg*100:.1f} sapma! {_prev:.4f} → {_price:.4f} — ESKİ FİYAT KORUNUYOR')
-                                prices[t] = _prev
-                                continue
-                        prices[t] = _price
-                        _last_known_prices[t] = _price
-            except Exception as e:
-                logging.info(f"[get_current_prices] Binance toplu fiyat hatası: {e}")
-
-        if IS_USA_SERVER or not prices:
-            try:
-                tickers_data = exchange_fallback.fetch_tickers()
-                for t in crypto_tickers:
-                    if t in tickers_data and 'last' in tickers_data[t] and tickers_data[t]['last']:
-                        _kprice = float(tickers_data[t]['last'])
-                    else:
-                        usd_t = t.replace("/USDT", "/USD")
-                        if usd_t in tickers_data and 'last' in tickers_data[usd_t] and tickers_data[usd_t]['last']:
-                            _kprice = float(tickers_data[usd_t]['last'])
-                        else:
-                            continue
-                    # K-08: Price Sanity Band — Kraken kripto sahte fiyat koruması
-                    if t in _last_known_prices:
-                        _kprev = _last_known_prices[t]
-                        _kchg = abs(_kprice - _kprev) / _kprev
-                        if _kchg > 0.50:
-                            logging.warning(f'[Price Sanity] {t}: Fiyat %{_kchg*100:.1f} sapma! {_kprev:.4f} → {_kprice:.4f} — ESKİ FİYAT KORUNUYOR')
-                            prices[t] = _kprev
-                            continue
-                    prices[t] = _kprice
-                    _last_known_prices[t] = _kprice
-            except Exception as ekr:
-                logging.warning(f"[get_current_prices] Kraken fiyat hatası: {ekr}, yfinance deneniyor...")
-                for t in crypto_tickers:
-                    try:
-                        yf_ticker = t.replace("/USDT", "-USD")
-                        t_obj = yf.Ticker(yf_ticker)
-                        try:
-                            last_price = t_obj.fast_info.last_price
-                        except Exception:
-                            hist = t_obj.history(period="1d")
-                            last_price = hist['Close'].iloc[-1] if not hist.empty else None
-                        if last_price is not None:
-                            _yfprice = float(last_price)
-                            # K-08: Price Sanity Band — yfinance kripto sahte fiyat koruması
-                            if t in _last_known_prices:
-                                _yfprev = _last_known_prices[t]
-                                _yfchg = abs(_yfprice - _yfprev) / _yfprev
-                                if _yfchg > 0.50:
-                                    logging.warning(f'[Price Sanity] {t}: Fiyat %{_yfchg*100:.1f} sapma! {_yfprev:.4f} → {_yfprice:.4f} — ESKİ FİYAT KORUNUYOR')
-                                    prices[t] = _yfprev
-                                    continue
-                            prices[t] = _yfprice
-                            _last_known_prices[t] = _yfprice
-                    except Exception as eyf:
-                        logging.warning(f"[get_current_prices] Kripto {t} yfinance hatası: {eyf}")
+        _fetch_crypto_prices(crypto_tickers, prices)
 
     return prices
+
 
 
 def get_crypto_1h_data(symbol):

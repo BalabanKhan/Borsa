@@ -1,13 +1,10 @@
 import pandas as pd
 import yfinance as yf
 import ccxt
-import time
-from datetime import datetime, timedelta
 import sys
-import os
 
 sys.path.append('C:\\Users\\YSR_MONSTER\\.antigravity\\Borsa')
-from data_fetcher import analyze_strategies_bist, analyze_strategies_crypto, TOP_BIST, TOP_CRYPTO, clean_yf_df, _get_btc_htf_bias
+from data_fetcher import analyze_strategies_bist, analyze_strategies_crypto, TOP_BIST, TOP_CRYPTO, clean_yf_df
 
 print("Downloading Data...")
 # We need data from a month ago to today

@@ -1,7 +1,6 @@
 import unittest
 import pandas as pd
 import numpy as np
-import math
 import sys
 import os
 
@@ -10,9 +9,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import config
 import indicators
-import strategies
 from strategies import helpers as strategies_helpers
-from conviction_scorer import calculate_conviction
 
 class TestChaosDynamicFilters(unittest.TestCase):
     def setUp(self):

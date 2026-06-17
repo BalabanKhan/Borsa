@@ -1,4 +1,4 @@
-﻿import os
+import os
 import csv
 import requests
 from datetime import datetime, timezone
@@ -33,7 +33,7 @@ def send_telegram(msg):
             "parse_mode": "HTML"
         }
         try:
-            r = requests.post(url, json=payload)
+            r = requests.post(url, json=payload, timeout=10)
             r.raise_for_status()
             print(f"Message sent to {cid}")
         except Exception as e:
@@ -50,7 +50,7 @@ def send_telegram_document_watch_bot(file_path, caption=""):
             with open(file_path, "rb") as f:
                 payload = {"chat_id": cid, "caption": caption, "parse_mode": "HTML"}
                 files = {"document": f}
-                r = requests.post(url, data=payload, files=files)
+                r = requests.post(url, data=payload, files=files, timeout=10)
                 r.raise_for_status()
             print(f"Document {file_path} sent via Watch Bot to {cid}")
         except Exception as e:

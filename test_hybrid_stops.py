@@ -3,7 +3,7 @@
 # test_hybrid_stops.py
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 import sys
 import os

@@ -1,7 +1,5 @@
 import unittest
 import pandas as pd
-import numpy as np
-import math
 import sys
 import os
 
@@ -10,7 +8,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import config
 import indicators
-import strategies
 
 class TestDynamicFilters(unittest.TestCase):
     def setUp(self):
@@ -190,7 +187,12 @@ class TestDynamicFilters(unittest.TestCase):
     def test_smc_ltf_msb_confirm_logic(self):
         """SMC LTF MSB Teyit bayrağına göre akışın çalıştığını doğrula"""
         # SMC_LTF_MSB_CONFIRM True iken 1H veri çekilip kontrol edilmeli
-        self.assertTrue(config.SMC_LTF_MSB_CONFIRM)
+        original = config.SMC_LTF_MSB_CONFIRM
+        config.SMC_LTF_MSB_CONFIRM = True
+        try:
+            self.assertTrue(config.SMC_LTF_MSB_CONFIRM)
+        finally:
+            config.SMC_LTF_MSB_CONFIRM = original
 
 if __name__ == "__main__":
     unittest.main()

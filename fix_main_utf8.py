@@ -1,4 +1,4 @@
-﻿import codecs
+import codecs
 
 with codecs.open('main.py', 'r', 'utf-8') as f:
     lines = f.readlines()

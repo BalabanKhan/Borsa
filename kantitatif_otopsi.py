@@ -37,7 +37,7 @@ def get_median(lst):
 
 def run_autopsy():
     if not os.path.exists(TRADE_JOURNAL_CSV):
-        print(f"❌ {TRADE_JOURNAL_CSV} bulunamadı. Önce işlem yapılması gerekiyor.")
+        print(f"[!] {TRADE_JOURNAL_CSV} bulunamadı. Önce işlem yapılması gerekiyor.")
         return
 
     wins = []
@@ -71,20 +71,20 @@ def run_autopsy():
                 else: real_stats["losses"] += 1
 
     if not wins and not losses:
-        print("❌ Analiz edilecek KAZANÇ veya KAYIP işlemi bulunamadı.")
+        print("[!] Analiz edilecek KAZANÇ veya KAYIP işlemi bulunamadı.")
         return
 
     total_trades = len(wins) + len(losses)
     win_rate = (len(wins) / total_trades) * 100 if total_trades > 0 else 0
 
     print("=" * 70)
-    print(" 🩺 KANTİTATİF OTOPSİ RAPORU (V2)")
+    print(" [ANALIZ] KANTITATIF OTOPSI RAPORU (V2)")
     print("=" * 70)
     print(f"Genel Win Rate   : %{win_rate:.2f} ({len(wins)} KAZANÇ / {len(losses)} KAYIP)")
     print(f"Gerçek İşlemler  : {real_stats['wins']} KAZANÇ / {real_stats['losses']} KAYIP")
     print(f"Sanal (WATCH)    : {watch_stats['wins']} KAZANÇ / {watch_stats['losses']} KAYIP\n")
 
-    print("📈 STRATEJİ BAZLI PERFORMANS")
+    print("STRATEJI BAZLI PERFORMANS")
     print("-" * 70)
     for strat, stats in sorted(strategies.items(), key=lambda x: x[1]['wins'] + x[1]['losses'], reverse=True):
         st_total = stats['wins'] + stats['losses']
@@ -97,7 +97,7 @@ def run_autopsy():
     for t in wins + losses:
         all_indicator_keys.update([k for k, v in t["parsed_indicators"].items() if isinstance(v, float)])
         
-    print("\n📊 İNDİKATÖR KARŞILAŞTIRMASI (MEDYAN DEĞERLER)")
+    print("\nINDIKATOR KARSILASTIRMASI (MEDYAN DEGERLER)")
     print("-" * 70)
     print(f"{'İNDİKATÖR':<15} | {'KAZANAN (W)':>12} | {'KAYBEDEN (L)':>12} | {'FARK (W - L)':>12}")
     print("-" * 70)
@@ -114,7 +114,7 @@ def run_autopsy():
         
         print(f"{key:<15} | {med_win:>12.2f} | {med_loss:>12.2f} | {diff_str:>12}")
 
-    print("\n🔍 ÇIKARIMLAR VE YORUMLAR")
+    print("\nCIKARIMLAR VE YORUMLAR")
     print("-" * 70)
     insights = []
     for key in sorted(all_indicator_keys):
@@ -129,9 +129,9 @@ def run_autopsy():
         
         # Anlamlı fark varsa (> %10) yorum yap
         if med_win > med_loss * 1.1:
-            insights.append(f"💡 {key} değeri yüksek olduğunda kazanma ihtimali daha yüksek.")
+            insights.append(f"[+] {key} değeri yüksek olduğunda kazanma ihtimali daha yüksek.")
         elif med_loss > med_win * 1.1:
-            insights.append(f"⚠️ {key} değeri yüksek olduğunda kaybetme riski daha yüksek (Zarar kesilebilir).")
+            insights.append(f"[!] {key} değeri yüksek olduğunda kaybetme riski daha yüksek (Zarar kesilebilir).")
             
     if insights:
         for insight in insights:

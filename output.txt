@@ -1,0 +1,23 @@
+
+=== BIST-12 GRAFİK FORMASYONLARI (CHART PATTERNS) SİMÜLASYONU ===
+  -> Scorer Result: Total Score=37.8, Grade=WATCH
+  -> Scorer Result: Total Score=37.4, Grade=WATCH
+  -> Scorer Result: Total Score=72.9, Grade=MEDIUM
+  -> Scorer Result: Total Score=40.4, Grade=WATCH
+  -> Scorer Result: Total Score=75.4, Grade=STRONG
+  -> Scorer Result: Total Score=75.8, Grade=STRONG
+  -> Scorer Result: Total Score=37.8, Grade=WATCH
+
+=== BIST-12 GRAFİK FORMASYONLARI (CHART PATTERNS) SONUÇLARI ===
+Total Trades: 7
+TP (Başarılı): 0 | SL (Başarısız): 0 | Open: 7
+Win Rate (closed): %0.00
+Average PnL: %1.07
+Trade Details:
+  AKSA.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 11.16 | Exit: 12.44 | Outcome: FORCE_CLOSE | PnL: 11.47%
+  EUPWR.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 96.60 | Exit: 92.15 | Outcome: FORCE_CLOSE | PnL: -4.61%
+  TURSG.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 6.66 | Exit: 6.46 | Outcome: FORCE_CLOSE | PnL: -3.00%
+  BIOEN.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 17.98 | Exit: 18.21 | Outcome: FORCE_CLOSE | PnL: 1.28%
+  ODAS.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 7.75 | Exit: 8.54 | Outcome: FORCE_CLOSE | PnL: 10.19%
+  NETAS.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 71.15 | Exit: 72.00 | Outcome: FORCE_CLOSE | PnL: 1.19%
+  KORDS.IS | Pattern: İkili Dip Kırılımı | Support: Grafik Formasyonu | Entry: 84.45 | Exit: 76.80 | Outcome: FORCE_CLOSE | PnL: -9.06%

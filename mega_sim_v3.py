@@ -2,8 +2,6 @@ import sys
 import pandas as pd
 import pandas_ta as ta
 import yfinance as yf
-import ccxt
-import json
 import warnings
 from datetime import datetime, timedelta
 
@@ -78,12 +76,14 @@ stats = {
     }
 }
 
+from core.defensive_engine import DefensiveStateGuard, DefensiveExceptionManager
+
 open_trades = {}
 trade_history = []
 
-def save_state():
-    with open(MEGA_ACTIVE_FILE, "w") as f: json.dump(open_trades, f, indent=4)
-    with open(MEGA_HISTORY_FILE, "w") as f: json.dump(trade_history, f, indent=4)
+def save_state() -> None:
+    DefensiveStateGuard.save_state_atomic(MEGA_ACTIVE_FILE, open_trades)
+    DefensiveStateGuard.save_state_atomic(MEGA_HISTORY_FILE, trade_history)
 
 # ══════════════════════════════════════════════════════════════════
 # VERİ MOTORU (MULTI-TIMEFRAME)
@@ -96,7 +96,8 @@ def apply_indicators(df):
         df['vol_sma_20'] = ta.sma(df['volume'], length=20) # Gate 4: Hacim
         df.ta.atr(length=14, append=True)
         df.ta.rsi(length=14, append=True) # Zırh hesaplamaları için
-    except: pass
+    except Exception as e:
+        DefensiveExceptionManager.swallow_safely(e, "mega_simapply_indicators ta calculations", threshold=100)
     return df
 
 def fetch_multi_timeframe_data(symbol, market):
@@ -314,7 +315,10 @@ def run_simulation(market_type, tickers, strategy_name):
                     if float(m_bar['close']) < float(m_bar.get('SMA_200', 0)):
                         print(f"{Colors.WARNING}[{strategy_identified}] Sinyal Reddedildi: 3. Kapı (XU100 Endeksi Ayı Rejiminde){Colors.ENDC}")
                         stats["rejections"][market_type]["gate3"] += 1; continue
-                except: pass
+                except Exception as e:
+                    print(f"{Colors.FAIL}[HATA] XU100 analizi başarısız, sinyal güvenlik sebebiyle reddedildi: {e}{Colors.ENDC}")
+                    DefensiveExceptionManager.swallow_safely(e, "mega_sim XU100 gate3 check", threshold=100)
+                    stats["rejections"][market_type]["gate3"] += 1; continue
             elif "CRYPTO" in market_type and not df_btc.empty:
                 try:
                     m_bar = df_btc[df_btc.index.tz_localize(None) <= timestamp.tz_localize(None)].iloc[-1]
@@ -324,7 +328,10 @@ def run_simulation(market_type, tickers, strategy_name):
                     elif signal_type == "SHORT" and float(m_bar['close']) > float(m_bar.get('SMA_200', 0)):
                         print(f"{Colors.WARNING}[{strategy_identified}] Sinyal Reddedildi: 3. Kapı (BTC Boğa Rejiminde, Short Açmak İntihardır){Colors.ENDC}")
                         stats["rejections"][market_type]["gate3"] += 1; continue
-                except: pass
+                except Exception as e:
+                    print(f"{Colors.FAIL}[HATA] BTC analizi başarısız, sinyal güvenlik sebebiyle reddedildi: {e}{Colors.ENDC}")
+                    DefensiveExceptionManager.swallow_safely(e, "mega_sim BTC gate3 check", threshold=100)
+                    stats["rejections"][market_type]["gate3"] += 1; continue
 
             # Kapı 4: Hacim
             if volume < (vol_sma * 1.5):
@@ -338,7 +345,10 @@ def run_simulation(market_type, tickers, strategy_name):
                     if float(dxy_bar['close']) > float(dxy_bar.get('SMA_200', 0)):
                         print(f"{Colors.WARNING}[{strategy_identified}] Sinyal Reddedildi: Zırh Aktif (DXY Dolar Endeksi Boğa Rejiminde){Colors.ENDC}")
                         stats["rejections"][market_type]["armor"] += 1; continue
-                except: pass
+                except Exception as e:
+                    print(f"{Colors.FAIL}[HATA] DXY analizi başarısız, sinyal güvenlik sebebiyle reddedildi: {e}{Colors.ENDC}")
+                    DefensiveExceptionManager.swallow_safely(e, "mega_sim DXY armor check", threshold=100)
+                    stats["rejections"][market_type]["armor"] += 1; continue
             elif market_type == "CRYPTO_SHORT":
                 if rsi < 35: # Aşırı satım, fonlama muhtemelen negatif
                     print(f"{Colors.WARNING}[{strategy_identified}] Sinyal Reddedildi: Zırh Aktif (Fonlama Oranı Aşırı Negatif - Squeeze Riski){Colors.ENDC}")

@@ -4,15 +4,10 @@ Tüm BIST, Kripto, Emtia ve Ayı Avcısı strateji fonksiyonları + scan_all_mar
 ThreadPoolExecutor ile toplu tarama.
 """
 import logging
-import math
-import time as _time
-import gc
 import pandas as pd
-import pandas_ta as ta
 import config
 from datetime import datetime, time as dt_time
 from zoneinfo import ZoneInfo
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import (
     TOP_BIST, TOP_CRYPTO, TOP_EMTIA, TOP_HEAVY_SHORT, MEME_BLACKLIST,
@@ -32,17 +27,6 @@ from config import (
     LIQUIDITY_WINDOW_END_HOUR, LIQUIDITY_WINDOW_END_MIN,
     RR_MINIMUM,
 )
-from data_sources import (
-    get_bist_data, get_crypto_data, get_emtia_data, get_bist_15m_data,
-    get_bist_data_batch, get_bist_15m_batch,
-    get_crypto_data_cached, get_crypto_1h_data, get_emtia_1h_data, clear_cycle_cache, purge_expired_cache,
-    is_bist_open, is_weekend_fakeout_time, check_xu100_wind,
-    get_btc_status, check_btc_not_pumping,
-    get_funding_rate, fetch_crypto_oi_crash, get_btc_dominance_trend,
-    check_token_unlocks, _get_btc_htf_bias, _check_dxy_shield,
-    _is_macro_news_hour, _is_btc_bullish_for_shorts, _get_xu100_daily_data,
-    get_current_prices,
-)
 from indicators import (
     sniper_get_htf_bias, sniper_find_swing_points, sniper_detect_sweep,
     sniper_detect_msb, sniper_calculate_ote, sniper_detect_fvg,
@@ -53,18 +37,6 @@ from indicators import (
     # AM Serisi
     check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
     sniper_calculate_ote_body,
-)
-from data_guard import guard_mtf_bundle, guard_signal_output
-from meta_engine import get_bist100_trend
-from conviction_scorer import (
-    check_hard_blocks, calculate_conviction,
-    build_trend_scores, build_dip_scores, build_breakout_scores, build_short_scores,
-    score_adx, score_rsi_oversold, score_rsi_trend, score_rsi_direction,
-    score_volume_ratio, score_dollar_volume, score_rr_ratio,
-    score_ema_alignment, score_ema_dip_distance, score_ema_short,
-    score_regime, score_regime_short, score_engulfing,
-    score_macro_alignment, score_penalty_level,
-    CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH,
 )
 
 

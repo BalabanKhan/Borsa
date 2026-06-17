@@ -11,7 +11,7 @@ Sinyal Yaşam Döngüsü:
   t=seans    → DEAD: BIST sinyalleri seans sonunda iptal
 """
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 # 99 yapılmıştır
 import config

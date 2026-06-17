@@ -9,7 +9,6 @@ yanlış unpacking'i veya DataFrame column name mismatch
 """
 
 import pandas as pd
-import pandas_ta as ta
 import logging
 
 def _get_structural_floor_safe(df, symbol):

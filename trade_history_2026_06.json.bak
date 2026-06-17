@@ -1,0 +1,13 @@
+[
+    {
+        "ticker": "CHAOS2",
+        "status": "CLOSED_SL",
+        "signal": "SAT",
+        "is_watch": true,
+        "entry_price": 100.0,
+        "sl": 110.0,
+        "tp": 90.0,
+        "indicators": "RSI:50 | GARBAGE",
+        "trailing_dist": 10.0
+    }
+]

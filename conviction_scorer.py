@@ -1195,6 +1195,92 @@ def build_short_scores(
     }
 
 
+def _get_sniper_pb_limits(market: str, is_long: bool) -> tuple[float, float]:
+    """
+    Sniper limitlerini çeker.
+    """
+    import config
+    if not is_long and market == "KRIPTO":
+        pb_min = getattr(config, "SHORT4_BBP_MIN_PULLBACK", 0.0)
+        pb_max = getattr(config, "SHORT4_BBP_MAX_PULLBACK", 1.0)
+    else:
+        # Sniper Long (BIST & KRIPTO) için %B daraltması
+        pb_min = 0.0
+        pb_max = 0.85
+    return pb_min, pb_max
+
+
+def _calculate_sniper_confluences(
+    price: float,
+    ema_mid: float,
+    volume: float,
+    vol_sma: float,
+    sfp_present: bool,
+    has_squeeze_breakout: bool
+) -> float:
+    """
+    Dinamik Confluence (Ödül / Ceza) Mekanizması.
+    """
+    penalty_bonus = 0.0
+
+    # 1. EMA 21 Yakınlığı (FOMO / Kovalamaca Cezası)
+    if ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
+        dist_ema21 = abs(price - ema_mid) / ema_mid
+        if dist_ema21 > 0.015:
+            excess = dist_ema21 - 0.015
+            penalty_bonus -= min(excess * 200.0, 10.0)
+
+    # 2. Squeeze & Hacim Confluence (Hacimli Patlama Ödülü)
+    if volume and vol_sma and vol_sma > 0:
+        vol_ratio = volume / vol_sma
+        if has_squeeze_breakout and vol_ratio >= 1.5:
+            penalty_bonus += min((vol_ratio - 1.5) * 8.0, 8.0)
+
+    # 3. SFP (Likidite Avı) + EMA Desteği Confluence (Güvenilir Dip Ödülü)
+    if sfp_present and ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
+        dist_ema21 = abs(price - ema_mid) / ema_mid
+        if dist_ema21 <= 0.015:
+            penalty_bonus += 5.0
+
+    return penalty_bonus
+
+
+def _calculate_sniper_base_scores(
+    market: str,
+    bbw: float,
+    kcw: float,
+    pb: float,
+    pb_min: float,
+    pb_max: float,
+    fvg_present: bool,
+    sfp_present: bool,
+    is_squeeze: bool
+) -> tuple[float, float, float]:
+    """
+    BIST veya diğer marketler için base (bbw, pb, fvg_sfp) skorlarını hesaplar.
+    """
+    if market == "BIST":
+        sfp_val = 40.0 if sfp_present else 0.0
+        fvg_val = 30.0 if fvg_present else 0.0
+        is_sq = is_squeeze if is_squeeze is not None else (bbw >= kcw * 0.90)
+        squeeze_val = 20.0 if is_sq else 0.0
+        pb_val = 10.0 if pb <= 0.1 else 0.0
+        
+        base_points = sfp_val + fvg_val + squeeze_val + pb_val
+        if sfp_present and fvg_present:
+            total_setup = base_points * 1.5
+        else:
+            total_setup = base_points
+        total_setup = min(total_setup, 100.0)
+        
+        return total_setup, total_setup, total_setup
+    else:
+        bbw_score = score_bbw_squeeze(bbw, kcw)
+        pb_score = score_percent_b(pb, pb_min=pb_min, pb_max=pb_max)
+        fvg_sfp_score = score_fvg_sfp(fvg_present, sfp_present)
+        return bbw_score, pb_score, fvg_sfp_score
+
+
 def build_sniper_scores(
     price, ema_fast, ema_mid, ema_slow,
     rsi, rsi_prev,
@@ -1240,15 +1326,7 @@ def build_sniper_scores(
         is_long=is_long
     )
 
-    import config
-    if not is_long and market == "KRIPTO":
-        pb_min = getattr(config, "SHORT4_BBP_MIN_PULLBACK", 0.0)
-        pb_max = getattr(config, "SHORT4_BBP_MAX_PULLBACK", 1.0)
-    else:
-        # Sniper Long (BIST & KRIPTO) için %B daraltması
-        # Aşırı şişmiş seviyelerden (üst bandın çok yakını) giriş yapılmasını önlemek için max 0.85 yapıldı.
-        pb_min = 0.0
-        pb_max = 0.85
+    pb_min, pb_max = _get_sniper_pb_limits(market, is_long)
 
     # Formasyon Kontrolü: FVG, SFP veya Sıkışma (Squeeze) Kırılımından en az biri olmalı
     # Hiçbiri yoksa yumuşak ceza puanı uygulayarak puanı düşür (-12 puan)
@@ -1259,53 +1337,28 @@ def build_sniper_scores(
     # ════════════════════════════════════════
     # Dinamik Confluence (Ödül / Ceza) Mekanizması
     # ════════════════════════════════════════
-    
-    # 1. EMA 21 Yakınlığı (FOMO / Kovalamaca Cezası)
-    if ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
-        dist_ema21 = abs(price - ema_mid) / ema_mid
-        # Fiyat EMA 21'den %1.5'ten fazla uzaklaşmışsa lineer ceza uygula (maksimum -10 puan)
-        if dist_ema21 > 0.015:
-            excess = dist_ema21 - 0.015
-            penalty_val = min(excess * 200.0, 10.0)
-            conflict_penalty -= penalty_val
+    confluence_impact = _calculate_sniper_confluences(
+        price=price,
+        ema_mid=ema_mid,
+        volume=volume,
+        vol_sma=vol_sma,
+        sfp_present=sfp_present,
+        has_squeeze_breakout=has_squeeze_breakout
+    )
+    conflict_penalty += confluence_impact
 
-    # 2. Squeeze & Hacim Confluence (Hacimli Patlama Ödülü)
-    if volume and vol_sma and vol_sma > 0:
-        vol_ratio = volume / vol_sma
-        if has_squeeze_breakout and vol_ratio >= 1.5:
-            # Sıkışma patlaması + Hacim patlaması varsa soft ödül (maksimum +8 puan)
-            bonus = min((vol_ratio - 1.5) * 8.0, 8.0)
-            conflict_penalty += bonus
-
-    # 3. SFP (Likidite Avı) + EMA Desteği Confluence (Güvenilir Dip Ödülü)
-    if sfp_present and ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
-        dist_ema21 = abs(price - ema_mid) / ema_mid
-        # Stop patlatma (SFP) gerçekleşmiş ve fiyat EMA 21 desteğine yakınsa (%1.5 veya daha yakın) +5 puan bonus
-        if dist_ema21 <= 0.015:
-            conflict_penalty += 5.0
-
-    # BIST 10 Sniper Puanlama Hiyerarşisi ve Çarpanı
-    if market == "BIST":
-        sfp_val = 40.0 if sfp_present else 0.0
-        fvg_val = 30.0 if fvg_present else 0.0
-        is_sq = is_squeeze if is_squeeze is not None else (bbw >= kcw * 0.90)
-        squeeze_val = 20.0 if is_sq else 0.0
-        pb_val = 10.0 if pb <= 0.1 else 0.0
-        
-        base_points = sfp_val + fvg_val + squeeze_val + pb_val
-        if sfp_present and fvg_present:
-            total_setup = base_points * 1.5
-        else:
-            total_setup = base_points
-        total_setup = min(total_setup, 100.0)
-        
-        bbw_score = total_setup
-        pb_score = total_setup
-        fvg_sfp_score = total_setup
-    else:
-        bbw_score = score_bbw_squeeze(bbw, kcw)
-        pb_score = score_percent_b(pb, pb_min=pb_min, pb_max=pb_max)
-        fvg_sfp_score = score_fvg_sfp(fvg_present, sfp_present)
+    # Base Skorlar
+    bbw_score, pb_score, fvg_sfp_score = _calculate_sniper_base_scores(
+        market=market,
+        bbw=bbw,
+        kcw=kcw,
+        pb=pb,
+        pb_min=pb_min,
+        pb_max=pb_max,
+        fvg_present=fvg_present,
+        sfp_present=sfp_present,
+        is_squeeze=is_squeeze
+    )
 
     return {
         "bbw_squeeze":   bbw_score,

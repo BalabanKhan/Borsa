@@ -1,4 +1,4 @@
-﻿with open('main.py', 'r', encoding='utf-8') as f:
+with open('main.py', 'r', encoding='utf-8') as f:
     content = f.read()
 
 # Replace actual literal newlines inside strings with \n (which happened because of powershell)
