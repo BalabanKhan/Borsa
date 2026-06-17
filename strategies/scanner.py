@@ -93,9 +93,7 @@ def scan_all_markets():
     purge_expired_cache()
 
     # ════ HİBRİT PİYASA ZAMANLAYICI (Market Routing) ════
-    # Hafta içi 09:30 - 18:30 -> SADECE BIST 100
-    # Hafta içi 18:30 - 09:30 -> SADECE Kripto
-    # Hafta sonu (Cuma 18:30'dan Pazartesi 09:30'a) -> SADECE Kripto
+    # BIST açıkken BIST taranır, kapalıyken Kripto taranır.
     bypass_time_routing = getattr(config, 'BYPASS_TIME_ROUTING', False)
     
     if bypass_time_routing:
@@ -103,34 +101,10 @@ def scan_all_markets():
         scan_crypto = True
         logging.info("[ZAMANLAYICI] Zamanlayıcı bypass edildi (BYPASS_TIME_ROUTING=True). Hem BIST hem Kripto taranıyor.")
     else:
-        now_ist = datetime.now(ZoneInfo("Europe/Istanbul"))
-        weekday = now_ist.weekday()  # 0=Pazartesi, 6=Pazar
-        time_of_day = now_ist.time()
-
-        # Hafta sonu bloğu: Cuma 18:30'dan Pazartesi 09:30'a kadar olan süre
-        is_weekend_block = False
-        if weekday == 4:  # Cuma
-            if time_of_day >= dt_time(18, 30):
-                is_weekend_block = True
-        elif weekday in (5, 6):  # Cumartesi, Pazar
-            is_weekend_block = True
-        elif weekday == 0:  # Pazartesi
-            if time_of_day < dt_time(9, 30):
-                is_weekend_block = True
-
-        if is_weekend_block:
-            scan_bist = False
-            scan_crypto = True
-        else:
-            # Hafta içi
-            if dt_time(9, 30) <= time_of_day < dt_time(18, 30):
-                scan_bist = True
-                scan_crypto = False
-            else:
-                scan_bist = False
-                scan_crypto = True
-        
-        logging.info(f"[ZAMANLAYICI] Gün/Saat: {weekday} / {time_of_day} | Aktif Tarama -> BIST: {scan_bist}, Kripto: {scan_crypto}")
+        bist_open = is_bist_open()
+        scan_bist = bist_open
+        scan_crypto = not bist_open
+        logging.info(f"[ZAMANLAYICI] BIST Açık mı: {bist_open} | Aktif Tarama -> BIST: {scan_bist}, Kripto: {scan_crypto}")
 
     # 1. BIST TARAMALARI (Batch Download)
     if scan_bist and is_bist_open():
