@@ -539,6 +539,7 @@ RS_ENTRY_TIMING_RSI_LIMIT: float = 90.0       # RS hissesinde işleme giriş iç
 VWAP_SLOPE_CONFIRMATION: bool = True          # VWAP eğiminin pozitif (long) / negatif (short) olması şartı
 VWAP_SLOPE_LOOKBACK: int = 3                  # Eğim hesaplanacak mum sayısı
 VWAP_BOUNCE_CANDLE_CONFIRM: int = 1           # VWAP üzerinde tutunmayı gösteren mum kapanışı sayısı (Örn: 1 veya 2)
+VWAP_SL_BUFFER_PCT: float = 1.5               # VWAP altı güvenli stop tampon yüzdesi (Örn: %1.5)
 
 # --- 8. OBV Accumulation ---
 OBV_SMA_ALIGN_REQUIRED: bool = True           # OBV'nin kendi 20 SMA'sı üzerinde olması koşulu

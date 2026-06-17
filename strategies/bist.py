@@ -529,7 +529,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
                 # Kurumsal limit emir emilimi (absorption) nedeniyle temasta hacim patlaması aranmaz.
                 # Sadece tahtanın likit olduğunu teyit etmek için asgari mutlak TL hacmi kontrol edilir.
                 if _has_absolute_hourly_volume(last_1h['volume'], current_price, "BIST"):
-                    sl = wick_low * 0.995
+                    sl = wick_low * (1.0 - config.VWAP_SL_BUFFER_PCT / 100.0)
                     _tp7 = current_price + (dynamic_sl_dist * 3.0)
                     _rr7 = abs(_tp7 - current_price) / max(abs(current_price - sl), 1e-8)
                     _scores7 = build_trend_scores(
