@@ -69,7 +69,8 @@ class TaskScheduler:
             self._price_fail_count += 1
             if self._price_fail_count >= 3:
                 await self.notifier.send_message(
-                    f"🔴 <b>FİYAT ÇEKİLEMİYOR</b>\nSon {self._price_fail_count} denemede veri alınamadı."
+                    f"🔴 <b>FİYAT ÇEKİLEMİYOR</b>\nSon {self._price_fail_count} denemede veri alınamadı.",
+                    is_system=True
                 )
                 self._price_fail_count = -15 # Cooldown
 
@@ -82,12 +83,12 @@ class TaskScheduler:
             else:
                 q_report = check_staleness(t)
                 if q_report:
-                    await self.notifier.send_message(generate_quarantine_alert(q_report))
+                    await self.notifier.send_message(generate_quarantine_alert(q_report), is_system=True)
 
         loop = asyncio.get_event_loop()
         notifications = await loop.run_in_executor(None, check_active_trades, current_prices)
         for msg in notifications:
-            await self.notifier.send_message(msg)
+            await self.notifier.send_message(msg, is_system=True)
 
     async def close_day_trades(self):
         trades = load_trades()
@@ -107,7 +108,8 @@ class TaskScheduler:
             
             await self.notifier.send_message(
                 f"⏱️ <b>DAY TRADE KAPANDI (17:55)</b>\n"
-                f"Varlık: <code>{ticker}</code>\nNet: %{pnl:.2f} {'✅' if pnl > 0 else '❌'}"
+                f"Varlık: <code>{ticker}</code>\nNet: %{pnl:.2f} {'✅' if pnl > 0 else '❌'}",
+                is_system=True
             )
 
         closed_day = [t for t in trades if t["status"] != "ACTIVE"]
@@ -137,7 +139,7 @@ class TaskScheduler:
             f"{get_scorecard_status()}\n"
             f"{get_filter_health_summary()}"
         )
-        await self.notifier.send_message(hb_msg)
+        await self.notifier.send_message(hb_msg, is_system=True)
 
     async def run_weekly_tasks(self):
         try:
@@ -150,21 +152,21 @@ class TaskScheduler:
                 for c in changes:
                     icon = "🔴" if c["action"] == "DISABLED" else "⚠️"
                     darwin_msg += f"{icon} {c['strategy']}: {c['reason']}\n"
-                await self.notifier.send_message(darwin_msg)
+                await self.notifier.send_message(darwin_msg, is_system=True)
             
-            await self.notifier.send_message(generate_weekly_report())
+            await self.notifier.send_message(generate_weekly_report(), is_system=True)
             cleanup_expired_quarantines()
             
             try:
                 from penalty_box import prune_old_assets
                 pruned = prune_old_assets(90)
                 if pruned > 0:
-                    await self.notifier.send_message(f"🧹 Penalty Box temizliği: {pruned} eski varlık silindi.")
+                    await self.notifier.send_message(f"🧹 Penalty Box temizliği: {pruned} eski varlık silindi.", is_system=True)
             except Exception as e:
                 logger.warning(f"Penalty pruning hatası: {e}")
                 
             paralysis = check_analysis_paralysis()
             if paralysis:
-                await self.notifier.send_message(paralysis)
+                await self.notifier.send_message(paralysis, is_system=True)
         except Exception as e:
             logger.error(f"Haftalık görev hatası: {e}")

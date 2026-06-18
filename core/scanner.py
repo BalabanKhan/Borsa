@@ -89,7 +89,7 @@ class ScannerService:
 
         if is_daily_commission_exceeded():
             logger.warning("Günlük komisyon limiti aşıldı.")
-            await self.notifier.send_message("🥊 <b>GÜNLÜK KOMİSYON LİMİTİ AŞILDI</b>\nBugün için tüm yeni sinyal üretimi durduruldu.")
+            await self.notifier.send_message("🥊 <b>GÜNLÜK KOMİSYON LİMİTİ AŞILDI</b>\nBugün için tüm yeni sinyal üretimi durduruldu.", is_system=True)
             return
 
         await self._process_signals(signals)

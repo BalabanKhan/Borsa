@@ -15,19 +15,37 @@ class NotificationService:
         load_dotenv()
         self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.watch_bot_token = os.getenv("TELEGRAM_WATCH_BOT_TOKEN")
+        self.system_bot_token = os.getenv("TELEGRAM_SYSTEM_BOT_TOKEN")
         
         chat_id_env = os.getenv("TELEGRAM_CHAT_ID", "")
         self.chat_ids = [cid.strip() for cid in chat_id_env.split(",") if cid.strip()]
         
         watch_chat_id_env = os.getenv("TELEGRAM_WATCH_CHAT_ID", "")
         self.watch_chat_ids = [cid.strip() for cid in watch_chat_id_env.split(",") if cid.strip()]
+
+        system_chat_id_env = os.getenv("TELEGRAM_SYSTEM_CHAT_ID", "")
+        self.system_chat_ids = [cid.strip() for cid in system_chat_id_env.split(",") if cid.strip()]
         
         self.bot = Bot(token=self.bot_token) if self.bot_token else None
         self.watch_bot = Bot(token=self.watch_bot_token) if self.watch_bot_token else None
+        
+        # System bot fallback to main bot
+        if self.system_bot_token:
+            self.system_bot = Bot(token=self.system_bot_token)
+        else:
+            self.system_bot = self.bot
+            self.system_chat_ids = self.chat_ids
 
-    async def send_message(self, message, is_watch=False, max_retries=3):
-        target_bot = self.watch_bot if is_watch else self.bot
-        target_chat_ids = self.watch_chat_ids if is_watch else self.chat_ids
+    async def send_message(self, message, is_watch=False, is_system=False, max_retries=3):
+        if is_watch:
+            target_bot = self.watch_bot
+            target_chat_ids = self.watch_chat_ids
+        elif is_system:
+            target_bot = self.system_bot
+            target_chat_ids = self.system_chat_ids
+        else:
+            target_bot = self.bot
+            target_chat_ids = self.chat_ids
 
         if not target_bot or not target_chat_ids:
             clean_msg = message.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", "")

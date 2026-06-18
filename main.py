@@ -80,7 +80,7 @@ async def main():
                 # Notifier async metodu çağrılıyor
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    loop.create_task(notifier.send_message(error_msg))
+                    loop.create_task(notifier.send_message(error_msg, is_system=True))
         except Exception as notify_err:
             logger.error(f"Hata bildirimi gönderilemedi: {notify_err}")
         
