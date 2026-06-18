@@ -102,7 +102,7 @@ def _check_bist_1_dip_hunter(ctx):
             rr=_rr, has_engulfing=True, regime=bist_regime,
             macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
         )
-        _conv = calculate_conviction(_scores)
+        _conv = calculate_conviction(_scores, ctx=ctx)
         if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
             signals.append({
                 "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -166,7 +166,7 @@ def _check_bist_2_trend_following(ctx):
             rr=_rr2, has_engulfing=has_engulfing, regime=bist_regime,
             macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
         )
-        _conv2 = calculate_conviction(_scores2)
+        _conv2 = calculate_conviction(_scores2, ctx=ctx)
         if _conv2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
             signals.append({
                 "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -268,7 +268,7 @@ def _check_bist_3_squeeze_breakout(ctx):
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
         dg_gap_pct=gap_pct
     )
-    _conv3 = calculate_conviction(_scores3)
+    _conv3 = calculate_conviction(_scores3, ctx=ctx)
     if _conv3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -333,7 +333,7 @@ def _check_bist_4_sniper_ote(ctx):
                     )
                     if has_fvg:
                         _scores4["engulfing"] = min(100.0, _scores4["engulfing"] + config.SMC_FVG_BONUS)
-                    _conv4 = calculate_conviction(_scores4)
+                    _conv4 = calculate_conviction(_scores4, ctx=ctx)
                     if _conv4.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                         signals.append({
                             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -418,7 +418,7 @@ def _check_bist_5_vol_squeeze_long(ctx, prev_bbu_1d, guarded_vol_sma):
         rr=_rr5u, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
     )
-    _conv5u = calculate_conviction(_scores5u)
+    _conv5u = calculate_conviction(_scores5u, ctx=ctx)
     if _conv5u.grade not in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         return None
         
@@ -474,7 +474,7 @@ def _check_bist_5_vol_squeeze_short(ctx, prev_bbl_1d, guarded_vol_sma):
         rr=_rr5d, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
     )
-    _conv5d = calculate_conviction(_scores5d)
+    _conv5d = calculate_conviction(_scores5d, ctx=ctx)
     if _conv5d.grade not in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         return None
         
@@ -556,7 +556,7 @@ def _check_bist_6_rs(ctx):
                     rr=_rr6, has_engulfing=False, regime=bist_regime,
                     macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
                 )
-                _conv6 = calculate_conviction(_scores6)
+                _conv6 = calculate_conviction(_scores6, ctx=ctx)
                 if _conv6.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({
                         "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -627,7 +627,7 @@ def _check_bist_7_vwap(ctx):
         rr=_rr7, has_engulfing=False, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
     )
-    _conv7 = calculate_conviction(_scores7)
+    _conv7 = calculate_conviction(_scores7, ctx=ctx)
     if _conv7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -678,7 +678,7 @@ def _check_bist_8_obv(ctx):
                 macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
                 cmf=cmf_val
             )
-            _conv8 = calculate_conviction(_scores8)
+            _conv8 = calculate_conviction(_scores8, ctx=ctx)
             if _conv8.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -781,7 +781,7 @@ def _check_bist_10_sniper(ctx):
         bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg, sfp_present=has_sfp,
         market="BIST", is_squeeze=is_squeeze
     )
-    _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS)
+    _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS, ctx=ctx)
     if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -861,7 +861,7 @@ def _build_bist11_signal(ctx, pattern_name, support_reason, vol_ratio, avg_vol_p
         _scores_cand['rsi'] = 100.0
         _scores_cand['rsi_direction'] = 100.0
 
-    _conv_cand = calculate_conviction(_scores_cand)
+    _conv_cand = calculate_conviction(_scores_cand, ctx=ctx)
     if _conv_cand.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         raw_vars = locals()
         return {
@@ -971,7 +971,7 @@ def _build_bist12_signal(ctx, pattern_name, pattern_details):
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
     )
     
-    _conv_pattern = calculate_conviction(_scores_pattern)
+    _conv_pattern = calculate_conviction(_scores_pattern, ctx=ctx)
     if _conv_pattern.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         raw_vars = locals()
         return {
@@ -1137,7 +1137,7 @@ def _check_orb_long(symbol, current_price, cage_high, cage_low, cage_mid, today_
                 rr=2.0, regime="BULL",
                 macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
             )
-            _conv9u = calculate_conviction(_scores9u)
+            _conv9u = calculate_conviction(_scores9u, ctx=ctx)
             if _conv9u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -1184,7 +1184,7 @@ def _check_orb_short(symbol, current_price, cage_high, cage_low, cage_mid, today
                 rr=2.0, regime="BEAR", macro_aligned=True,
                 consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
             )
-            _conv9d = calculate_conviction(_scores9d)
+            _conv9d = calculate_conviction(_scores9d, ctx=ctx)
             if _conv9d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),

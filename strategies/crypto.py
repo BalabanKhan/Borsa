@@ -15,6 +15,7 @@ from conviction_scorer import (
     build_trend_scores, build_dip_scores, build_breakout_scores,
     build_short_scores, build_sniper_scores,
     CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH, SNIPER_CRYPTO_WEIGHTS,
+    check_hard_blocks,
 )
 from indicators import (
     sniper_find_swing_points, sniper_detect_sweep,
@@ -95,7 +96,7 @@ def _check_crypto_1_liquidation(ctx):
                 macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
                 dg_is_darth_maul=dm_ratio
             )
-            _conv_c1 = calculate_conviction(_scores_c1)
+            _conv_c1 = calculate_conviction(_scores_c1, ctx=ctx)
             if _conv_c1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -210,7 +211,7 @@ def _check_crypto_2_mega_trend(ctx):
         macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
         dg_is_darth_maul=dm_ratio
     )
-    _conv_c2 = calculate_conviction(_scores_c2)
+    _conv_c2 = calculate_conviction(_scores_c2, ctx=ctx)
     if _conv_c2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -321,7 +322,7 @@ def _check_crypto_3_breakout(ctx):
         macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
         dg_is_darth_maul=dm_ratio
     )
-    _conv_c3 = calculate_conviction(_scores_c3)
+    _conv_c3 = calculate_conviction(_scores_c3, ctx=ctx)
     if _conv_c3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -387,7 +388,7 @@ def _check_crypto_short_1_fomo(ctx):
         rr=_rr_s1, has_engulfing=False, regime="BEAR", macro_aligned=True,
         consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
     )
-    _conv_s1 = calculate_conviction(_scores_s1)
+    _conv_s1 = calculate_conviction(_scores_s1, ctx=ctx)
     if _conv_s1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -447,7 +448,7 @@ def _check_crypto_short_2_waterfall(ctx):
         rr=_rr_s2, has_engulfing=False, regime="BEAR",
         macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
     )
-    _conv_s2 = calculate_conviction(_scores_s2)
+    _conv_s2 = calculate_conviction(_scores_s2, ctx=ctx)
     if _conv_s2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -514,7 +515,7 @@ def _check_crypto_short_3_cliff(ctx):
         rr=_rr_s3, has_engulfing=False, regime="BEAR", macro_aligned=not btc_ok,
         consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
     )
-    _conv_s3 = calculate_conviction(_scores_s3)
+    _conv_s3 = calculate_conviction(_scores_s3, ctx=ctx)
     if _conv_s3.grade == CONVICTION_STRONG:
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -618,7 +619,7 @@ def _check_crypto_4_sniper_ote_long(ctx):
     if has_fvg:
         _scores_c4l["engulfing"] = min(100.0, _scores_c4l["engulfing"] + config.SMC_FVG_BONUS)
         
-    _conv_c4l = calculate_conviction(_scores_c4l)
+    _conv_c4l = calculate_conviction(_scores_c4l, ctx=ctx)
     if _conv_c4l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -718,7 +719,7 @@ def _check_crypto_4_sniper_ote_short(ctx):
     if has_fvg:
         _scores_c4s["engulfing"] = min(100.0, _scores_c4s["engulfing"] + config.SMC_FVG_BONUS)
         
-    _conv_c4s = calculate_conviction(_scores_c4s)
+    _conv_c4s = calculate_conviction(_scores_c4s, ctx=ctx)
     if _conv_c4s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -785,7 +786,7 @@ def _check_crypto_5_vol_squeeze(ctx):
                 rr=_rr_c5, regime="BULL" if sq_dir == "up" else "BEAR", macro_aligned=btc_ok,
                 consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
             )
-            _conv_c5 = calculate_conviction(_scores_c5)
+            _conv_c5 = calculate_conviction(_scores_c5, ctx=ctx)
             if _conv_c5.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -838,7 +839,7 @@ def _check_crypto_6_vwap(ctx):
                 rr=_rr_c6, has_engulfing=True, regime="BULL", macro_aligned=btc_ok,
                 consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
             )
-            _conv_c6 = calculate_conviction(_scores_c6)
+            _conv_c6 = calculate_conviction(_scores_c6, ctx=ctx)
             if _conv_c6.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -885,7 +886,7 @@ def _check_crypto_7_obv(ctx):
                 macro_aligned=(btcdom_trend != 'UP'), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
                 cmf=cmf_val if cmf_val is not None else 0.0
             )
-            _conv_c7 = calculate_conviction(_scores_c7)
+            _conv_c7 = calculate_conviction(_scores_c7, ctx=ctx)
             if _conv_c7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
@@ -927,6 +928,22 @@ def _check_crypto_sniper_1h_long(ctx_1h):
     _tp_sn_long = current_price + 2.0 * (current_price - sl_long)
     _rr_sn_long = abs(_tp_sn_long - current_price) / max(abs(current_price - sl_long), 1e-8)
     
+    is_nan_ind = (pd.isna(last_1h_s.get('volume', float('nan'))) or pd.isna(current_price))
+    blocked, block_reason = check_hard_blocks(
+        volume=last_1h_s.get('volume', 0),
+        price=current_price,
+        is_quarantined=False,
+        is_circuit_open=False,
+        is_darth_maul_flag=False,
+        sl_direction_ok=(sl_long < current_price),
+        rr_ratio=_rr_sn_long,
+        consecutive_sl=_get_consecutive_sl(symbol),
+        is_core_indicators_nan=is_nan_ind,
+        min_volume_usd=50_000
+    )
+    if blocked:
+        return signals
+        
     _scores_sn_long = build_sniper_scores(
         price=current_price, ema_fast=last_1h_s.get(f'EMA_{config.IND_EMA_FAST}'), ema_mid=last_1h_s.get(f'EMA_{config.IND_EMA_21}'), ema_slow=None,
         rsi=last_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=prev_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'),
@@ -936,7 +953,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
         bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg_long, sfp_present=has_sfp_long,
         market="KRIPTO", is_long=True
     )
-    _conv_sn_long = calculate_conviction(_scores_sn_long, weights=SNIPER_CRYPTO_WEIGHTS)
+    _conv_sn_long = calculate_conviction(_scores_sn_long, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx)
     if _conv_sn_long.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
         raw_vars = locals()
         signals.append({
@@ -981,6 +998,22 @@ def _check_crypto_sniper_1h_short(ctx_1h):
     _tp_sn_short = current_price - 2.0 * (sl_short - current_price)
     _rr_sn_short = abs(_tp_sn_short - current_price) / max(abs(sl_short - current_price), 1e-8)
     
+    is_nan_ind = (pd.isna(last_1h_s.get('volume', float('nan'))) or pd.isna(current_price))
+    blocked, block_reason = check_hard_blocks(
+        volume=last_1h_s.get('volume', 0),
+        price=current_price,
+        is_quarantined=False,
+        is_circuit_open=False,
+        is_darth_maul_flag=False,
+        sl_direction_ok=(sl_short > current_price),
+        rr_ratio=_rr_sn_short,
+        consecutive_sl=_get_consecutive_sl(symbol),
+        is_core_indicators_nan=is_nan_ind,
+        min_volume_usd=50_000
+    )
+    if blocked:
+        return signals
+        
     _scores_sn_short = build_sniper_scores(
         price=current_price, ema_fast=last_1h_s.get(f'EMA_{config.IND_EMA_FAST}'), ema_mid=last_1h_s.get(f'EMA_{config.IND_EMA_21}'), ema_slow=None,
         rsi=last_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=prev_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'),
@@ -991,7 +1024,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         market="KRIPTO", is_long=False, funding_rate=funding_rate,
         cmf=cmf_1h if cmf_1h is not None and not math.isnan(cmf_1h) else 0.0
     )
-    _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS)
+    _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx)
     if _conv_sn_short.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
         raw_vars = locals()
         signals.append({

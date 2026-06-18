@@ -140,14 +140,14 @@ assert abs(sum(SNIPER_BIST_WEIGHTS.values()) - 1.0) < 0.001, \
     f"SNIPER_BIST_WEIGHTS toplamı 1.0 olmalı, şu an: {sum(SNIPER_BIST_WEIGHTS.values())}"
 
 SNIPER_CRYPTO_WEIGHTS = {
-    "bbw_squeeze":      0.20,
-    "percent_b":        0.20,
-    "fvg_sfp":          0.20,
-    "volume_ratio":     0.10,
+    "bbw_squeeze":      0.10,
+    "percent_b":        0.10,
+    "fvg_sfp":          0.10,
+    "volume_ratio":     0.25,
     "dollar_volume":    0.05,
-    "rr_ratio":         0.10,
-    "regime":           0.05,
-    "macro":            0.05,
+    "rr_ratio":         0.15,
+    "regime":           0.10,
+    "macro":            0.10,
     "funding_rate":     0.05,
 }
 assert abs(sum(SNIPER_CRYPTO_WEIGHTS.values()) - 1.0) < 0.001, \
@@ -561,8 +561,8 @@ def score_fvg_sfp(fvg_present: bool, sfp_present: bool) -> float:
 # 99 yapılmıştır
 # check_hard_blocks fonksiyonuna kritik veri eksikliği için is_core_indicators_nan parametresi ve HB-8 bloğu eklenmiştir.
 def check_hard_blocks(
-    volume: float,
-    price: float,
+    volume: float = None,
+    price: float = None,
     is_quarantined: bool = False,
     is_circuit_open: bool = False,
     is_darth_maul_flag: bool = False,
@@ -573,31 +573,14 @@ def check_hard_blocks(
     min_volume_usd: float = 50_000,
 ) -> tuple:
     """
-    Asla esnetilemeyen güvenlik kontrolleri.
-    Bu kontroller sigmoid'e tabi değildir — binary kalır.
-
-    Returns:
-        (blocked: bool, reason: str)
+    Asla esnetilemeyen güvenlik kontrolleri. (Sadece NaN, Karantina, Devre Kesici)
+    Diğer filtreler Soft Score tarafında değerlendirilir.
     """
-    dollar_vol = (volume or 0) * (price or 0)
-
-    if dollar_vol < min_volume_usd:
-        return True, f"HB-1: Hacim limiti altı ({min_volume_usd}) — likidite yetersiz"
-
     if is_quarantined:
         return True, "HB-2: Varlık karantinada — veri güvenilmez"
 
     if is_circuit_open:
         return True, "HB-3: Devre Kesici aktif — sistem korumada"
-
-    if not sl_direction_ok:
-        return True, "HB-4: SL yönü yanlış — veri bütünlüğü bozuk"
-
-    if rr_ratio is not None and rr_ratio < RR_MINIMUM:
-        return True, f"HB-6: R:R < {RR_MINIMUM} — risk/ödül yetersiz"
-
-    if consecutive_sl >= 5:
-        return True, "HB-7: 5+ ardışık SL — yapısal sorun"
 
     if is_core_indicators_nan:
         return True, "HB-8: Kritik teknik gösterge verisi eksik (NaN) — işlem yapılamaz"
@@ -832,6 +815,7 @@ def calculate_conviction(
     hard_blocked: bool = False,
     block_reason: str = "",
     weights: dict = None,
+    ctx: dict = None,
 ) -> ConvictionResult:
     """
     Ağırlıklı conviction skoru hesapla.
@@ -841,6 +825,7 @@ def calculate_conviction(
         hard_blocked: Hard block tetiklendi mi
         block_reason: Hard block nedeni
         weights: Özel ağırlıklar (None ise global WEIGHTS kullanılır)
+        ctx: Strateji bağlamı (is_quarantined, is_circuit_open kontrolleri için)
 
     Returns:
         ConvictionResult
@@ -858,6 +843,14 @@ def calculate_conviction(
     if is_core_indicators_nan:
         hard_blocked = True
         block_reason = "HB-8: Kritik teknik gösterge verisi eksik (NaN) — işlem yapılamaz"
+
+    if not hard_blocked and ctx is not None:
+        if ctx.get("is_quarantined", False):
+            hard_blocked = True
+            block_reason = "HB-2: Varlık karantinada — veri güvenilmez"
+        elif ctx.get("is_circuit_open", False):
+            hard_blocked = True
+            block_reason = "HB-3: Devre Kesici aktif — sistem korumada"
 
     result.hard_blocked = hard_blocked
     result.hard_block_reason = block_reason
@@ -1231,11 +1224,13 @@ def _calculate_sniper_confluences(
             excess = dist_ema21 - 0.015
             penalty_bonus -= min(excess * 200.0, 10.0)
 
-    # 2. Squeeze & Hacim Confluence (Hacimli Patlama Ödülü)
+    # 2. Squeeze & Hacim Confluence (Hacimli Patlama Ödülü ve Hacimsizlik Cezası)
     if volume and vol_sma and vol_sma > 0:
         vol_ratio = volume / vol_sma
         if has_squeeze_breakout and vol_ratio >= 1.5:
             penalty_bonus += min((vol_ratio - 1.5) * 8.0, 8.0)
+        elif vol_ratio < 1.0:
+            penalty_bonus -= 15.0  # Sığ hacimli hareketleri sert cezalandır
 
     # 3. SFP (Likidite Avı) + EMA Desteği Confluence (Güvenilir Dip Ödülü)
     if sfp_present and ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
