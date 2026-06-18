@@ -38,7 +38,7 @@ from indicators import (
     calculate_orb_cage, calculate_time_specific_rvol,
     # AM Serisi
     check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
-    sniper_calculate_ote_body,
+    sniper_calculate_ote_body, get_trend_sma,
 )
 from conviction_scorer import (
     calculate_conviction, build_trend_scores,
@@ -99,7 +99,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
             "4H ADX": round(df_4h.iloc[-1].get("ADX_14", 0), 2) if df_4h is not None and not df_4h.empty and pd.notna(df_4h.iloc[-1].get("ADX_14")) else None,
             "1H RSI": None,
             "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
-            "1D SMA 200": round(last_1d.get("SMA_200", 0), 2) if pd.notna(last_1d.get("SMA_200")) else None,
+            "1D Trend SMA": round(get_trend_sma(last_1d), 2) if pd.notna(get_trend_sma(last_1d)) else None,
             "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
             "1H Volume": None
         }

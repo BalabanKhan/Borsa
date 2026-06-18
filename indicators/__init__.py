@@ -4,6 +4,7 @@ from .core import (
     calculate_anchored_vwap,
     detect_vwap_bounce,
     calculate_relative_strength,
+    get_trend_sma,
 )
 from .anti_manipulation import (
     check_bullish_engulfing_momentum,
@@ -40,6 +41,7 @@ __all__ = [
     "calculate_anchored_vwap",
     "detect_vwap_bounce",
     "calculate_relative_strength",
+    "get_trend_sma",
     "check_bullish_engulfing_momentum",
     "calculate_cmf",
     "is_cmf_wash_trade",

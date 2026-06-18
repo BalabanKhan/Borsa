@@ -174,16 +174,19 @@ def get_strategy_score(strategy_name: str) -> dict:
     tp = strat.get("total_tp", 0)
     sl = strat.get("total_sl", 0)
     
-    win_rate = tp / total if total > 0 else 0
+    true_tp = len([t for t in trades if t.get("pnl_pct", 0) > 0])
+    true_sl = len([t for t in trades if t.get("pnl_pct", 0) < 0])
+    
+    win_rate = true_tp / total if total > 0 else 0
     avg_pnl = strat.get("total_pnl_pct", 0) / total if total > 0 else 0
     
     # Expectancy (beklenen kazanç) = avg_win × win_rate - avg_loss × loss_rate
-    wins = [t["pnl_pct"] for t in trades if t.get("outcome") == "TP" and t.get("pnl_pct")]
-    losses = [abs(t["pnl_pct"]) for t in trades if t.get("outcome") == "SL" and t.get("pnl_pct")]
+    wins = [t["pnl_pct"] for t in trades if t.get("pnl_pct", 0) > 0]
+    losses = [abs(t["pnl_pct"]) for t in trades if t.get("pnl_pct", 0) < 0]
     
-    avg_win = sum(wins) / len(wins) if wins else 0
-    avg_loss = sum(losses) / len(losses) if losses else 0
-    loss_rate = 1 - win_rate
+    avg_win = sum(wins) / true_tp if true_tp > 0 else 0
+    avg_loss = sum(losses) / true_sl if true_sl > 0 else 0
+    loss_rate = true_sl / total if total > 0 else 0
     
     expectancy = (avg_win * win_rate) - (avg_loss * loss_rate)
     

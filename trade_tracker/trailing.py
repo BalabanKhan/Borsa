@@ -1,7 +1,41 @@
 import logging
 import math
 import config
+import time
 from datetime import datetime, timezone
+
+_atr_cache = {}
+_ATR_CACHE_TTL = 300  # 5 minutes
+
+def _get_atr_cached(ticker: str) -> float:
+    now = time.time()
+    if ticker in _atr_cache:
+        val, ts = _atr_cache[ticker]
+        if now - ts < _ATR_CACHE_TTL:
+            return val
+            
+    try:
+        from data_sources import get_bist_data, get_crypto_1h_data, get_emtia_1h_data
+        df_1h = None
+        
+        if ticker.endswith(".IS"):
+            _, _, df_1h = get_bist_data(ticker)
+        elif "=" in ticker or "GLDTR" in ticker or "GMSTR" in ticker:
+            df_1h = get_emtia_1h_data(ticker)
+        else:
+            df_1h = get_crypto_1h_data(ticker)
+            
+        if df_1h is not None and not df_1h.empty:
+            atr_series = df_1h.ta.atr(length=config.IND_ATR_LENGTH)
+            if atr_series is not None and not atr_series.empty:
+                last_atr = atr_series.iloc[-1]
+                if last_atr is not None and not math.isnan(last_atr):
+                    _atr_cache[ticker] = (float(last_atr), now)
+                    return float(last_atr)
+    except Exception as e:
+        logging.warning(f"[_get_atr_cached] {ticker} için ATR hesaplanamadı: {e}")
+        
+    return None
 
 def _get_structural_floor(ticker: str, signal: str) -> float:
     """
@@ -35,24 +69,43 @@ def _calculate_long_trailing_stop(t, current_price, profit_pct, trailing_dist, a
     ticker = t["ticker"]
     sl = float(t["sl"])
     
-    if config.HYBRID_STOP_ENABLED:
-        if profit_pct >= 15.0:
-            multiplier = 1.0
-        elif profit_pct >= 10.0:
-            multiplier = 1.5
-        elif profit_pct >= 5.0:
-            multiplier = 2.0
-        else:
-            multiplier = 2.5
-        current_trailing_dist = trailing_dist * (multiplier / 2.5)
+    # Kâr kilit mekanizması (Profit Locking)
+    # Başlangıçta atr ile esnek bir takip alanı bırakıyoruz, kâr arttıkça çarpanı bir miktar daraltabiliriz
+    # ancak eskisi gibi agresif yarıya kesme yapmayacağız.
+    if ticker.endswith(".IS"):
+        base_multiplier = config.ATR_MULTIPLIER_BIST
+    elif "=" in ticker or "GLDTR" in ticker or "GMSTR" in ticker:
+        base_multiplier = config.EMTIA_ATR_MULT.get(ticker, 2.5)
     else:
-        if profit_pct >= 15.0:
-            current_trailing_dist = max(current_price * 0.005, atr_floor)
-        elif profit_pct >= 10.0:
-            current_trailing_dist = max(current_price * 0.015, atr_floor)
+        base_multiplier = config.ATR_MULTIPLIER_CRYPTO
+
+    # Güncel ATR değerini al (Chandelier Exit)
+    real_atr = _get_atr_cached(ticker)
+    
+    if real_atr is not None and real_atr > 0:
+        if config.HYBRID_STOP_ENABLED:
+            # Çok kârlı pozisyonlarda stop'u biraz sıkılaştırıp kârı kilitleyelim (kademeli daralma)
+            if profit_pct >= 20.0:
+                current_trailing_dist = real_atr * (base_multiplier * 0.6)
+            elif profit_pct >= 10.0:
+                current_trailing_dist = real_atr * (base_multiplier * 0.8)
+            else:
+                current_trailing_dist = real_atr * base_multiplier
+        else:
+            current_trailing_dist = real_atr * base_multiplier
+    else:
+        # Fallback: ATR hesaplanamazsa eski sabit trailing dist'i kullanalım
+        if config.HYBRID_STOP_ENABLED:
+            if profit_pct >= 20.0:
+                current_trailing_dist = trailing_dist * 0.6
+            elif profit_pct >= 10.0:
+                current_trailing_dist = trailing_dist * 0.8
+            else:
+                current_trailing_dist = trailing_dist
         else:
             current_trailing_dist = trailing_dist
 
+    # En az atr_floor kadar mesafe bırak (çok daralmasını önle)
     current_trailing_dist = max(current_trailing_dist, atr_floor)
 
     raw_hh = t.get("highest_high")
@@ -84,31 +137,57 @@ def _calculate_short_trailing_stop(t, current_price, profit_pct, trailing_dist, 
     ticker = t["ticker"]
     sl = float(t["sl"])
     
-    if config.HYBRID_STOP_ENABLED:
-        if profit_pct >= 15.0:
-            multiplier = 1.0
-        elif profit_pct >= 10.0:
-            multiplier = 1.5
-        elif profit_pct >= 5.0:
-            multiplier = 2.0
-        else:
-            multiplier = 2.5
-        current_trailing_dist = trailing_dist * (multiplier / 2.5)
+    if ticker.endswith(".IS"):
+        base_multiplier = config.ATR_MULTIPLIER_BIST
+    elif "=" in ticker or "GLDTR" in ticker or "GMSTR" in ticker:
+        base_multiplier = config.EMTIA_ATR_MULT.get(ticker, 2.5)
     else:
-        if "ŞELALE SÖRFÜ" in strategy_name:
-            current_trailing_dist = trailing_dist
-        elif "UÇURUM ÇÖKÜŞÜ" in strategy_name:
-            if profit_pct >= 15.0:
-                current_trailing_dist = trailing_dist * 0.4
+        base_multiplier = config.ATR_MULTIPLIER_CRYPTO
+
+    real_atr = _get_atr_cached(ticker)
+    
+    if real_atr is not None and real_atr > 0:
+        if config.HYBRID_STOP_ENABLED:
+            if profit_pct >= 20.0:
+                current_trailing_dist = real_atr * (base_multiplier * 0.6)
+            elif profit_pct >= 10.0:
+                current_trailing_dist = real_atr * (base_multiplier * 0.8)
+            else:
+                current_trailing_dist = real_atr * base_multiplier
+        else:
+            if "ŞELALE SÖRFÜ" in strategy_name:
+                current_trailing_dist = real_atr * base_multiplier
+            elif "UÇURUM ÇÖKÜŞÜ" in strategy_name:
+                if profit_pct >= 15.0:
+                    current_trailing_dist = real_atr * (base_multiplier * 0.4)
+                else:
+                    current_trailing_dist = real_atr * base_multiplier
+            else:
+                current_trailing_dist = real_atr * base_multiplier
+    else:
+        # Fallback
+        if config.HYBRID_STOP_ENABLED:
+            if profit_pct >= 20.0:
+                current_trailing_dist = trailing_dist * 0.6
+            elif profit_pct >= 10.0:
+                current_trailing_dist = trailing_dist * 0.8
             else:
                 current_trailing_dist = trailing_dist
         else:
-            if profit_pct >= 15.0:
-                current_trailing_dist = max(current_price * 0.005, atr_floor_short)
-            elif profit_pct >= 10.0:
-                current_trailing_dist = max(current_price * 0.015, atr_floor_short)
-            else:
+            if "ŞELALE SÖRFÜ" in strategy_name:
                 current_trailing_dist = trailing_dist
+            elif "UÇURUM ÇÖKÜŞÜ" in strategy_name:
+                if profit_pct >= 15.0:
+                    current_trailing_dist = trailing_dist * 0.4
+                else:
+                    current_trailing_dist = trailing_dist
+            else:
+                if profit_pct >= 15.0:
+                    current_trailing_dist = trailing_dist * 0.6
+                elif profit_pct >= 10.0:
+                    current_trailing_dist = trailing_dist * 0.8
+                else:
+                    current_trailing_dist = trailing_dist
 
     current_trailing_dist = max(current_trailing_dist, atr_floor_short)
 

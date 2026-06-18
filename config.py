@@ -63,6 +63,8 @@ TOP_BIST = list(dict.fromkeys([
     "BIOEN.IS",
 ]))
 
+TOP_BIST_50 = TOP_BIST[:50]
+
 TOP_EMTIA_USD = [
     "GC=F",   # Altın (Gold)
     "SI=F",   # Gümüş (Silver)
@@ -356,7 +358,7 @@ DATA_PERIOD_1D = "12mo"            # 1D timeframe için 1 yıllık veri çekilir
 DATA_PERIOD_1H = "1mo"             # 1H timeframe için 1 aylık veri çekilir
 SOFT_UNCERTAINTY_PENALTY = 0.0     # Eksik teknik veri durumunda verilecek ceza puanı (nötr 50.0 yerine 0.0)
 
-OHLCV_LIMIT = 100              # API'den çekilecek mum sayısı
+OHLCV_LIMIT = 300              # API'den çekilecek mum sayısı (SMA200 için en az 200+ gerekir)
 API_SLEEP_BIST = 0.1
 API_SLEEP_CRYPTO = 0.1
 API_SLEEP_EMTIA = 0.2
@@ -540,6 +542,8 @@ VWAP_SLOPE_CONFIRMATION: bool = True          # VWAP eğiminin pozitif (long) / 
 VWAP_SLOPE_LOOKBACK: int = 3                  # Eğim hesaplanacak mum sayısı
 VWAP_BOUNCE_CANDLE_CONFIRM: int = 1           # VWAP üzerinde tutunmayı gösteren mum kapanışı sayısı (Örn: 1 veya 2)
 VWAP_SL_BUFFER_PCT: float = 1.5               # VWAP altı güvenli stop tampon yüzdesi (Örn: %1.5)
+VWAP_BOUNCE_LOWER_SHADOW_MULT: float = 0.5    # Pin-bar yerine, güçlü gövdeli ralli mumlarına izin verir (2.0'dan 0.5'e).
+VWAP_TOLERANCE_PCT: float = 0.003             # VWAP'a %0.3 oranında yaklaşmayı temas (bounce) olarak kabul eder.
 
 # --- 8. OBV Accumulation ---
 OBV_SMA_ALIGN_REQUIRED: bool = True           # OBV'nin kendi 20 SMA'sı üzerinde olması koşulu
@@ -586,8 +590,8 @@ ANTI_HUNT_OFFSET_PCT: float = 0.00034         # Balinaların stop-avı yapmasın
 STRUCTURAL_STOP_ENABLED: bool = True          # EMA-20 yapısal trend desteği alt zemin koruması aktif/pasif
 
 # --- 15. Kripto Short-4 (Keskin Nişancı) ---
-SHORT4_BBP_MAX_PULLBACK = 1.0
-SHORT4_BBP_MIN_PULLBACK = 0.15
+SHORT4_BBP_MAX_PULLBACK = 1.05
+SHORT4_BBP_MIN_PULLBACK = 0.85
 
 # ════════════════════════════════════════
 # 🚀 Vectorbt Yüksek Hızlı Backtest Motoru (V4.0)
@@ -602,12 +606,12 @@ BYPASS_TIME_ROUTING: bool = False             # Zamanlayıcıyı tamamen devre d
 # --- 17. BIST 11: Mum Formasyonları (Candlestick) ---
 BIST11_ATR_MULTIPLIER: float = 2.0            # ATR tabanlı trailing stop çarpanı
 BIST11_VOLUME_SMA_PERIOD: int = 10            # Hacim teyidi için geriye dönük SMA periyodu
-BIST11_VOLUME_MULT: float = 0.8               # Formasyon mumunun hacminin ortalama hacme oranı
+BIST11_VOLUME_MULT: float = 1.25              # Formasyon mumunun hacminin ortalama hacme oranı
 BIST11_SUPPORT_TOLERANCE_PCT: float = 2.0     # Destek seviyelerine maksimum yakınlık yüzdesi
 BIST11_DIVERGENCE_REQUIRED: bool = False      # RSI/MACD uyumsuzluğu zorunlu mu
 
 # --- 18. BIST 12: Grafik Formasyonları (Chart Patterns) ---
-BIST12_PROMINENCE_ATR_MULT: float = 0.5       # find_peaks için dinamik prominence (ATR oranı)
+BIST12_PROMINENCE_ATR_MULT: float = 0.75      # find_peaks için dinamik prominence (ATR oranı)
 BIST12_VOLATILITY_TOLERANCE_MULT: float = 1.0 # volatiliteye duyarlı tolerans katsayısı
 BIST12_OBO_BASE_TOLERANCE_PCT: float = 5.0    # OBO/TOBO omuzları arası taban tolerans yüzdesi (%)
 BIST12_NECK_TOLERANCE_PCT: float = 3.0       # OBO/TOBO boyun çizgisi hizalama toleransı (%)

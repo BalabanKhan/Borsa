@@ -256,7 +256,7 @@ def _write_trade_journal_csv(trade):
 
 def get_learning_context(limit=5):
     """
-    Kapanan başarılı (CLOSED_TP) ve başarısız (CLOSED_SL) işlemleri döndürür.
+    Kapanan başarılı (PnL > 0) ve başarısız (PnL <= 0) işlemleri döndürür.
     """
     import glob
     history = []
@@ -268,8 +268,31 @@ def get_learning_context(limit=5):
         except Exception as e:
             logging.warning(f"[get_learning_context] {hf} okuma hatası: {e}")
 
-    successful = [t for t in history if t.get("status") == "CLOSED_TP"]
-    failed = [t for t in history if t.get("status") == "CLOSED_SL"]
+    successful = []
+    failed = []
+    
+    for t in history:
+        entry_price = float(t.get("entry_price", 0))
+        exit_price = float(t.get("exit_price", 0))
+        signal = t.get("signal", "AL")
+        
+        if entry_price > 0 and exit_price > 0:
+            if signal == "AL":
+                pnl = ((exit_price - entry_price) / entry_price) * 100
+            else:
+                pnl = ((entry_price - exit_price) / entry_price) * 100
+        else:
+            pnl = 0.0
+            
+        if pnl > 0:
+            successful.append(t)
+        elif pnl < 0:
+            failed.append(t)
+        else:
+            if "TP" in t.get("status", ""):
+                successful.append(t)
+            elif "SL" in t.get("status", "") or "BLACK_SWAN" in t.get("status", ""):
+                failed.append(t)
 
     return {
         "successful_trades": successful[-limit:],

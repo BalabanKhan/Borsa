@@ -39,10 +39,12 @@ def inject_smart_indicators(df):
     # SMA
     if TA_LIB_AVAILABLE:
         df_copy[f'SMA_{config.IND_SMA_SLOW}'] = talib.SMA(df_copy['close'].values, timeperiod=config.IND_SMA_SLOW)
+        df_copy[f'SMA_100'] = talib.SMA(df_copy['close'].values, timeperiod=100)
         df_copy[f'SMA_{config.IND_SMA_TREND}'] = talib.SMA(df_copy['close'].values, timeperiod=config.IND_SMA_TREND)
         df_copy[f'SMA_200'] = talib.SMA(df_copy['close'].values, timeperiod=200)
     else:
         df_copy.ta.sma(length=config.IND_SMA_SLOW, append=True)
+        df_copy.ta.sma(length=100, append=True)
         df_copy.ta.sma(length=config.IND_SMA_TREND, append=True)
         df_copy.ta.sma(length=200, append=True)
         
@@ -139,12 +141,13 @@ def detect_vwap_bounce(df, vwap_val):
             if vwap_past.iloc[0] >= vwap_past.iloc[-1]:
                 return False, None
 
-    # 2. VWAP Değme (Touch) ve İğne Kontrolü
+    # 2. VWAP Değme (Touch) ve İğne Kontrolü (Front-running toleransı eklendi)
     touched_vwap = False
+    vwap_upper_band = vwap_val * (1 + getattr(config, 'VWAP_TOLERANCE_PCT', 0.003))
     for i in range(1, config.VWAP_BOUNCE_CANDLE_CONFIRM + 2):
         if i <= len(df):
             c = df.iloc[-i]
-            if c['low'] <= vwap_val:
+            if c['low'] <= vwap_upper_band:
                 touched_vwap = True
                 break
     if not touched_vwap:
@@ -160,7 +163,8 @@ def detect_vwap_bounce(df, vwap_val):
     if math.isclose(body, 0.0, abs_tol=1e-10):
         body = last['close'] * 0.0001
     lower_wick = min(last['close'], last['open']) - last['low']
-    if lower_wick < body * config.CANDLE_HAMMER_LOWER_SHADOW_MULT:
+    shadow_mult = getattr(config, 'VWAP_BOUNCE_LOWER_SHADOW_MULT', 0.5)
+    if lower_wick < body * shadow_mult:
         return False, None
 
     return True, float(last['low'])
@@ -205,3 +209,26 @@ def calculate_relative_strength(df_stock, df_index):
             index_recovering = bool(df_idx['close'].iloc[-1] > df_idx[ema_col].iloc[-1])
 
     return rs_strong, rs_trend_up, index_stressed, index_recovering
+
+def get_trend_sma(last_1d: dict) -> float:
+    """
+    Sma fallback hiyerarşisine göre trend sma değerini döndürür.
+    Öncelik: SMA_200 -> SMA_100 -> SMA_50
+    Eğer hiçbiri yoksa None döner.
+    """
+    if last_1d is None:
+        return None
+        
+    sma_200 = last_1d.get("SMA_200")
+    if sma_200 is not None and not pd.isna(sma_200):
+        return float(sma_200)
+        
+    sma_100 = last_1d.get("SMA_100")
+    if sma_100 is not None and not pd.isna(sma_100):
+        return float(sma_100)
+        
+    sma_50 = last_1d.get("SMA_50")
+    if sma_50 is not None and not pd.isna(sma_50):
+        return float(sma_50)
+        
+    return None

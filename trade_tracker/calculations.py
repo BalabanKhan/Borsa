@@ -104,7 +104,7 @@ def _check_funding_shield(t, current_price, profit_pct, signal):
             f"📋 <b>AKSİYON: Derhal borsayı aç ve bu pozisyonu kapat!</b>\n"
             f"Net Kâr: %{profit_pct:.2f}"
         )
-        t["status"] = "CLOSED_SL"
+        t["status"] = "CLOSED_FUNDING_SHIELD"
         should_close = True
 
     return t, notifications, should_close
@@ -243,14 +243,14 @@ def _check_black_swan(t, current_price, signal):
             is_black_swan = True
             close_msg = trade_tracker._format_close_message(t, current_price, signal, "BLACK_SWAN")
             notifications.append(close_msg)
-            t["status"] = "CLOSED_SL"
+            t["status"] = "CLOSED_BLACK_SWAN"
 
     elif signal == "SAT":
         if current_price > sl * 1.03:
             is_black_swan = True
             close_msg = trade_tracker._format_close_message(t, current_price, signal, "BLACK_SWAN")
             notifications.append(close_msg)
-            t["status"] = "CLOSED_SL"
+            t["status"] = "CLOSED_BLACK_SWAN"
 
     return t, notifications, is_black_swan
 

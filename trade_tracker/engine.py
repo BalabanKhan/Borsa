@@ -229,11 +229,15 @@ def _process_active_trade_checks(t, current_price, check_price, profit_pct_wick,
     return False
 
 def _cb_on_trade_closed_helper(status, ticker_ct, strategy_ct, pnl_pct, hold_hours, entry_time_ct, ct, rr_achieved, cb_notifications):
-    if "SL" in status or "BLACK_SWAN" in status:
+    is_win = pnl_pct > 0.05
+    is_be = -0.05 <= pnl_pct <= 0.05
+    is_loss = pnl_pct < -0.05
+
+    if ("SL" in status and is_loss) or "BLACK_SWAN" in status:
         cb_observer.on_trade_closed({
             "ticker": ticker_ct,
             "strategy": strategy_ct,
-            "pnl_percent": -abs(pnl_pct) if pnl_pct != 0 else -0.01
+            "pnl_percent": pnl_pct if pnl_pct != 0 else -0.01
         })
         
         penalty_msg = record_asset_sl(ticker_ct)
@@ -250,12 +254,30 @@ def _cb_on_trade_closed_helper(status, ticker_ct, strategy_ct, pnl_pct, hold_hou
                 "exit_time": ct.get("exit_time", ""),
                 "rr_achieved": round(rr_achieved, 2),
             })
-        
-    elif "TP" in status:
+            
+    elif "SL" in status and is_be:
         cb_observer.on_trade_closed({
             "ticker": ticker_ct,
             "strategy": strategy_ct,
-            "pnl_percent": abs(pnl_pct) if pnl_pct != 0 else 0.01
+            "pnl_percent": 0.0
+        })
+        
+        if strategy_ct:
+            record_trade_result(strategy_ct, {
+                "ticker": ticker_ct,
+                "outcome": "MANUAL",
+                "pnl_pct": pnl_pct,
+                "hold_hours": hold_hours,
+                "entry_time": entry_time_ct,
+                "exit_time": ct.get("exit_time", ""),
+                "rr_achieved": round(rr_achieved, 2),
+            })
+        
+    elif "TP" in status or ("SL" in status and is_win):
+        cb_observer.on_trade_closed({
+            "ticker": ticker_ct,
+            "strategy": strategy_ct,
+            "pnl_percent": pnl_pct if pnl_pct != 0 else 0.01
         })
         
         penalty_msg = record_asset_tp(ticker_ct)
@@ -384,7 +406,7 @@ def check_active_trades(current_prices_dict):
         timeframe = t.get("timeframe", "4h")
 
         check_price = current_price
-        if body_close_stop_required:
+        if body_close_stop_required or getattr(config, "HYBRID_STOP_ENABLED", False):
             completed_close = _get_last_completed_candle_close(ticker, timeframe)
             if completed_close is not None:
                 check_price = completed_close

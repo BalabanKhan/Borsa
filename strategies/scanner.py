@@ -160,7 +160,9 @@ async def scan_all_markets():
                             return []
                         return analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias, metrics_collector=scan_metrics)
                 except Exception as e:
+                    import traceback
                     logging.warning(f"[scan_all_markets] KRİPTO {sym}: {e}")
+                    traceback.print_exc()
                 finally:
                     if API_SLEEP_CRYPTO > 0:
                         await asyncio.sleep(API_SLEEP_CRYPTO)

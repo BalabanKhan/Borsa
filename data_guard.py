@@ -173,11 +173,20 @@ def check_data_freshness(
     now_utc = pd.Timestamp.now(tz='UTC')
     age_minutes = (now_utc - last_ts).total_seconds() / 60
 
-    # Hafta sonu toleransı: BIST hisseleri (.IS) Cuma kapanışından Pazartesi açılışına kadar bayat görünür
+    # Hafta sonu ve Gece toleransı: BIST hisseleri (.IS)
     is_bist = symbol.endswith('.IS') or symbol.endswith('.E')
-    if is_bist and now_utc.weekday() in (5, 6):  # Cumartesi, Pazar
-        # Hafta sonu BIST verisi doğal olarak bayat, 72 saat tolerans
-        max_minutes = 72 * 60
+    if is_bist:
+        if now_utc.weekday() in (5, 6):  # Cumartesi, Pazar
+            max_minutes = 72 * 60
+        else:
+            now_ist = now_utc.tz_convert('Europe/Istanbul')
+            h = now_ist.hour
+            m = now_ist.minute
+            is_overnight = (h > 18) or (h == 18 and m >= 15) or (h < 9) or (h == 9 and m < 55)
+            if is_overnight:
+                max_minutes = 16 * 60
+            else:
+                max_minutes = max_staleness_minutes or STALENESS_LIMITS.get(timeframe, 26 * 60)
     else:
         max_minutes = max_staleness_minutes or STALENESS_LIMITS.get(timeframe, 26 * 60)
 

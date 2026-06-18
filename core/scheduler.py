@@ -32,7 +32,7 @@ class TaskScheduler:
         self.scheduler.add_job(self.scanner.run_scan, 'interval', minutes=15, id='market_scan')
         
         # Aktif Pozisyon Fiyat Kontrolü (Her 1 Dakika)
-        self.scheduler.add_job(self.check_prices, 'interval', minutes=1, id='check_prices')
+        self.scheduler.add_job(self.check_prices, 'interval', minutes=1, id='check_prices', max_instances=2)
         
         # Başarısız Mesajları Yeniden Gönderme (Her 1 Dakika)
         self.scheduler.add_job(self.notifier.retry_failed_messages, 'interval', minutes=1, id='retry_messages')

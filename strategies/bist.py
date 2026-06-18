@@ -25,7 +25,7 @@ from indicators import (
     calculate_orb_cage, calculate_time_specific_rvol,
     detect_bullish_candlestick_pattern, check_near_support,
     check_bullish_engulfing_momentum, calculate_cmf,
-    sniper_calculate_ote_body, calculate_anchored_vwap,
+    sniper_calculate_ote_body, calculate_anchored_vwap, get_trend_sma,
 )
 from meta_engine import get_bist100_trend, get_bist100_intraday_trend
 from .helpers import (
@@ -51,9 +51,9 @@ def _check_bist_1_dip_hunter(ctx):
     if pd.isna(last_1d.get('RSI_14')) or last_1d['RSI_14'] >= config.BIST_DIP_HUNTER_RSI_1D_LIMIT:
         return signals
 
-    sma_200 = last_1d.get('SMA_200')
+    trend_sma = get_trend_sma(last_1d)
     trend_aligned = not config.DIP_RSI_1D_SMA200_ALIGN_ENABLED or (
-        sma_200 is not None and not pd.isna(sma_200) and current_price > sma_200
+        trend_sma is not None and not pd.isna(trend_sma) and current_price > trend_sma
     )
     if not trend_aligned:
         return signals
@@ -592,8 +592,8 @@ def _check_bist_7_vwap(ctx):
         return signals
 
     sma_50 = last_1d.get('SMA_50')
-    sma_200 = last_1d.get('SMA_200')
-    is_bear_regime = (not pd.isna(sma_50) and not pd.isna(sma_200) and current_price < sma_50 and current_price < sma_200)
+    trend_sma = get_trend_sma(last_1d)
+    is_bear_regime = (not pd.isna(sma_50) and not pd.isna(trend_sma) and current_price < sma_50 and current_price < trend_sma)
     ema_21_daily = last_1d.get('EMA_21')
     mtf_trend_down = (not pd.isna(ema_21_daily) and last_1d['close'] < ema_21_daily)
 
@@ -918,8 +918,11 @@ def _check_bist12_timing_filters(df_1d, df_4h, current_price):
     rsi_1d = df_1d['RSI_14'].iloc[-1] if 'RSI_14' in df_1d.columns else 50.0
     ema_21_4h = df_4h['EMA_21'].iloc[-1] if 'EMA_21' in df_4h.columns else current_price
     dist_to_ema21 = abs(current_price - ema_21_4h) / ema_21_4h * 100 if ema_21_4h > 0 else 0
+    adx_4h = df_4h['ADX_14'].iloc[-1] if 'ADX_14' in df_4h.columns else 25.0
     
     if rsi_1d >= config.BIST_CHART_RSI_D_LIMIT or dist_to_ema21 >= config.BIST_CHART_EMA21_DIST_LIMIT:
+        return False
+    if adx_4h < 20.0:
         return False
     return True
 
@@ -1081,7 +1084,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
             "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
             "1H RSI": round(last_1h.get("RSI_14", 0), 2) if pd.notna(last_1h.get("RSI_14")) else None,
             "1D SMA 50": round(last_1d.get("SMA_50", 0), 2) if pd.notna(last_1d.get("SMA_50")) else None,
-            "1D SMA 200": round(last_1d.get("SMA_200", 0), 2) if pd.notna(last_1d.get("SMA_200")) else None,
+            "1D Trend SMA": round(get_trend_sma(last_1d), 2) if pd.notna(get_trend_sma(last_1d)) else None,
             "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
             "1H Volume": last_1h.get("volume")
         }

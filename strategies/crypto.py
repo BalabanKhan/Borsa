@@ -23,7 +23,7 @@ from indicators import (
     detect_bullish_divergence, detect_bearish_divergence,
     detect_vwap_bounce, detect_obv_accumulation,
     detect_squeeze, calculate_cmf, sniper_calculate_ote_body,
-    sniper_calculate_ote, calculate_anchored_vwap,
+    sniper_calculate_ote, calculate_anchored_vwap, get_trend_sma,
 )
 from data_sources import (
     get_crypto_1h_data, get_funding_rate, fetch_crypto_oi_crash,
@@ -350,10 +350,10 @@ def _check_crypto_short_1_fomo(ctx):
     trend_aligned = True
     if config.SHORT_TREND_ALIGN_REQUIRED:
         ema_50_1d = last_1d.get(f'EMA_{config.IND_EMA_SLOW}')
-        sma_200_1d = last_1d.get('SMA_200')
+        trend_sma = get_trend_sma(last_1d)
         if ema_50_1d is not None and not pd.isna(ema_50_1d) and current_price >= ema_50_1d:
             trend_aligned = False
-        if sma_200_1d is not None and not pd.isna(sma_200_1d) and current_price >= sma_200_1d:
+        if trend_sma is not None and not pd.isna(trend_sma) and current_price >= trend_sma:
             trend_aligned = False
 
     if not trend_aligned:
@@ -954,7 +954,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
         bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg_long, sfp_present=has_sfp_long,
         market="KRIPTO", is_long=True
     )
-    _conv_sn_long = calculate_conviction(_scores_sn_long, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx)
+    _conv_sn_long = calculate_conviction(_scores_sn_long, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx_1h)
     if _conv_sn_long.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
         raw_vars = locals()
         signals.append({
@@ -1026,7 +1026,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         market="KRIPTO", is_long=False, funding_rate=funding_rate,
         cmf=cmf_1h if cmf_1h is not None and not math.isnan(cmf_1h) else 0.0
     )
-    _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx)
+    _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx_1h)
     if _conv_sn_short.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
         raw_vars = locals()
         signals.append({
@@ -1158,7 +1158,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
             "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
             "1H RSI": None,
             "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
-            "1D SMA 200": round(last_1d.get("SMA_200", 0), 2) if pd.notna(last_1d.get("SMA_200")) else None,
+            "1D Trend SMA": round(get_trend_sma(last_1d), 2) if pd.notna(get_trend_sma(last_1d)) else None,
             "Trend": "Bullish" if last_1d.get("EMA_20", 0) > last_1d.get("EMA_50", float('inf')) else "Bearish",
             "1H Volume": last_4h.get("volume")
         }
