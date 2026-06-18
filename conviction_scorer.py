@@ -563,6 +563,7 @@ def score_fvg_sfp(fvg_present: bool, sfp_present: bool) -> float:
 def check_hard_blocks(
     volume: float = None,
     price: float = None,
+    vol_sma: float = None,
     is_quarantined: bool = False,
     is_circuit_open: bool = False,
     is_darth_maul_flag: bool = False,
@@ -584,6 +585,20 @@ def check_hard_blocks(
 
     if is_core_indicators_nan:
         return True, "HB-8: Kritik teknik gösterge verisi eksik (NaN) — işlem yapılamaz"
+        
+    if volume is not None and price is not None:
+        if (volume * price) < min_volume_usd:
+            return True, f"HB-4: Dolar Hacmi Yetersiz ({(volume * price):.0f} < {min_volume_usd})"
+            
+    if vol_sma is not None and volume is not None and vol_sma > 0:
+        if (volume / vol_sma) < 0.8:
+            return True, f"HB-5: Göreceli Hacim Çok Düşük (Kırılım hacimsiz - {(volume/vol_sma):.2f}x)"
+
+    if not sl_direction_ok:
+        return True, "HB-6: Stop Loss yönü hatalı"
+        
+    if rr_ratio is not None and rr_ratio < 0.4:
+        return True, "HB-7: R:R oranı çok düşük (< 0.4)"
 
     return False, ""
 

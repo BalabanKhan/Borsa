@@ -932,6 +932,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
     blocked, block_reason = check_hard_blocks(
         volume=last_1h_s.get('volume', 0),
         price=current_price,
+        vol_sma=guarded_vol_sma,
         is_quarantined=False,
         is_circuit_open=False,
         is_darth_maul_flag=False,
@@ -1002,6 +1003,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
     blocked, block_reason = check_hard_blocks(
         volume=last_1h_s.get('volume', 0),
         price=current_price,
+        vol_sma=guarded_vol_sma,
         is_quarantined=False,
         is_circuit_open=False,
         is_darth_maul_flag=False,
