@@ -16,7 +16,7 @@ from config import MAX_CONSECUTIVE_SL, COOLDOWN_HOURS, DAILY_MAX_SL
 from core.defensive_engine import DefensiveStateGuard
 
 # V3.3.4 Hibrit Şalter: Global günlük limit
-GLOBAL_DAILY_MAX_SL = 15
+GLOBAL_DAILY_MAX_SL = 99
 
 CB_STATE_FILE = "circuit_breaker_state.json"
 _cb_lock = threading.RLock()
