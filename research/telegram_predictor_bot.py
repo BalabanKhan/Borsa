@@ -758,6 +758,148 @@ async def temizle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, parse_mode='Markdown')
 
+async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sabah bültenini manuel tetikler."""
+    if not await check_auth(update): return
+    
+    user_id_str = str(update.effective_user.id)
+    favs_db = load_favorites()
+    fav_list = favs_db.get(user_id_str, [])
+    
+    if not fav_list:
+        await update.message.reply_text("Favori listeniz boş. Sabah bülteni oluşturabilmek için önce `/favoriekle` ile favori ekleyin.")
+        return
+        
+    msg = await update.message.reply_text("⏳ *Sabah Bülteni hazırlanıyor...* (Çoklu zaman dilimi teyitleri ve filtreler kontrol ediliyor)", parse_mode='Markdown')
+    
+    bist_favs = [item for item in fav_list if item['type'] == 'bist']
+    if not bist_favs:
+        await msg.edit_text("Favorilerinizde BIST hissesi bulunamadı. Sabah bülteni sadece BIST hisseleri için oluşturulur.")
+        return
+        
+    report_lines = ["🌅 *Sabah Bülteni (BIST 100 Favorileriniz)*:\n"]
+    candidates = []
+    
+    for item in bist_favs:
+        symbol = item['symbol']
+        asset_type = item['type']
+        try:
+            res_1d = await asyncio.to_thread(
+                predict_future, 
+                symbol=symbol, 
+                asset_type=asset_type, 
+                context_len=90,
+                horizon_len=7, 
+                show_plot=False,
+                save_plot=False,
+                interval='1d'
+            )
+            if res_1d:
+                _, final_pred_1d, pct_change_1d, rsi = res_1d
+                if rsi > 75.0:
+                    report_lines.append(f"⚠️ *{symbol}*: Elendi (RSI {rsi:.1f} > 75)")
+                    continue
+                if pct_change_1d <= 0:
+                    report_lines.append(f"🔴 *{symbol}*: Elendi (Günlük trend negatif)")
+                    continue
+                
+                res_1h = await asyncio.to_thread(
+                    predict_future,
+                    symbol=symbol,
+                    asset_type=asset_type,
+                    context_len=60,
+                    horizon_len=8,
+                    show_plot=False,
+                    save_plot=False,
+                    interval='1h'
+                )
+                if res_1h:
+                    _, final_pred_1h, pct_change_1h, _ = res_1h
+                    if pct_change_1h <= 0:
+                        report_lines.append(f"🔴 *{symbol}*: Elendi (Saatlik trend negatif)")
+                        continue
+                        
+                    import data_sources
+                    import pandas as pd
+                    _, _, df_1h_data = data_sources.get_bist_data(symbol)
+                    if df_1h_data is not None and not df_1h_data.empty:
+                        ema5 = df_1h_data['close'].ewm(span=5, adjust=False).mean()
+                        last_close = df_1h_data['close'].iloc[-1]
+                        last_ema5 = ema5.iloc[-1]
+                        if last_close <= last_ema5:
+                            report_lines.append(f"🔴 *{symbol}*: Elendi (Fiyat EMA 5'in altında)")
+                            continue
+                            
+                        tr1 = df_1h_data['high'] - df_1h_data['low']
+                        tr2 = (df_1h_data['high'] - df_1h_data['close'].shift(1)).abs()
+                        tr3 = (df_1h_data['low'] - df_1h_data['close'].shift(1)).abs()
+                        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                        atr = tr.rolling(window=14).mean().iloc[-1]
+                        
+                        tp = last_close + (atr * 2.0)
+                        sl = last_close - (atr * 1.5)
+                        tp_pct = ((tp - last_close) / last_close) * 100
+                        sl_pct = ((last_close - sl) / last_close) * 100
+                    else:
+                        tp = sl = tp_pct = sl_pct = 0
+                        
+                    candidates.append({
+                        'symbol': symbol,
+                        'pct_change_1d': pct_change_1d,
+                        'pct_change_1h': pct_change_1h,
+                        'rsi': rsi,
+                        'tp': tp,
+                        'sl': sl,
+                        'tp_pct': tp_pct,
+                        'sl_pct': sl_pct
+                    })
+                else:
+                    report_lines.append(f"❓ *{symbol}*: Saatlik veri alınamadı.")
+            else:
+                report_lines.append(f"❓ *{symbol}*: Günlük veri alınamadı.")
+        except Exception as e:
+            report_lines.append(f"❌ *{symbol}*: Hata oluştu.")
+            
+    candidates.sort(key=lambda x: x['pct_change_1d'], reverse=True)
+    top_3 = candidates[:3]
+    
+    if top_3:
+        report_lines.append("\n🏆 *Günün En İyi Tahminleri (Teyitli)*:")
+        for i, cand in enumerate(top_3, 1):
+            sym = cand['symbol']
+            report_lines.append(f"{i}️⃣ *{sym}*: Günlük +{cand['pct_change_1d']:.1f}% | Saatlik +{cand['pct_change_1h']:.1f}% | RSI: {cand['rsi']:.1f}")
+            if cand.get('tp', 0) > 0:
+                report_lines.append(f"   🎯 Hedef (TP): {cand['tp']:.2f} (+%{cand['tp_pct']:.2f})")
+                report_lines.append(f"   🛑 Stop (SL): {cand['sl']:.2f} (-%{cand['sl_pct']:.2f})")
+    else:
+        report_lines.append("\n⚠️ *Bugün tüm filtreleri geçen (Çoklu Zaman Dilimi, RSI < 75, EMA 5) hisse bulunamadı.*")
+        
+    await msg.delete()
+    await update.message.reply_text("\n".join(report_lines), parse_mode='Markdown')
+    
+    for cand in top_3:
+        sym = cand['symbol']
+        try:
+            res_plot = await asyncio.to_thread(
+                predict_future,
+                symbol=sym,
+                asset_type='bist',
+                context_len=60,
+                horizon_len=8,
+                show_plot=False,
+                save_plot=True,
+                interval='1h'
+            )
+            if res_plot and res_plot[0] and os.path.exists(res_plot[0]):
+                with open(res_plot[0], 'rb') as photo:
+                    await update.message.reply_photo(
+                        photo=photo, 
+                        caption=f"🌟 *{sym}* Saatlik Detay Grafiği", 
+                        parse_mode='Markdown'
+                    )
+        except Exception as e:
+            logger.error(f"Grafik gönderme hatası {sym}: {e}")
+
 def main():
     token = os.getenv("TELEGRAM_PREDICTOR_TOKEN")
     if not token:
@@ -778,6 +920,7 @@ def main():
     application.add_handler(CommandHandler("temizle", temizle))
     application.add_handler(CommandHandler("gunici", gunici))
     application.add_handler(CommandHandler("saatlik", saatlik))
+    application.add_handler(CommandHandler("sabah", sabah_komutu))
 
     # JobQueue for daily report at 09:00 TR Time
     # If job_queue isn't installed, this might throw an error. In PTB v20 it's typically built-in or requires python-telegram-bot[job-queue].
