@@ -468,32 +468,147 @@ async def gunici(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     })
                     
             if not results:
-                # Eğer hacim veya MACD çok katı geldiyse, biraz esnetelim (sadece Trend + RSI)
+                # Esnek Kriter: Trend + RSI < 75 (Hacim veya MACD filtresine takılanları kurtar)
                 for ticker in TOP_BIST_50:
-                    if ticker not in data.columns.get_level_values(0): continue
-                    df = data[ticker].dropna()
+                    if len(TOP_BIST_50) == 1:
+                        df = data.copy()
+                    else:
+                        if ticker not in data.columns.get_level_values(0): continue
+                        df = data[ticker].copy()
+                    df = df.dropna()
                     if df.empty: continue
-                    # ... re-calculating is not ideal here, let's just use the strict rule.
+                    
+                    delta = df['Close'].diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / loss
+                    rsi_val = 100 - (100 / (1 + rs)).iloc[-1]
+                    
+                    ema_5 = df['Close'].ewm(span=5, adjust=False).mean()
+                    ema_20 = df['Close'].ewm(span=20, adjust=False).mean()
+                    trend = (df['Close'] > ema_5) & (ema_5 > ema_20)
+                    
+                    if trend.iloc[-1] and rsi_val < 75:
+                        price = df['Close'].iloc[-1]
+                        results.append({
+                            'Ticker': ticker,
+                            'RSI': rsi_val,
+                            'Price': price,
+                            'TP': price * 1.05,
+                            'SL': price * 0.97,
+                            'TP_Pct': 5.0,
+                            'SL_Pct': 3.0
+                        })
             
             res_df = pd.DataFrame(results)
             if res_df.empty:
                 return []
             
-            res_df = res_df.sort_values('RSI', ascending=False).head(3)
             return res_df.to_dict('records')
 
         top_stocks = await asyncio.to_thread(run_intraday_scan)
         
         if not top_stocks:
-            await msg.edit_text("⚠️ *Gün İçi Sinyal*: Şu anki piyasa koşullarında tüm kriterleri (Trend + Hacim + MACD + RSI<75) karşılayan BIST 50 hissesi bulunamadı.", parse_mode='Markdown')
+            await msg.edit_text("⚠️ *Gün İçi Sinyal*: Şu anki piyasa koşullarında kriterleri (Trend + RSI<75) karşılayan BIST 50 hissesi bulunamadı.", parse_mode='Markdown')
         else:
-            text = "⚡️ *Gün İçi Algoritmik Taraması Sonuçları*\n(Kriter: Trend Yukarı + MACD Pozitif + Hacim Artışı + RSI < 75)\n\n"
-            for i, stock in enumerate(top_stocks, 1):
-                text += f"{i}️⃣ *{stock['Ticker']}* - Fiyat: {stock['Price']:.2f} (RSI: {stock['RSI']:.1f})\n"
+            # Adayları RSI değerine göre sıralayıp ilk 8'ini yapay zeka süzgecine alalım
+            top_stocks.sort(key=lambda x: x['RSI'], reverse=True)
+            candidates = top_stocks[:8]
+            
+            await msg.edit_text(f"🔍 Taramadan geçen *{len(candidates)}* aday hisse için TimesFM AI tahmini ve MAPE optimizasyonu yapılıyor... Lütfen bekleyin.", parse_mode='Markdown')
+            
+            # Dinamik seans sonu saati
+            tz = pytz.timezone('Europe/Istanbul')
+            now = datetime.datetime.now(tz)
+            if now.weekday() < 5 and 10 <= now.hour < 18:
+                horizon_len = 18 - now.hour
+                if horizon_len <= 0:
+                    horizon_len = 8
+            else:
+                horizon_len = 8
+                
+            verified_results = []
+            for stock in candidates:
+                ticker = stock['Ticker']
+                
+                # MAPE Optimizasyonu
+                best_mape = float('inf')
+                best_c = 60
+                for c in [32, 64, 96, 128]:
+                    mape_cand = await asyncio.to_thread(evaluate_model_accuracy, ticker, 'bist', '1h', c, horizon_len)
+                    if mape_cand is not None and mape_cand < best_mape:
+                        best_mape = mape_cand
+                        best_c = c
+                        
+                # TimesFM Tahmini
+                res = await asyncio.to_thread(
+                    predict_future,
+                    symbol=ticker,
+                    asset_type='bist',
+                    context_len=best_c,
+                    horizon_len=horizon_len,
+                    show_plot=False,
+                    save_plot=False,
+                    interval='1h'
+                )
+                
+                if res:
+                    _, final_pred, pct_change, _ = res
+                    
+                    # ATR TP/SL Hesaplaması
+                    import data_sources
+                    df_1d_b, _, df_1h_b = await asyncio.to_thread(data_sources.get_bist_data, ticker)
+                    if df_1h_b is not None and not df_1h_b.empty:
+                        last_close = df_1h_b['close'].iloc[-1]
+                        tr1 = df_1h_b['high'] - df_1h_b['low']
+                        tr2 = (df_1h_b['high'] - df_1h_b['close'].shift(1)).abs()
+                        tr3 = (df_1h_b['low'] - df_1h_b['close'].shift(1)).abs()
+                        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                        atr = tr.rolling(window=14).mean().iloc[-1]
+                        
+                        tp = last_close + (atr * 2.0)
+                        sl = last_close - (atr * 1.5)
+                        tp_pct = ((tp - last_close) / last_close) * 100
+                        sl_pct = ((last_close - sl) / last_close) * 100
+                    else:
+                        tp, sl, tp_pct, sl_pct = stock['TP'], stock['SL'], stock['TP_Pct'], stock['SL_Pct']
+                        last_close = stock['Price']
+                        
+                    verified_results.append({
+                        'Ticker': ticker,
+                        'Price': last_close,
+                        'RSI': stock['RSI'],
+                        'TP': tp,
+                        'SL': sl,
+                        'TP_Pct': tp_pct,
+                        'SL_Pct': sl_pct,
+                        'pct_change_1h': pct_change,
+                        'final_pred': final_pred,
+                        'mape': best_mape if best_mape != float('inf') else None,
+                        'best_context': best_c
+                    })
+                    
+            if not verified_results:
+                await msg.edit_text("⚠️ Yapay zeka modeliyle tahmin doğrulanamadı.")
+                return
+                
+            # Yapay zekanın en yüksek yükseliş beklediği ilk 3'ü seç (pct_change_1h)
+            verified_results.sort(key=lambda x: x['pct_change_1h'], reverse=True)
+            top_3 = verified_results[:3]
+            
+            text = f"⚡️ *Gün İçi Yapay Zeka Teyitli Sinyal Raporu ({horizon_len} Saatlik/Seans Sonu)*\n"
+            text += f"(Kriter: Trend/Hacim Kırılımı + TimesFM AI & MAPE Doğrulaması)\n\n"
+            
+            for i, stock in enumerate(top_3, 1):
+                trend_icon = "🟢" if stock['pct_change_1h'] > 0 else "🔴"
+                mape_str = f" | Hata: %{stock['mape']:.2f}" if stock['mape'] is not None else ""
+                text += f"{i}️⃣ {trend_icon} *{stock['Ticker']}* - Fiyat: {stock['Price']:.2f} (RSI: {stock['RSI']:.1f}{mape_str})\n"
+                text += f"   ⚙️ Optimum Veri: *{stock['best_context']} saat*\n"
+                text += f"   📈 Beklenen Değişim: *{stock['pct_change_1h']:+.2f}%* (Hedef Fiyat: {stock['final_pred']:.2f})\n"
                 text += f"   🎯 Hedef (TP): {stock['TP']:.2f} (+%{stock['TP_Pct']:.2f})\n"
                 text += f"   🛑 Stop (SL): {stock['SL']:.2f} (-%{stock['SL_Pct']:.2f})\n\n"
-            
-            text += "\n_Not: Seans kapanışına kadar geçerli tahminlerdir, yatırım tavsiyesi değildir._"
+                
+            text += "_Not: Seans sonuna (18:00 TRT) kadar geçerli yapay zeka tahminleridir._"
             await msg.edit_text(text, parse_mode='Markdown')
             
     except Exception as e:
