@@ -62,35 +62,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     welcome_text = (
-        "🤖 *TimesFM Tahmin Botuna Hoş Geldiniz!*\n\n"
-        "Bu bot, yapay zeka kullanarak hisse, kripto ve emtialar için gelecek tahmini yapar.\n\n"
-        "📌 *Nasıl Kullanılır?*\n"
-        "`/tahmin <SEMBOL> <TÜR>`\n\n"
-        "📌 *Örnek Kullanımlar:*\n"
-        "`/tahmin THYAO.IS bist`\n"
-        "`/tahmin BTC/USDT crypto`\n"
-        "`/tahmin XAU/USD emtia`\n\n"
-        "⚡️ *Saatlik / Seans İçi Tahmin:*\n"
-        "Saatlik grafikleri tahmin ettirmek için sonuna *saat* veya *saatlik* ekleyin:\n"
-        "`/tahmin <SEMBOL> saat` veya `/tahmin <SEMBOL> <TÜR> saatlik`\n"
-        "Örnek: `/tahmin THYAO saat`\n\n"
-        "⭐️ *Favori ve Kıyaslama Komutları:*\n"
-        "`/favoriekle <SEMBOL> <TÜR>` - Favorilere ekler\n"
-        "`/favoricikar <SEMBOL>` - Favorilerden çıkarır\n"
-        "`/favoriler` - Favori listenizin güncel tahmin özetini sunar\n"
-        "`/kiyasla <SEMBOL1> <SEMBOL2> <TÜR>` - İki varlığı kıyaslar\n\n"
-        "🧹 *Diğer Komutlar:*\n"
-        "`/temizle` - Ekrandaki konuşmaları temizler/kaydırır.\n\n"
-        "ℹ️ *Gelişmiş Kullanım (Opsiyonel):*\n"
-        "Bot varsayılan olarak **son 60 günün/saatin** verisine bakıp **önümüzdeki 7 günü/saati** tahmin eder. "
-        "Ancak isterseniz geçmiş veri (context) ve tahmin edilecek (horizon) sayılarını kendiniz belirleyebilirsiniz:\n\n"
-        "`/tahmin <SEMBOL> <TÜR> <GEÇMİŞ> <GELECEK>`\n\n"
-        "Örnek: `/tahmin THYAO saat 120 12`\n"
-        "_(Yukarıdaki komut son 120 saatlik veriye bakıp 12 saatlik tahmin yapar.)_\n\n"
-        "⚡️ *BIST 50 Tarama ve Raporlama Komutları:*\n"
-        "`/gunici` - Seans sonuna kadar yükselme potansiyeli en yüksek 3 hisseyi (grafiksiz) listeler.\n"
-        "`/saatlik` - Hata payı (MAPE) en düşük olan 3 hisseyi ve grafiklerini gönderir.\n"
-        "`/sabah` - Günün en iyi, çoklu zaman dilimi teyitli (RSI/EMA5) 3 hissesini ve grafiklerini gönderir."
+        "🤖 *TimesFM Tahmin Botu Komut Kılavuzu*\n\n"
+        "⚡️ *Tahmin Komutları:*\n"
+        "• `/tahmin <SEM> <TÜR>`: Standart günlük tahmin yapar.\n"
+        "  _Örn: `/tahmin THYAO bist` veya `/tahmin BTC/USDT crypto`_\n"
+        "• `/tahmin <SEM> bist gün`: **7 Günlük** günlük grafik tahmini (En düşük MAPE optimize).\n"
+        "• `/tahmin <SEM> bist saat`: **Seans sonuna kadar (18:00 TRT)** seans içi saatlik grafik tahmini.\n"
+        "• `/tahmin <SEM> saat` / `saatlik`: Diğer türlerde saatlik grafik tahmini.\n"
+        "  _Örn: `/tahmin BTC/USDT crypto saat`_\n\n"
+        "⭐️ *Favori ve Karşılaştırma Komutları:*\n"
+        "• `/favoriekle <SEM> <TÜR>`: Varlığı favorilere ekler.\n"
+        "• `/favoricikar <SEM>`: Varlığı favorilerden çıkarır.\n"
+        "• `/favoriler`: Favori listenizin 7 günlük tahmin özetini sunar.\n"
+        "• `/kiyasla <SEM1> <SEM2> <TÜR>`: İki varlığın kazanç potansiyelini karşılaştırır.\n\n"
+        "📊 *BIST 50 Tarama Komutları:*\n"
+        "• `/gunici`: Seans sonuna kadarki en yüksek potansiyelli 3 hisseyi listeler.\n"
+        "• `/saatlik`: Hata payı (MAPE) en düşük 3 hisseyi grafikli listeler.\n"
+        "• `/sabah`: Çoklu zaman dilimi teyitli (EMA5/RSI) günün en iyi 3 hissesini grafikli listeler.\n\n"
+        "🧹 *Diğer:*\n"
+        "• `/temizle`: Ekrandaki eski grafikleri gizlemek için boşluk bırakır.\n"
+        "• `/help` veya `/start`: Bu menüyü gösterir.\n\n"
+        "ℹ️ *Gelişmiş Manuel Kullanım:*\n"
+        "`/tahmin <SEM> <TÜR> <GEÇMİŞ> <GELECEK>`\n"
+        "_Örn: `/tahmin THYAO saat 120 12` (Son 120 bar veriyle 12 bar tahmin)_"
     )
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
@@ -118,6 +112,12 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif 'saatlik' in args_lower:
         interval = '1h'
         args_lower.remove('saatlik')
+    elif 'gün' in args_lower:
+        interval = '1d'
+        args_lower.remove('gün')
+    elif 'günlük' in args_lower:
+        interval = '1d'
+        args_lower.remove('günlük')
         
     if not args_lower:
         await update.message.reply_text("⚠️ Lütfen bir sembol belirtin.")
@@ -148,21 +148,38 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(numbers) >= 2:
         horizon_len = numbers[1]
         
+    # BIST Saatlik tahminlerde seans sonuna kadar (18:00 TR) dinamik horizon
+    if interval == '1h' and asset_type == 'bist' and len(numbers) < 2:
+        tz = pytz.timezone('Europe/Istanbul')
+        now = datetime.datetime.now(tz)
+        if now.weekday() < 5 and 10 <= now.hour < 18:
+            horizon_len = 18 - now.hour
+            if horizon_len <= 0:
+                horizon_len = 8
+        else:
+            horizon_len = 8
+            
     is_auto_optimized = False
     interval_str = "Saatlik" if interval == '1h' else "Günlük"
     
-    # BIST Saatlik tahminlerde otomatik optimizasyon (Eğer kullanıcı manuel geçmiş gün girmediyse)
-    if interval == '1h' and asset_type == 'bist' and len(numbers) < 1:
+    # BIST tahminlerinde otomatik optimizasyon (Eğer kullanıcı manuel geçmiş gün/saat girmediyse)
+    if asset_type == 'bist' and len(numbers) < 1:
         is_auto_optimized = True
-        status_msg = await update.message.reply_text(f"🔍 *[{symbol}]* için en düşük hata payı veren veri aralığı hesaplanıyor (MAPE Optimizasyonu)...", parse_mode='Markdown')
+        status_msg = await update.message.reply_text(f"🔍 *[{symbol}]* için en düşük hata payı veren {interval_str.lower()} veri aralığı hesaplanıyor (MAPE Optimizasyonu)...", parse_mode='Markdown')
         
-        candidates = [32, 64, 96, 128]
+        if interval == '1h':
+            candidates = [32, 64, 96, 128]
+            default_c = 60
+        else:
+            candidates = [60, 90, 120, 250]
+            default_c = 90
+            
         best_mape_val = float('inf')
-        best_c = 60
+        best_c = default_c
         
         # Ayrı thread'lerde hızlıca MAPE'leri hesapla
         for c in candidates:
-            mape_candidate = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', c, horizon_len)
+            mape_candidate = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, interval, c, horizon_len)
             if mape_candidate is not None and mape_candidate < best_mape_val:
                 best_mape_val = mape_candidate
                 best_c = c
@@ -172,7 +189,8 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context_len = best_c
             best_mape = best_mape_val
             
-    msg = await update.message.reply_text(f"⏳ *[{symbol}]* için TimesFM {interval_str} tahmin grafiği hazırlanıyor... Lütfen bekleyin. (Geçmiş: {context_len} saat)", parse_mode='Markdown')
+    unit_label = "saat" if interval == '1h' else "gün"
+    msg = await update.message.reply_text(f"⏳ *[{symbol}]* için TimesFM {interval_str} tahmin grafiği hazırlanıyor... Lütfen bekleyin. (Geçmiş: {context_len} {unit_label})", parse_mode='Markdown')
     
     try:
         # Yapay zeka modeli (plt işlemleri vs) senkron (blocking) çalıştığı için 
@@ -195,18 +213,20 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tp_sl_text = ""
             mape_text = ""
             
-            if interval == '1h' and asset_type == 'bist':
+            if asset_type == 'bist':
                 # Eğer optimizasyonda zaten hesaplanmadıysa burada hesapla
                 if best_mape is None:
-                    best_mape = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', context_len, horizon_len)
+                    best_mape = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, interval, context_len, horizon_len)
                 
                 if best_mape is not None:
                     opt_tag = " (En Düşük Hata)" if is_auto_optimized else ""
-                    mape_text = f"⚙️ Veri Uzunluğu: *{context_len} saat*{opt_tag}\n📉 AI Hata Payı (MAPE): *%{best_mape:.2f}*\n"
+                    unit_str = "saat" if interval == '1h' else "gün"
+                    mape_text = f"⚙️ Veri Uzunluğu: *{context_len} {unit_str}*{opt_tag}\n📉 AI Hata Payı (MAPE): *%{best_mape:.2f}*\n"
                     
                 import data_sources
                 import pandas as pd
-                _, _, df_data = await asyncio.to_thread(data_sources.get_bist_data, symbol)
+                df_1d_b, _, df_1h_b = await asyncio.to_thread(data_sources.get_bist_data, symbol)
+                df_data = df_1h_b if interval == '1h' else df_1d_b
                 if df_data is not None and not df_data.empty:
                     last_close = df_data['close'].iloc[-1]
                     tr1 = df_data['high'] - df_data['low']
@@ -526,12 +546,21 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
                         report_lines.append(f"🔴 *{symbol}*: Elendi (Günlük trend negatif)")
                         continue
 
+                    # Saatlik MAPE Optimizasyonu
+                    best_mape_val = float('inf')
+                    best_c = 60
+                    for c in [32, 64, 96, 128]:
+                        mape_candidate = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', c, 8)
+                        if mape_candidate is not None and mape_candidate < best_mape_val:
+                            best_mape_val = mape_candidate
+                            best_c = c
+
                     # Saatlik Tahmin (Strategy A için Çoklu Zaman Dilimi Teyidi)
                     res_1h = await asyncio.to_thread(
                         predict_future,
                         symbol=symbol,
                         asset_type=asset_type,
-                        context_len=60,
+                        context_len=best_c,
                         horizon_len=8,
                         show_plot=False,
                         save_plot=False,
@@ -581,7 +610,9 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
                             'tp': tp,
                             'sl': sl,
                             'tp_pct': tp_pct,
-                            'sl_pct': sl_pct
+                            'sl_pct': sl_pct,
+                            'best_context_1h': best_c,
+                            'mape_1h': best_mape_val if best_mape_val != float('inf') else None
                         })
                     else:
                         report_lines.append(f"❓ *{symbol}*: Saatlik veri alınamadı.")
@@ -598,7 +629,8 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
             report_lines.append("\n🏆 *Günün En İyi Tahminleri (Teyitli)*:")
             for i, cand in enumerate(top_3, 1):
                 sym = cand['symbol']
-                report_lines.append(f"{i}️⃣ *{sym}*: Günlük +{cand['pct_change_1d']:.1f}% | Saatlik +{cand['pct_change_1h']:.1f}% | RSI: {cand['rsi']:.1f}")
+                mape_info = f" (Hata: %{cand['mape_1h']:.2f})" if cand.get('mape_1h') is not None else ""
+                report_lines.append(f"{i}️⃣ *{sym}*: Günlük +{cand['pct_change_1d']:.1f}% | Saatlik +{cand['pct_change_1h']:.1f}%{mape_info} | RSI: {cand['rsi']:.1f}")
                 if cand.get('tp', 0) > 0:
                     report_lines.append(f"   🎯 Hedef (TP): {cand['tp']:.2f} (+%{cand['tp_pct']:.2f})")
                     report_lines.append(f"   🛑 Stop (SL): {cand['sl']:.2f} (-%{cand['sl_pct']:.2f})")
@@ -617,7 +649,7 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
                         predict_future,
                         symbol=sym,
                         asset_type='bist',
-                        context_len=60,
+                        context_len=cand.get('best_context_1h', 60),
                         horizon_len=8,
                         show_plot=False,
                         save_plot=True,
@@ -628,7 +660,7 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_photo(
                                 chat_id=int(user_id_str), 
                                 photo=photo, 
-                                caption=f"🌟 *{sym}* Saatlik Detay Grafiği", 
+                                caption=f"🌟 *{sym}* Saatlik Detay Grafiği (Geçmiş: {cand.get('best_context_1h', 60)}s, Hata: %{cand.get('mape_1h', 0.0):.2f})", 
                                 parse_mode='Markdown'
                             )
                 except Exception as e:
@@ -804,11 +836,20 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if pct_change_1d <= 0:
                             continue
                         
+                        # Saatlik MAPE Optimizasyonu
+                        best_mape_val = float('inf')
+                        best_c = 60
+                        for c in [32, 64, 96, 128]:
+                            mape_candidate = evaluate_model_accuracy(symbol, 'bist', '1h', c, 8)
+                            if mape_candidate is not None and mape_candidate < best_mape_val:
+                                best_mape_val = mape_candidate
+                                best_c = c
+
                         # Saatlik Tahmin
                         res_1h = predict_future(
                             symbol=symbol,
                             asset_type='bist',
-                            context_len=60,
+                            context_len=best_c,
                             horizon_len=8,
                             show_plot=False,
                             save_plot=False,
@@ -855,12 +896,14 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 'sl': sl,
                                 'tp_pct': tp_pct,
                                 'sl_pct': sl_pct,
-                                'price': last_close
+                                'price': last_close,
+                                'best_context_1h': best_c,
+                                'mape_1h': best_mape_val if best_mape_val != float('inf') else None
                             })
                 except Exception as e:
                     logger.error(f"Scan error for {symbol}: {e}")
             return scanned_candidates
-
+ 
         candidates = await asyncio.to_thread(scan_all_bist50)
         
         # Günlük beklenen yükseliş oranına göre sırala
@@ -871,8 +914,9 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             report_lines.append("🏆 *Günün En Çok Yükseliş Beklenen 3 Hissesi (Çoklu Zaman Dilimi Teyitli)*:\n")
             for i, cand in enumerate(top_3, 1):
                 sym = cand['symbol']
+                mape_info = f" (Hata: %{cand['mape_1h']:.2f})" if cand.get('mape_1h') is not None else ""
                 report_lines.append(f"{i}️⃣ *{sym}* - Güncel: {cand['price']:.2f}\n"
-                                     f"   📈 Günlük Beklenen: *+{cand['pct_change_1d']:.1f}%* | Saatlik: *+{cand['pct_change_1h']:.1f}%*\n"
+                                     f"   📈 Günlük Beklenen: *+{cand['pct_change_1d']:.1f}%* | Saatlik: *+{cand['pct_change_1h']:.1f}%*{mape_info}\n"
                                      f"   🔥 RSI: {cand['rsi']:.1f}\n"
                                      f"   🎯 Hedef (TP): {cand['tp']:.2f} (+%{cand['tp_pct']:.2f})\n"
                                      f"   🛑 Stop (SL): {cand['sl']:.2f} (-%{cand['sl_pct']:.2f})\n")
@@ -890,7 +934,7 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     predict_future,
                     symbol=sym,
                     asset_type='bist',
-                    context_len=60,
+                    context_len=cand.get('best_context_1h', 60),
                     horizon_len=8,
                     show_plot=False,
                     save_plot=True,
@@ -900,7 +944,7 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(res_plot[0], 'rb') as photo:
                         await update.message.reply_photo(
                             photo=photo, 
-                            caption=f"🌟 *{sym}* Saatlik Detay Grafiği", 
+                            caption=f"🌟 *{sym}* Saatlik Detay Grafiği (Geçmiş: {cand.get('best_context_1h', 60)}s, Hata: %{cand.get('mape_1h', 0.0):.2f})", 
                             parse_mode='Markdown'
                         )
             except Exception as e:
