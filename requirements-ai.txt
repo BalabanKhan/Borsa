@@ -1,0 +1,6 @@
+timesfm[torch]
+pandas
+numpy
+matplotlib
+ccxt
+yfinance

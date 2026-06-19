@@ -1094,6 +1094,7 @@ def build_breakout_scores(
     is_liquidity_window=True,
     strategy_type="TREND_BREAKOUT",
     is_long=True,
+    rsi=None,
 ):
     """Kırılım/Squeeze stratejileri (BIST 3/5, KRİPTO 3) için skor paketi."""
     from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
@@ -1118,6 +1119,15 @@ def build_breakout_scores(
         strategy_type=strategy_type,
         is_long=is_long
     )
+    
+    # Overbought/Oversold breakout penalty
+    if rsi is not None and not _is_nan(rsi):
+        from config import BREAKOUT_RSI_MAX_LIMIT
+        if is_long and rsi > BREAKOUT_RSI_MAX_LIMIT:
+            conflict_penalty -= 15.0
+        elif not is_long and rsi < (100.0 - BREAKOUT_RSI_MAX_LIMIT):
+            conflict_penalty -= 15.0
+
     squeeze_score = inverse_linear_score(bb_width, SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX) if bb_width else SOFT_UNCERTAINTY_PENALTY
 
     return {
@@ -1309,9 +1319,10 @@ def build_sniper_scores(
     dg_gap_pct=0.0,
     cmf=0.0,
     is_liquidity_window=True,
-    strategy_type="TREND_BREAKOUT",
+    strategy_type="MEAN_REVERSION",
     is_long=True,
     is_squeeze=None,
+    asset_trend_aligned=True,
 ):
     """Keskin Nişancı stratejisi (BIST Sniper, KRIPTO Sniper) için skor paketi."""
     from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
@@ -1336,6 +1347,9 @@ def build_sniper_scores(
         strategy_type=strategy_type,
         is_long=is_long
     )
+
+    if not asset_trend_aligned:
+        conflict_penalty -= 10.0
 
     pb_min, pb_max = _get_sniper_pb_limits(market, is_long)
 

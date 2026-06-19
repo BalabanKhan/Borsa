@@ -266,7 +266,7 @@ def _check_bist_3_squeeze_breakout(ctx):
         volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
         rr=_rr3, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
-        dg_gap_pct=gap_pct
+        dg_gap_pct=gap_pct, rsi=last_1h.get('RSI_14')
     )
     _conv3 = calculate_conviction(_scores3, ctx=ctx)
     if _conv3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -329,7 +329,8 @@ def _check_bist_4_sniper_ote(ctx):
                         ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
                         volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
                         rr=_rr4, regime=bist_regime,
-                        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+                        rsi=last_1h.get('RSI_14')
                     )
                     if has_fvg:
                         _scores4["engulfing"] = min(100.0, _scores4["engulfing"] + config.SMC_FVG_BONUS)
@@ -406,7 +407,10 @@ def _check_bist_5_vol_squeeze_long(ctx, prev_bbu_1d, guarded_vol_sma):
         
     sq_mid = (last_1h['high'] + last_1h['low']) / 2
     ema21_1h = last_1h.get('EMA_21', current_price * config.BIST_VWAP_EMA_SL_FALLBACK_LONG)
-    sl = min(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid
+    sl = min(
+        min(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid,
+        current_price * (1.0 - config.BIST_MIN_SL_PCT)
+    )
     _tp5u = current_price + (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr5u = abs(_tp5u - current_price) / max(abs(current_price - sl), 1e-8)
     
@@ -416,7 +420,8 @@ def _check_bist_5_vol_squeeze_long(ctx, prev_bbu_1d, guarded_vol_sma):
         ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
         volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
         rr=_rr5u, regime=bist_regime,
-        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+        rsi=last_1h.get('RSI_14')
     )
     _conv5u = calculate_conviction(_scores5u, ctx=ctx)
     if _conv5u.grade not in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -462,7 +467,10 @@ def _check_bist_5_vol_squeeze_short(ctx, prev_bbl_1d, guarded_vol_sma):
         
     sq_mid = (last_1h['high'] + last_1h['low']) / 2
     ema21_1h = last_1h.get('EMA_21', current_price * config.BIST_VWAP_EMA_SL_FALLBACK_SHORT)
-    sl = max(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid
+    sl = max(
+        max(sq_mid, ema21_1h) if not pd.isna(ema21_1h) else sq_mid,
+        current_price * (1.0 + config.BIST_MIN_SL_PCT)
+    )
     _tp5d = current_price - (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr5d = abs(current_price - _tp5d) / max(abs(sl - current_price), 1e-8)
     
@@ -472,7 +480,8 @@ def _check_bist_5_vol_squeeze_short(ctx, prev_bbl_1d, guarded_vol_sma):
         ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
         volume=last_1h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_1h['volume'] * current_price,
         rr=_rr5d, regime=bist_regime,
-        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+        macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+        is_long=False, rsi=last_1h.get('RSI_14')
     )
     _conv5d = calculate_conviction(_scores5d, ctx=ctx)
     if _conv5d.grade not in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -766,11 +775,15 @@ def _check_bist_10_sniper(ctx):
     sweep_ok, _ = sniper_detect_sweep(df_1h_sniper, swing_lows_s, point_type="low")
     has_sfp = sweep_ok
     
-    sl = max(bbl_s_last * config.BIST_SQUEEZE_SL_BBL_MULT, current_price * config.BIST_SQUEEZE_SL_MIN_MULT)
+    sl = min(
+        max(bbl_s_last * config.BIST_SQUEEZE_SL_BBL_MULT, current_price * config.BIST_SQUEEZE_SL_MIN_MULT),
+        current_price * (1.0 - config.BIST_MIN_SL_PCT)
+    )
     _tp_sn = current_price + 2.0 * (current_price - sl)
     _rr_sn = abs(_tp_sn - current_price) / max(abs(current_price - sl), 1e-8)
     guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h.get('vol_sma_20', 0))
     
+    asset_trend_aligned = last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float("inf"))
     raw_vars = locals()
     _scores_sn = build_sniper_scores(
         price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=last_1d.get('SMA_50'),
@@ -779,7 +792,8 @@ def _check_bist_10_sniper(ctx):
         rr=_rr_sn, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol),
         bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg, sfp_present=has_sfp,
-        market="BIST", is_squeeze=is_squeeze
+        market="BIST", is_squeeze=is_squeeze,
+        asset_trend_aligned=asset_trend_aligned
     )
     _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS, ctx=ctx)
     if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
@@ -1072,7 +1086,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     raw_sl_dist = ATR_MULTIPLIER_BIST * atr_val
     dynamic_sl_dist = max(
         min(raw_sl_dist, current_price * ATR_CAP_BIST),
-        current_price * config.MIN_SL_PCT
+        current_price * config.BIST_MIN_SL_PCT
     )
     sl_pct = (dynamic_sl_dist / current_price) * 100
     bist_regime = _get_bist_regime(xu100_daily)

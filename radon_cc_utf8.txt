@@ -1,0 +1,207 @@
+﻿core\defensive_engine.py
+    M 16:4 DefensiveStateGuard.save_state_atomic - C
+    C 9:0 DefensiveStateGuard - C
+    M 65:4 DefensiveStateGuard.load_state_safe - B
+    M 128:4 DefensiveExceptionManager.swallow_safely - A
+    C 110:0 DefensiveExceptionManager - A
+    M 119:4 DefensiveExceptionManager.log_and_raise - A
+    M 160:4 DefensiveExceptionManager.is_system_in_safe_mode - A
+    M 164:4 DefensiveExceptionManager.reset_safe_mode - A
+core\notifier.py
+    M 104:4 NotificationService.format_signal_message - C
+    M 28:4 NotificationService.send_message - B
+    C 13:0 NotificationService - B
+    M 14:4 NotificationService.__init__ - B
+    M 74:4 NotificationService.retry_failed_messages - B
+    M 53:4 NotificationService._save_failed_message - A
+core\scanner.py
+    M 97:4 ScannerService._process_signals - C
+    C 19:0 ScannerService - A
+    M 27:4 ScannerService._load_cooldown - A
+    M 37:4 ScannerService._save_cooldown - A
+    M 47:4 ScannerService._cleanup_cooldown - A
+    M 51:4 ScannerService._save_scan_metrics - A
+    M 73:4 ScannerService.run_scan - A
+    M 159:4 ScannerService._is_on_cooldown - A
+    M 169:4 ScannerService._is_already_active - A
+    M 173:4 ScannerService._mark_as_day_trade - A
+    M 23:4 ScannerService.__init__ - A
+    M 165:4 ScannerService._set_cooldown - A
+core\scheduler.py
+    M 92:4 TaskScheduler.close_day_trades - C
+    M 142:4 TaskScheduler.run_weekly_tasks - B
+    M 56:4 TaskScheduler.check_prices - B
+    C 19:0 TaskScheduler - B
+    M 76:4 TaskScheduler._process_active_prices - B
+    M 128:4 TaskScheduler.send_heartbeat - A
+    M 120:4 TaskScheduler.send_daily_snapshot - A
+    M 20:4 TaskScheduler.__init__ - A
+    M 30:4 TaskScheduler.setup_jobs - A
+    M 52:4 TaskScheduler.start - A
+strategies\bear_hunter.py
+    F 50:0 analyze_bear_hunter - F
+strategies\bist.py
+    F 926:0 _build_bist12_signal - D
+    F 38:0 _check_bist_1_dip_hunter - C
+    F 356:0 _get_bist_daily_squeeze_setup - C
+    F 699:0 _get_bist_10_sniper_setup - C
+    F 1020:0 analyze_strategies_bist - C
+    F 577:0 _check_bist_7_vwap - C
+    F 284:0 _check_bist_4_sniper_ote - C
+    F 828:0 _build_bist11_signal - C
+    F 119:0 _check_bist_2_trend_following - C
+    F 198:0 _get_bist_3_bb_width_prev - C
+    F 382:0 _check_bist_5_vol_squeeze_long - C
+    F 521:0 _check_bist_6_rs - C
+    F 439:0 _check_bist_5_vol_squeeze_short - C
+    F 219:0 _check_bist_3_squeeze_breakout - B
+    F 1113:0 _check_orb_long - B
+    F 1161:0 _check_orb_short - B
+    F 802:0 _detect_bist11_pattern - B
+    F 883:0 _check_bist_11_candlestick - B
+    F 648:0 _check_bist_8_obv - B
+    F 993:0 _check_bist_12_chart_patterns - B
+    F 917:0 _check_bist12_timing_filters - B
+    F 1208:0 scan_orb_bist - B
+    F 186:0 _is_bist_3_retest_and_price_ok - A
+    F 495:0 _check_bist_5_vol_squeeze - A
+    F 738:0 _check_bist_10_sniper - A
+    F 819:0 _verify_bist11_volume - A
+strategies\crypto.py
+    F 1013:0 _check_crypto_sniper_1h - D
+    F 543:0 _check_crypto_4_sniper_ote_long - D
+    F 338:0 _check_crypto_short_1_fomo - C
+    F 642:0 _check_crypto_4_sniper_ote_short - C
+    F 749:0 _check_crypto_5_vol_squeeze - C
+    F 38:0 _check_crypto_1_liquidation - C
+    F 403:0 _check_crypto_short_2_waterfall - C
+    F 463:0 _check_crypto_short_3_cliff - C
+    F 227:0 _is_breakout_setup - C
+    F 113:0 _check_mega_trend_1d_squeeze - C
+    F 807:0 _check_crypto_6_vwap - C
+    F 137:0 _check_mega_trend_4h_indicators - C
+    F 274:0 _check_crypto_3_breakout - C
+    F 164:0 _check_crypto_2_mega_trend - B
+    F 1090:0 analyze_strategies_crypto - B
+    F 255:0 _is_breakout_retest_valid - B
+    F 860:0 _check_crypto_7_obv - B
+    F 129:0 _check_mega_trend_1d_trend - B
+    F 154:0 _is_mega_trend_valid - A
+    F 958:0 _check_crypto_sniper_1h_short - A
+    F 907:0 _check_crypto_sniper_1h_long - A
+    F 530:0 _check_crypto_shorts - A
+    F 742:0 _check_crypto_4_sniper_ote - A
+strategies\emtia.py
+    F 53:0 analyze_strategies_emtia - F
+strategies\helpers.py
+    F 44:0 _extract_raw_indicators - C
+    F 198:0 _apply_rr_filter - C
+    F 162:0 _resolve_dual_signals - B
+    F 114:0 _adx_momentum_ok - B
+    F 131:0 _apply_volume_sma_guard - B
+    F 142:0 _is_unclosed_candle - B
+    F 287:0 _get_bist_regime - B
+    F 316:0 _apply_regime_filter - B
+    F 103:0 _is_meaningful_volume - A
+    F 72:0 _get_consecutive_sl - A
+    F 85:0 _is_darth_maul - A
+    F 94:0 _get_darth_maul_ratio - A
+    F 343:0 _has_absolute_hourly_volume - A
+    F 353:0 _is_funding_safe_for_short - A
+    F 363:0 _is_in_liquidity_window - A
+strategies\scanner.py
+    F 58:0 scan_all_markets - D
+indicators\anti_manipulation.py
+    F 83:0 sniper_calculate_ote_body - B
+    F 38:0 calculate_cmf - B
+    F 9:0 check_bullish_engulfing_momentum - A
+    F 73:0 is_cmf_wash_trade - A
+indicators\chart_patterns.py
+    F 56:0 detect_squeeze - D
+    F 402:0 check_near_support - C
+    F 697:0 detect_chart_patterns - C
+    F 585:0 _check_falling_wedge - C
+    F 148:0 detect_obv_accumulation_bist - C
+    F 483:0 _check_tobo - C
+    F 623:0 _check_ascending_triangle - C
+    F 663:0 _check_diamond_bottom - C
+    F 322:0 detect_bullish_candlestick_pattern - C
+    F 101:0 detect_obv_accumulation - C
+    F 20:0 _determine_squeeze_direction - C
+    F 314:0 _check_pattern_three_white_soldiers - C
+    F 521:0 _check_double_bottom - C
+    F 35:0 _verify_squeeze_momentum - B
+    F 204:0 calculate_orb_cage - B
+    F 285:0 _check_pattern_bullish_engulfing - B
+    F 554:0 _check_bull_flag - B
+    F 9:0 _check_squeeze_count - B
+    F 239:0 calculate_time_specific_rvol - B
+    F 457:0 _check_rectangle_breakout - B
+    F 292:0 _check_pattern_piercing_line - B
+    F 306:0 _check_pattern_morning_star - B
+    F 267:0 _check_pattern_hammer - A
+    F 273:0 _check_pattern_inverted_hammer - A
+    F 279:0 _check_pattern_dragonfly_doji - A
+    F 299:0 _check_pattern_tweezer_bottom - A
+    F 50:0 _verify_squeeze_volume - A
+    F 445:0 _check_session_aware_volume - A
+    F 399:0 _check_morning_star - A
+indicators\core.py
+    F 122:0 detect_vwap_bounce - C
+    F 168:0 calculate_relative_strength - C
+    F 16:0 inject_smart_indicators - B
+    F 90:0 calculate_anchored_vwap_series - A
+    F 115:0 calculate_anchored_vwap - A
+indicators\harmonics.py
+    F 57:0 _check_5_pivot_harmonics - C
+    F 99:0 _check_4_pivot_harmonics - C
+    F 133:0 _check_harmonic_patterns - B
+    F 6:0 _check_gartley - B
+    F 20:0 _check_bat - B
+    F 34:0 _check_abcd - B
+    F 47:0 _get_harmonic_pivots - A
+indicators\smc.py
+    F 275:0 detect_bearish_divergence - D
+    F 204:0 detect_premium_rejection - D
+    F 344:0 detect_bullish_divergence - D
+    F 156:0 detect_sfp - D
+    F 33:0 sniper_find_swing_points - C
+    F 125:0 sniper_detect_fvg - C
+    F 9:0 sniper_get_htf_bias - B
+    F 68:0 sniper_detect_sweep - B
+    F 93:0 sniper_detect_msb - B
+    F 111:0 sniper_calculate_ote - A
+trade_tracker\calculations.py
+    F 257:0 _get_last_completed_candle_close - C
+    F 9:0 _check_scale_out - B
+    F 112:0 _check_danger_zone - B
+    F 72:0 _check_funding_shield - B
+    F 154:0 _check_sfp_mfe_time_filter - B
+    F 191:0 _check_time_stop - B
+    F 229:0 _check_black_swan - B
+trade_tracker\engine.py
+    F 160:0 _process_active_trade_checks - C
+    F 335:0 check_active_trades - C
+    F 25:0 add_trade - C
+    F 231:0 _cb_on_trade_closed_helper - C
+    F 287:0 _handle_closed_trade_accounting - C
+    F 70:0 _format_close_message - B
+    F 155:0 _stamp_exit_data - A
+trade_tracker\repository.py
+    F 131:0 _write_trade_journal_csv - D
+    F 21:0 _sanitize_for_json - C
+    F 99:0 _align_and_migrate_journal_csv - B
+    F 257:0 get_learning_context - B
+    F 72:0 _archive_closed_trades - A
+    F 49:0 _save_trades_unlocked - A
+    F 15:0 _load_trades_unlocked - A
+    F 56:0 load_trades - A
+    F 64:0 save_trades - A
+trade_tracker\trailing.py
+    F 83:0 _calculate_short_trailing_stop - C
+    F 34:0 _calculate_long_trailing_stop - C
+    F 140:0 _update_trailing_stop - C
+    F 6:0 _get_structural_floor - C
+
+185 blocks (classes, functions, methods) analyzed.
+Average complexity: C (10.124324324324323)
