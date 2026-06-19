@@ -734,8 +734,8 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 report_lines.append(f"❌ *{symbol}*: Hata oluştu.")
                 
-        # En iyi 3 hisseyi seç
-        candidates.sort(key=lambda x: x['pct_change_1d'], reverse=True)
+        # En iyi 3 hisseyi seç (Düşük MAPE öncelikli)
+        candidates.sort(key=lambda x: x['mape_1h'] if x['mape_1h'] is not None else 999.0)
         top_3 = candidates[:3]
         
         if top_3:
@@ -1017,8 +1017,8 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
  
         candidates = await asyncio.to_thread(scan_all_bist50)
         
-        # Günlük beklenen yükseliş oranına göre sırala
-        candidates.sort(key=lambda x: x['pct_change_1d'], reverse=True)
+        # Hata payı (MAPE) en düşük olanı (en güveniliri) en başa alacak şekilde sırala
+        candidates.sort(key=lambda x: x['mape_1h'] if x['mape_1h'] is not None else 999.0)
         top_3 = candidates[:3]
         
         if top_3:
