@@ -138,6 +138,7 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     context_len = 60
     horizon_len = 7
+    best_mape = None
     
     numbers = [int(a) for a in args_lower[1:] if a.isdigit()]
     if len(numbers) >= 1:
@@ -145,8 +146,31 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(numbers) >= 2:
         horizon_len = numbers[1]
         
+    is_auto_optimized = False
     interval_str = "Saatlik" if interval == '1h' else "Günlük"
-    msg = await update.message.reply_text(f"⏳ *[{symbol}]* için TimesFM {interval_str} tahmin grafiği hazırlanıyor... Lütfen bekleyin.", parse_mode='Markdown')
+    
+    # BIST Saatlik tahminlerde otomatik optimizasyon (Eğer kullanıcı manuel geçmiş gün girmediyse)
+    if interval == '1h' and asset_type == 'bist' and len(numbers) < 1:
+        is_auto_optimized = True
+        status_msg = await update.message.reply_text(f"🔍 *[{symbol}]* için en düşük hata payı veren veri aralığı hesaplanıyor (MAPE Optimizasyonu)...", parse_mode='Markdown')
+        
+        candidates = [32, 64, 96, 128]
+        best_mape_val = float('inf')
+        best_c = 60
+        
+        # Ayrı thread'lerde hızlıca MAPE'leri hesapla
+        for c in candidates:
+            mape_candidate = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', c, horizon_len)
+            if mape_candidate is not None and mape_candidate < best_mape_val:
+                best_mape_val = mape_candidate
+                best_c = c
+        
+        await status_msg.delete()
+        if best_mape_val != float('inf'):
+            context_len = best_c
+            best_mape = best_mape_val
+            
+    msg = await update.message.reply_text(f"⏳ *[{symbol}]* için TimesFM {interval_str} tahmin grafiği hazırlanıyor... Lütfen bekleyin. (Geçmiş: {context_len} saat)", parse_mode='Markdown')
     
     try:
         # Yapay zeka modeli (plt işlemleri vs) senkron (blocking) çalıştığı için 
@@ -170,10 +194,13 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mape_text = ""
             
             if interval == '1h' and asset_type == 'bist':
-                # MAPE Hata Payı
-                mape = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', context_len, horizon_len)
-                if mape is not None:
-                    mape_text = f"📉 AI Hata Payı (MAPE): *%{mape:.2f}*\n"
+                # Eğer optimizasyonda zaten hesaplanmadıysa burada hesapla
+                if best_mape is None:
+                    best_mape = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', context_len, horizon_len)
+                
+                if best_mape is not None:
+                    opt_tag = " (En Düşük Hata)" if is_auto_optimized else ""
+                    mape_text = f"⚙️ Veri Uzunluğu: *{context_len} saat*{opt_tag}\n📉 AI Hata Payı (MAPE): *%{best_mape:.2f}*\n"
                     
                 import data_sources
                 import pandas as pd
@@ -612,17 +639,25 @@ async def saatlik(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """BIST 50 içinden TimesFM hata payı en düşük olan 3 hisseyi bulur."""
     if not await check_auth(update): return
     
-    msg = await update.message.reply_text("⏳ *Saatlik AI Taraması Başladı*\nBIST 50 hisseleri için yapay zekanın geçmiş hata payları (MAPE) hesaplanıyor...\n_(Bu işlem 5-10 dakika sürebilir, lütfen bekleyin)_", parse_mode='Markdown')
+    msg = await update.message.reply_text("⏳ *Saatlik AI Taraması Başladı*\nBIST 50 hisseleri için en düşük hata payı veren veri aralığı hesaplanıyor (32, 64, 96, 128 saat candidates)...\n_(Bu işlem 5-10 dakika sürebilir, lütfen bekleyin)_", parse_mode='Markdown')
     
     try:
         from config import TOP_BIST_50
         
         def run_hourly_scan():
             results = []
+            candidates = [32, 64, 96, 128]
             for ticker in TOP_BIST_50:
-                mape = evaluate_model_accuracy(ticker, asset_type='bist', interval='1h', context_len=60, horizon_len=7)
-                if mape is not None:
-                    results.append({'symbol': ticker, 'mape': mape})
+                best_mape = float('inf')
+                best_c = 60
+                for c in candidates:
+                    mape = evaluate_model_accuracy(ticker, asset_type='bist', interval='1h', context_len=c, horizon_len=7)
+                    if mape is not None and mape < best_mape:
+                        best_mape = mape
+                        best_c = c
+                
+                if best_mape != float('inf'):
+                    results.append({'symbol': ticker, 'mape': best_mape, 'best_context': best_c})
             
             # Hata oranına göre küçükten büyüğe sırala (En düşük hata = En iyi tahmin)
             results.sort(key=lambda x: x['mape'])
@@ -633,7 +668,8 @@ async def saatlik(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_results = []
             for item in top_3:
                 sym = item['symbol']
-                res = predict_future(symbol=sym, asset_type='bist', interval='1h', context_len=60, horizon_len=7, show_plot=False, save_plot=True)
+                c_len = item['best_context']
+                res = predict_future(symbol=sym, asset_type='bist', interval='1h', context_len=c_len, horizon_len=7, show_plot=False, save_plot=True)
                 if res and res[0]:
                     image_path, final_pred, pct_change, rsi = res
                     
@@ -667,7 +703,8 @@ async def saatlik(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         'sl': sl,
                         'tp_pct': tp_pct,
                         'sl_pct': sl_pct,
-                        'price': last_close
+                        'price': last_close,
+                        'best_context': c_len
                     })
             return final_results
 
@@ -680,6 +717,7 @@ async def saatlik(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, stock in enumerate(best_stocks, 1):
                 trend = "🟢" if stock['pct_change'] > 0 else "🔴"
                 text += f"{i}️⃣ {trend} *{stock['symbol']}* - Güncel: {stock['price']:.2f}\n"
+                text += f"   ⚙️ Optimum Veri Uzunluğu: *{stock['best_context']} saat*\n"
                 text += f"   📉 AI Hata Payı (MAPE): *%{stock['mape']:.2f}*\n"
                 text += f"   📈 Beklenen Değişim: *{stock['pct_change']:+.2f}%*\n"
                 text += f"   🎯 Hedef (TP): {stock['tp']:.2f} (+%{stock['tp_pct']:.2f})\n"
@@ -695,7 +733,7 @@ async def saatlik(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_photo(
                                 chat_id=update.effective_chat.id, 
                                 photo=photo, 
-                                caption=f"🌟 *{stock['symbol']}* Saatlik AI Grafiği (Hata: %{stock['mape']:.2f})", 
+                                caption=f"🌟 *{stock['symbol']}* Saatlik AI Grafiği (Geçmiş: {stock['best_context']}s, Hata: %{stock['mape']:.2f})", 
                                 parse_mode='Markdown'
                             )
                 except Exception as e:
