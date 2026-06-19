@@ -172,7 +172,8 @@ def predict_future(symbol, asset_type='crypto', context_len=128, horizon_len=14,
     connected_preds = [last_price] + list(predicted_data)
 
     # Tahmin Çizgisi
-    ax.plot(connected_dates, connected_preds, label=f"TimesFM Tahmini ({horizon_len} Gün)", color='#2962FF', linewidth=2, linestyle='dashed', zorder=4)
+    time_unit = "Gün" if interval == '1d' else ("Saat" if interval in ('1h', '4h') else "Bar")
+    ax.plot(connected_dates, connected_preds, label=f"TimesFM Tahmini ({horizon_len} {time_unit})", color='#2962FF', linewidth=2, linestyle='dashed', zorder=4)
 
     # 3. Tahmin Bandı (Confidence Interval) +/- %4
     lower_bound = np.array(connected_preds) * 0.96
@@ -194,7 +195,8 @@ def predict_future(symbol, asset_type='crypto', context_len=128, horizon_len=14,
     text_color = '#00E676' if pct_change >= 0 else '#FF1744'
     ax.text(connected_dates[-1], final_pred, f"Hedef: {final_pred:.2f} ({pct_change:+.1f}%)", color=text_color, verticalalignment='bottom', horizontalalignment='right', fontsize=10, fontweight='bold')
 
-    ax.set_title(f"{symbol} - TimesFM Canlı Piyasa Tahmini", color='white', fontsize=14)
+    type_str = "Günlük" if interval == '1d' else ("Saatlik" if interval == '1h' else "4 Saatlik")
+    ax.set_title(f"{symbol} - TimesFM Canlı Piyasa Tahmini ({type_str})", color='white', fontsize=14)
     ax.set_xlabel("Tarih", color='lightgray')
     ax.set_ylabel("Fiyat", color='lightgray')
     ax.tick_params(colors='lightgray')
