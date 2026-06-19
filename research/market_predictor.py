@@ -29,11 +29,14 @@ def predict_future(symbol, asset_type='crypto', context_len=128, horizon_len=14,
         else:
             df_use = df_1d
     else:
-        df_1d, df_4h = data_sources.get_crypto_data(symbol)
-        if interval == '4h' and df_4h is not None:
-            df_use = df_4h
+        if interval == '1h':
+            df_use = data_sources.get_crypto_1h_data(symbol)
         else:
-            df_use = df_1d
+            df_1d, df_4h = data_sources.get_crypto_data(symbol)
+            if interval == '4h' and df_4h is not None:
+                df_use = df_4h
+            else:
+                df_use = df_1d
             
     if df_use is None or df_use.empty:
         print(f"[{symbol}] Veri çekilemedi.")
@@ -229,8 +232,11 @@ def evaluate_model_accuracy(symbol, asset_type='bist', interval='1h', context_le
         df_1d, df_4h, df_1h = data_sources.get_bist_data(symbol)
         df_use = df_1h if interval == '1h' else df_1d
     else:
-        df_1d, df_4h = data_sources.get_crypto_data(symbol)
-        df_use = df_4h if interval == '4h' else df_1d
+        if interval == '1h':
+            df_use = data_sources.get_crypto_1h_data(symbol)
+        else:
+            df_1d, df_4h = data_sources.get_crypto_data(symbol)
+            df_use = df_4h if interval == '4h' else df_1d
 
     if df_use is None or df_use.empty:
         return None

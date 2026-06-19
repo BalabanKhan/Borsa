@@ -103,7 +103,7 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    args_lower = [a.lower() for a in args]
+    args_lower = [a.lower().strip("`'\".,") for a in args]
     interval = '1d'
     
     if 'saat' in args_lower:
