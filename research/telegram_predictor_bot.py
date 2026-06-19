@@ -906,28 +906,65 @@ async def temizle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """BIST 50 içinden günün en iyi 3 teyitli hissesini bulup raporlar."""
+    """BIST 100 içinden günün en iyi 3 teyitli hissesini bulup raporlar."""
     if not await check_auth(update): return
     
-    msg = await update.message.reply_text("⏳ *BIST 50 Tarama Başladı*\nBugün en çok yükselme potansiyeli olan teyitli 3 hisse belirleniyor...\n_(Çoklu zaman dilimi ve RSI filtreleri taranıyor, bu işlem 2-3 dakika sürebilir)_", parse_mode='Markdown')
+    msg = await update.message.reply_text("⏳ *BIST 100 Tarama Başladı*\nBugün en çok yükselme potansiyeli olan, saatlik hacmi yüksek ve aşırı şişmemiş teyitli 3 hisse belirleniyor...\n_(Toplu veri indirme ve filtreleme yapılıyor, bu işlem 30-40 saniye sürebilir)_", parse_mode='Markdown')
     
     try:
-        from config import TOP_BIST_50
+        from config import TOP_BIST
         
-        # BIST 50 hisselerinin tamamını tarıyoruz
-        bist_targets = TOP_BIST_50
+        # BIST 100 hisselerinin tamamını tarıyoruz
+        bist_targets = TOP_BIST
         
-        report_lines = ["🌅 *BIST 50 Günlük/Saatlik Yapay Zeka Taraması Sonuçları*:\n"]
+        report_lines = ["🌅 *BIST 100 Günlük/Saatlik Yapay Zeka Taraması Sonuçları*:\n"]
         candidates = []
         
         # Zaman alıcı işlemleri thread içinde yapabilmek için fonksiyon tanımlıyoruz
-        def scan_all_bist50():
+        def scan_all_bist100():
             import data_sources
             import pandas as pd
+            import pandas_ta as ta
             
             scanned_candidates = []
+            
+            # 1. BIST 100 verilerini toplu olarak çekiyoruz
+            print(f"BIST 100 toplu veri indiriliyor (toplam {len(bist_targets)} hisse)...")
+            batch_data = data_sources.get_bist_data_batch(bist_targets, batch_size=35)
+            
             for symbol in bist_targets:
                 try:
+                    dfs = batch_data.get(symbol)
+                    if not dfs or dfs[0] is None or dfs[2] is None:
+                        continue
+                        
+                    df_1d, df_4h, df_1h = dfs
+                    
+                    # Filtre A: Saatlik Hacim Kontrolü (Son 20 saatlik ortalama hacmin en az 1.2 katı olmalı)
+                    if len(df_1h) >= 20:
+                        last_vol = df_1h['volume'].iloc[-1]
+                        avg_vol_20 = df_1h['volume'].rolling(20).mean().iloc[-1]
+                        if pd.isna(avg_vol_20) or avg_vol_20 == 0:
+                            avg_vol_20 = 1.0
+                        if last_vol <= avg_vol_20 * 1.2:
+                            continue
+                    else:
+                        continue
+
+                    # Filtre B: Saatlik (1h) RSI Kontrolü (RSI < 70 olmalı, aşırı şişmiş olmamalı)
+                    if len(df_1h) >= 15:
+                        df_1h_copy = df_1h.copy()
+                        df_1h_copy.ta.rsi(length=14, append=True)
+                        rsi_col = 'rsi_14' if 'rsi_14' in df_1h_copy.columns else 'RSI_14'
+                        if rsi_col in df_1h_copy.columns:
+                            rsi_1h = df_1h_copy[rsi_col].iloc[-1]
+                            if pd.isna(rsi_1h) or rsi_1h > 70.0:
+                                continue
+                        else:
+                            continue
+                    else:
+                        continue
+
                     # Günlük Tahmin
                     res_1d = predict_future(
                         symbol=symbol, 
@@ -936,25 +973,22 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         horizon_len=7, 
                         show_plot=False,
                         save_plot=False,
-                        interval='1d'
+                        interval='1d',
+                        preloaded_dfs=dfs
                     )
                     
                     if res_1d:
-                        _, final_pred_1d, pct_change_1d, rsi = res_1d
+                        _, final_pred_1d, pct_change_1d, rsi_1d = res_1d
                         
-                        # Filtre 1: RSI > 75 ise ele
-                        if rsi > 75.0:
-                            continue
-                        # Filtre 2: Günlük trend negatifse ele
+                        # Filtre C: Günlük trend negatifse ele
                         if pct_change_1d <= 0:
                             continue
                         
                         # Vur-kaç seans içi işlem odaklı sabit 64 saatlik lookback
                         best_c = 64
-                        best_mape_val = evaluate_model_accuracy(symbol, 'bist', '1h', best_c, 8)
+                        best_mape_val = evaluate_model_accuracy(symbol, 'bist', '1h', best_c, 8, preloaded_dfs=dfs)
                         if best_mape_val is None:
                             best_mape_val = 0.0
-
 
                         # Saatlik Tahmin
                         res_1h = predict_future(
@@ -964,58 +998,54 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             horizon_len=8,
                             show_plot=False,
                             save_plot=False,
-                            interval='1h'
+                            interval='1h',
+                            preloaded_dfs=dfs
                         )
                         
                         if res_1h:
                             _, final_pred_1h, pct_change_1h, _ = res_1h
                             
-                            # Filtre 3: Saatlik trend negatifse ele
+                            # Filtre D: Saatlik trend negatifse ele
                             if pct_change_1h <= 0:
                                 continue
                                 
-                            # Filtre 4: EMA 5 Kontrolü
-                            _, _, df_1h_data = data_sources.get_bist_data(symbol)
-                            if df_1h_data is not None and not df_1h_data.empty:
-                                ema5 = df_1h_data['close'].ewm(span=5, adjust=False).mean()
-                                last_close = df_1h_data['close'].iloc[-1]
-                                last_ema5 = ema5.iloc[-1]
-                                if last_close <= last_ema5:
-                                    continue
-                                    
-                                # ATR ve TP/SL
-                                tr1 = df_1h_data['high'] - df_1h_data['low']
-                                tr2 = (df_1h_data['high'] - df_1h_data['close'].shift(1)).abs()
-                                tr3 = (df_1h_data['low'] - df_1h_data['close'].shift(1)).abs()
-                                tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                                atr = tr.rolling(window=14).mean().iloc[-1]
+                            # Filtre E: EMA 5 Kontrolü
+                            ema5 = df_1h['close'].ewm(span=5, adjust=False).mean()
+                            last_close = df_1h['close'].iloc[-1]
+                            last_ema5 = ema5.iloc[-1]
+                            if last_close <= last_ema5:
+                                continue
                                 
-                                tp = last_close + (atr * 2.0)
-                                sl = last_close - (atr * 1.5)
-                                tp_pct = ((tp - last_close) / last_close) * 100
-                                sl_pct = ((last_close - sl) / last_close) * 100
-                            else:
-                                tp = sl = tp_pct = sl_pct = 0
-                                last_close = final_pred_1h / (1 + (pct_change_1h/100))
+                            # ATR ve TP/SL
+                            tr1 = df_1h['high'] - df_1h['low']
+                            tr2 = (df_1h['high'] - df_1h['close'].shift(1)).abs()
+                            tr3 = (df_1h['low'] - df_1h['close'].shift(1)).abs()
+                            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                            atr = tr.rolling(window=14).mean().iloc[-1]
+                            
+                            tp = last_close + (atr * 2.0)
+                            sl = last_close - (atr * 1.5)
+                            tp_pct = ((tp - last_close) / last_close) * 100
+                            sl_pct = ((last_close - sl) / last_close) * 100
                                 
                             scanned_candidates.append({
                                 'symbol': symbol,
                                 'pct_change_1d': pct_change_1d,
                                 'pct_change_1h': pct_change_1h,
-                                'rsi': rsi,
+                                'rsi': rsi_1h,
                                 'tp': tp,
                                 'sl': sl,
                                 'tp_pct': tp_pct,
                                 'sl_pct': sl_pct,
                                 'price': last_close,
                                 'best_context_1h': best_c,
-                                'mape_1h': best_mape_val if best_mape_val != float('inf') else None
+                                'mape_1h': best_mape_val
                             })
                 except Exception as e:
                     logger.error(f"Scan error for {symbol}: {e}")
             return scanned_candidates
- 
-        candidates = await asyncio.to_thread(scan_all_bist50)
+  
+        candidates = await asyncio.to_thread(scan_all_bist100)
         
         # Hata payı (MAPE) en düşük olanı (en güveniliri) en başa alacak şekilde sırala
         candidates.sort(key=lambda x: x['mape_1h'] if x['mape_1h'] is not None else 999.0)
@@ -1028,11 +1058,11 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 mape_info = f" (Hata: %{cand['mape_1h']:.2f})" if cand.get('mape_1h') is not None else ""
                 report_lines.append(f"{i}️⃣ *{sym}* - Güncel: {cand['price']:.2f}\n"
                                      f"   📈 Günlük Beklenen: *+{cand['pct_change_1d']:.1f}%* | Saatlik: *+{cand['pct_change_1h']:.1f}%*{mape_info}\n"
-                                     f"   🔥 RSI: {cand['rsi']:.1f}\n"
+                                     f"   🔥 Saatlik RSI: {cand['rsi']:.1f}\n"
                                      f"   🎯 Hedef (TP): {cand['tp']:.2f} (+%{cand['tp_pct']:.2f})\n"
                                      f"   🛑 Stop (SL): {cand['sl']:.2f} (-%{cand['sl_pct']:.2f})\n")
         else:
-            report_lines.append("\n⚠️ *Bugün tüm filtreleri geçen (Çoklu Zaman Dilimi, RSI < 75, EMA 5) BIST 50 hissesi bulunamadı.*")
+            report_lines.append("\n⚠️ *Bugün tüm filtreleri geçen (Hacim Artışı, Saatlik RSI < 70, EMA 5) BIST 100 hissesi bulunamadı.*")
             
         await msg.delete()
         await update.message.reply_text("\n".join(report_lines), parse_mode='Markdown')
@@ -1041,21 +1071,24 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for cand in top_3:
             sym = cand['symbol']
             try:
+                # Grafiği çizerken batch verisini preloaded olarak pasla
+                dfs = batch_data.get(sym)
                 res_plot = await asyncio.to_thread(
                     predict_future,
                     symbol=sym,
                     asset_type='bist',
-                    context_len=cand.get('best_context_1h', 60),
+                    context_len=cand.get('best_context_1h', 64),
                     horizon_len=8,
                     show_plot=False,
                     save_plot=True,
-                    interval='1h'
+                    interval='1h',
+                    preloaded_dfs=dfs
                 )
                 if res_plot and res_plot[0] and os.path.exists(res_plot[0]):
                     with open(res_plot[0], 'rb') as photo:
                         await update.message.reply_photo(
                             photo=photo, 
-                            caption=f"🌟 *{sym}* Saatlik Detay Grafiği (Geçmiş: {cand.get('best_context_1h', 60)}s, Hata: %{cand.get('mape_1h', 0.0):.2f})", 
+                            caption=f"🌟 *{sym}* Saatlik Detay Grafiği (Geçmiş: {cand.get('best_context_1h', 64)}s, Hata: %{cand.get('mape_1h', 0.0):.2f})", 
                             parse_mode='Markdown'
                         )
             except Exception as e:
