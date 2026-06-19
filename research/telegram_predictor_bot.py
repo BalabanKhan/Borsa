@@ -78,7 +78,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📊 *BIST 50 Tarama Komutları:*\n"
         "• `/gunici`: Seans sonuna kadarki en yüksek potansiyelli 3 hisseyi listeler.\n"
         "• `/saatlik`: Hata payı (MAPE) en düşük 3 hisseyi grafikli listeler.\n"
-        "• `/sabah`: Çoklu zaman dilimi teyitli (EMA5/RSI) günün en iyi 3 hissesini grafikli listeler.\n\n"
+        "• `/tara`: Çoklu zaman dilimi teyitli (EMA5/RSI) günün en iyi 3 hissesini grafikli listeler.\n\n"
         "🧹 *Diğer:*\n"
         "• `/temizle`: Ekrandaki eski grafikleri gizlemek için boşluk bırakır.\n"
         "• `/help` veya `/start`: Bu menüyü gösterir.\n\n"
@@ -1090,6 +1090,7 @@ def main():
     application.add_handler(CommandHandler("gunici", gunici))
     application.add_handler(CommandHandler("saatlik", saatlik))
     application.add_handler(CommandHandler("sabah", sabah_komutu))
+    application.add_handler(CommandHandler("tara", sabah_komutu))
 
     # JobQueue for daily report at 09:00 TR Time
     # If job_queue isn't installed, this might throw an error. In PTB v20 it's typically built-in or requires python-telegram-bot[job-queue].
