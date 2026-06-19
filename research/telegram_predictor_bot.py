@@ -661,14 +661,12 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
                         report_lines.append(f"🔴 *{symbol}*: Elendi (Günlük trend negatif)")
                         continue
 
-                    # Saatlik MAPE Optimizasyonu
-                    best_mape_val = float('inf')
-                    best_c = 60
-                    for c in [32, 64, 96, 128]:
-                        mape_candidate = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', c, 8)
-                        if mape_candidate is not None and mape_candidate < best_mape_val:
-                            best_mape_val = mape_candidate
-                            best_c = c
+                    # Vur-kaç seans içi işlem odaklı sabit 64 saatlik lookback
+                    best_c = 64
+                    best_mape_val = await asyncio.to_thread(evaluate_model_accuracy, symbol, asset_type, '1h', best_c, 8)
+                    if best_mape_val is None:
+                        best_mape_val = 0.0
+
 
                     # Saatlik Tahmin (Strategy A için Çoklu Zaman Dilimi Teyidi)
                     res_1h = await asyncio.to_thread(
@@ -951,14 +949,12 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if pct_change_1d <= 0:
                             continue
                         
-                        # Saatlik MAPE Optimizasyonu
-                        best_mape_val = float('inf')
-                        best_c = 60
-                        for c in [32, 64, 96, 128]:
-                            mape_candidate = evaluate_model_accuracy(symbol, 'bist', '1h', c, 8)
-                            if mape_candidate is not None and mape_candidate < best_mape_val:
-                                best_mape_val = mape_candidate
-                                best_c = c
+                        # Vur-kaç seans içi işlem odaklı sabit 64 saatlik lookback
+                        best_c = 64
+                        best_mape_val = evaluate_model_accuracy(symbol, 'bist', '1h', best_c, 8)
+                        if best_mape_val is None:
+                            best_mape_val = 0.0
+
 
                         # Saatlik Tahmin
                         res_1h = predict_future(
