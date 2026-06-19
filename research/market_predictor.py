@@ -141,25 +141,30 @@ def predict_future(symbol, asset_type='crypto', context_len=128, horizon_len=14,
         else:
             future_dates = pd.date_range(start=last_date, periods=horizon_len+1, freq='D')[1:]
     
-    # 2. Mum Grafiği (Candlestick)
-    color_up = '#00E676'   # Neon yeşil
-    color_down = '#FF1744' # Neon kırmızı
-    up = df_plot[df_plot['close'] >= df_plot['open']]
-    down = df_plot[df_plot['close'] < df_plot['open']]
-    
-    # Bar genişliği ayarı (Matplotlib tarih ekseni gün bazlı çalıştığı için)
+    # 2. Mum Grafiği veya Çizgi Grafiği
     if interval == '1h':
-        bar_width = 0.025  # ~36 dakika (1 saatin %60'ı)
-    elif interval == '4h':
-        bar_width = 0.100  # ~2.4 saat (4 saatin %60'ı)
+        # Saatlik seans için sade ve şık çizgi grafiği (Line Chart)
+        ax.plot(df_plot.index, df_plot['close'], color='#00E676', linewidth=2.5, label="Fiyat", zorder=3)
+        # Çizginin altını hafifçe doldurarak modern bir görünüm verelim (Gradient/Area efekti)
+        ax.fill_between(df_plot.index, df_plot['close'], df_plot['close'].min() * 0.99, color='#00E676', alpha=0.08, zorder=2)
     else:
-        bar_width = 0.600  # ~14.4 saat (1 günün %60'ı)
+        # Mum Grafiği (Candlestick)
+        color_up = '#00E676'   # Neon yeşil
+        color_down = '#FF1744' # Neon kırmızı
+        up = df_plot[df_plot['close'] >= df_plot['open']]
+        down = df_plot[df_plot['close'] < df_plot['open']]
         
-    ax.bar(up.index, up['close'] - up['open'], bar_width, bottom=up['open'], color=color_up, zorder=3)
-    ax.vlines(up.index, up['low'], up['high'], color=color_up, linewidth=1, zorder=2)
-    
-    ax.bar(down.index, down['open'] - down['close'], bar_width, bottom=down['close'], color=color_down, zorder=3)
-    ax.vlines(down.index, down['low'], down['high'], color=color_down, linewidth=1, zorder=2)
+        # Bar genişliği ayarı (Matplotlib tarih ekseni gün bazlı çalıştığı için)
+        if interval == '4h':
+            bar_width = 0.100  # ~2.4 saat (4 saatin %60'ı)
+        else:
+            bar_width = 0.600  # ~14.4 saat (1 günün %60'ı)
+            
+        ax.bar(up.index, up['close'] - up['open'], bar_width, bottom=up['open'], color=color_up, zorder=3)
+        ax.vlines(up.index, up['low'], up['high'], color=color_up, linewidth=1, zorder=2)
+        
+        ax.bar(down.index, down['open'] - down['close'], bar_width, bottom=down['close'], color=color_down, zorder=3)
+        ax.vlines(down.index, down['low'], down['high'], color=color_down, linewidth=1, zorder=2)
 
     # 4. Kopukluğu Giderme
     last_price = data[-1]
