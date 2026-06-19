@@ -734,8 +734,23 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 report_lines.append(f"❌ *{symbol}*: Hata oluştu.")
                 
-        # En iyi 3 hisseyi seç (Düşük MAPE öncelikli)
-        candidates.sort(key=lambda x: x['mape_1h'] if x['mape_1h'] is not None else 999.0)
+        # Kademeli öncelik sınıflandırması (A -> B -> C) ve sıralama tuşunu oluşturma
+        for cand in candidates:
+            # Sınıf A: Yüksek Kazanç (>= %1.5) + Düşük Hata (< %1.2)
+            if cand['pct_change_1h'] >= 1.5 and cand['mape_1h'] < 1.2:
+                cand['category'] = 'A'
+                cand['sort_key'] = (1, cand['mape_1h'], -cand['pct_change_1h'])
+            # Sınıf B: Yüksek Kazanç (>= %1.5) + Orta/Yüksek Hata (>= %1.2)
+            elif cand['pct_change_1h'] >= 1.5:
+                cand['category'] = 'B'
+                cand['sort_key'] = (2, cand['mape_1h'], -cand['pct_change_1h'])
+            # Sınıf C: Düşük Kazanç (< %1.5) + Düşük Hata (< %1.2)
+            else:
+                cand['category'] = 'C'
+                cand['sort_key'] = (3, cand['mape_1h'], -cand['pct_change_1h'])
+
+        # Kademeli öncelik tuşuna göre sırala
+        candidates.sort(key=lambda x: x.get('sort_key', (4, 999.0, 0.0)))
         top_3 = candidates[:3]
         
         if top_3:
@@ -743,7 +758,7 @@ async def daily_report(context: ContextTypes.DEFAULT_TYPE):
             for i, cand in enumerate(top_3, 1):
                 sym = cand['symbol']
                 mape_info = f" (Hata: %{cand['mape_1h']:.2f})" if cand.get('mape_1h') is not None else ""
-                report_lines.append(f"{i}️⃣ *{sym}*: Günlük +{cand['pct_change_1d']:.1f}% | Saatlik +{cand['pct_change_1h']:.1f}%{mape_info} | RSI: {cand['rsi']:.1f}")
+                report_lines.append(f"{i}️⃣ *{sym}* [Sınıf {cand.get('category', 'C')}]: Günlük +{cand['pct_change_1d']:.1f}% | Saatlik +{cand['pct_change_1h']:.1f}%{mape_info} | RSI: {cand['rsi']:.1f}")
                 if cand.get('tp', 0) > 0:
                     report_lines.append(f"   🎯 Hedef (TP): {cand['tp']:.2f} (+%{cand['tp_pct']:.2f})")
                     report_lines.append(f"   🛑 Stop (SL): {cand['sl']:.2f} (-%{cand['sl_pct']:.2f})")
@@ -1047,8 +1062,23 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
   
         candidates = await asyncio.to_thread(scan_all_bist100)
         
-        # Hata payı (MAPE) en düşük olanı (en güveniliri) en başa alacak şekilde sırala
-        candidates.sort(key=lambda x: x['mape_1h'] if x['mape_1h'] is not None else 999.0)
+        # 3. Kademeli öncelik sınıflandırması (A -> B -> C) ve sıralama tuşunu oluşturma
+        for cand in candidates:
+            # Sınıf A: Yüksek Kazanç (>= %1.5) + Düşük Hata (< %1.2)
+            if cand['pct_change_1h'] >= 1.5 and cand['mape_1h'] < 1.2:
+                cand['category'] = 'A'
+                cand['sort_key'] = (1, cand['mape_1h'], -cand['pct_change_1h'])
+            # Sınıf B: Yüksek Kazanç (>= %1.5) + Orta/Yüksek Hata (>= %1.2)
+            elif cand['pct_change_1h'] >= 1.5:
+                cand['category'] = 'B'
+                cand['sort_key'] = (2, cand['mape_1h'], -cand['pct_change_1h'])
+            # Sınıf C: Düşük Kazanç (< %1.5) + Düşük Hata (< %1.2)
+            else:
+                cand['category'] = 'C'
+                cand['sort_key'] = (3, cand['mape_1h'], -cand['pct_change_1h'])
+
+        # Kademeli öncelik tuşuna göre sırala (En düşük kademe sayısı, en düşük hata, en yüksek kazanç)
+        candidates.sort(key=lambda x: x.get('sort_key', (4, 999.0, 0.0)))
         top_3 = candidates[:3]
         
         if top_3:
@@ -1056,7 +1086,7 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, cand in enumerate(top_3, 1):
                 sym = cand['symbol']
                 mape_info = f" (Hata: %{cand['mape_1h']:.2f})" if cand.get('mape_1h') is not None else ""
-                report_lines.append(f"{i}️⃣ *{sym}* - Güncel: {cand['price']:.2f}\n"
+                report_lines.append(f"{i}️⃣ *{sym}* [Sınıf {cand.get('category', 'C')}] - Güncel: {cand['price']:.2f}\n"
                                      f"   📈 Günlük Beklenen: *+{cand['pct_change_1d']:.1f}%* | Saatlik: *+{cand['pct_change_1h']:.1f}%*{mape_info}\n"
                                      f"   🔥 Saatlik RSI: {cand['rsi']:.1f}\n"
                                      f"   🎯 Hedef (TP): {cand['tp']:.2f} (+%{cand['tp_pct']:.2f})\n"
