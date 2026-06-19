@@ -147,10 +147,18 @@ def predict_future(symbol, asset_type='crypto', context_len=128, horizon_len=14,
     up = df_plot[df_plot['close'] >= df_plot['open']]
     down = df_plot[df_plot['close'] < df_plot['open']]
     
-    ax.bar(up.index, up['close'] - up['open'], 0.6, bottom=up['open'], color=color_up, zorder=3)
+    # Bar genişliği ayarı (Matplotlib tarih ekseni gün bazlı çalıştığı için)
+    if interval == '1h':
+        bar_width = 0.025  # ~36 dakika (1 saatin %60'ı)
+    elif interval == '4h':
+        bar_width = 0.100  # ~2.4 saat (4 saatin %60'ı)
+    else:
+        bar_width = 0.600  # ~14.4 saat (1 günün %60'ı)
+        
+    ax.bar(up.index, up['close'] - up['open'], bar_width, bottom=up['open'], color=color_up, zorder=3)
     ax.vlines(up.index, up['low'], up['high'], color=color_up, linewidth=1, zorder=2)
     
-    ax.bar(down.index, down['open'] - down['close'], 0.6, bottom=down['close'], color=color_down, zorder=3)
+    ax.bar(down.index, down['open'] - down['close'], bar_width, bottom=down['close'], color=color_down, zorder=3)
     ax.vlines(down.index, down['low'], down['high'], color=color_down, linewidth=1, zorder=2)
 
     # 4. Kopukluğu Giderme
