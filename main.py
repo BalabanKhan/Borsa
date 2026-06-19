@@ -50,6 +50,9 @@ async def main():
             
         if notifier.watch_bot:
             print('✅ WATCH Telegram Bot bağlantısı kuruldu.')
+            
+        if getattr(notifier, 'system_bot_token', None):
+            print('✅ SYSTEM Telegram Bot bağlantısı kuruldu.')
         
         # 2. Tarayıcı Servisi (Piyasa Taraması & Kaos Modülleri)
         scanner = ScannerService(notifier=notifier)
