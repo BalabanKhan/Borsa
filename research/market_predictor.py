@@ -13,6 +13,22 @@ sys.path.append(project_root)
 
 import data_sources
 
+_tfm_model = None
+
+def get_timesfm_model():
+    global _tfm_model
+    if _tfm_model is None:
+        import timesfm
+        print("Model ilk kez yükleniyor (google/timesfm-2.5-200m-pytorch)...")
+        # TimesFM loading from pretrained
+        _tfm_model = timesfm.TimesFM_2p5_200M_torch.from_pretrained("google/timesfm-2.5-200m-pytorch")
+        # Compile once with maximum required bounds
+        _tfm_model.compile(forecast_config=timesfm.configs.ForecastConfig(
+            max_context=512,
+            max_horizon=32
+        ))
+    return _tfm_model
+
 def predict_future(symbol, asset_type='crypto', context_len=128, horizon_len=14, show_plot=True, save_plot=True, interval='1d'):
     """
     Belirtilen sembol için güncel veriyi çeker ve TimesFM ile gelecekteki 'horizon_len' 
@@ -70,13 +86,8 @@ def predict_future(symbol, asset_type='crypto', context_len=128, horizon_len=14,
     recent_data_log = np.log(recent_data)
 
     try:
-        import timesfm
-        print("Model yükleniyor (google/timesfm-2.5-200m-pytorch)...")
-        tfm = timesfm.TimesFM_2p5_200M_torch.from_pretrained("google/timesfm-2.5-200m-pytorch")
-        tfm.compile(forecast_config=timesfm.configs.ForecastConfig(
-            max_context=context_len,
-            max_horizon=horizon_len
-        ))
+        from research.market_predictor import get_timesfm_model
+        tfm = get_timesfm_model()
         
         print("Gelecek tahmini yapılıyor (Logaritmik)...")
         # Modele log dönüşümlü veriyi veriyoruz
@@ -254,12 +265,8 @@ def evaluate_model_accuracy(symbol, asset_type='bist', interval='1h', context_le
     train_data_log = np.log(train_data)
 
     try:
-        import timesfm
-        tfm = timesfm.TimesFM_2p5_200M_torch.from_pretrained("google/timesfm-2.5-200m-pytorch")
-        tfm.compile(forecast_config=timesfm.configs.ForecastConfig(
-            max_context=context_len,
-            max_horizon=horizon_len
-        ))
+        from research.market_predictor import get_timesfm_model
+        tfm = get_timesfm_model()
         
         forecast_result = tfm.forecast(horizon_len, [train_data_log])
         if isinstance(forecast_result, tuple):
