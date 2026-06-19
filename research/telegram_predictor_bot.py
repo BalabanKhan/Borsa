@@ -87,8 +87,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/tahmin <SEMBOL> <TÜR> <GEÇMİŞ> <GELECEK>`\n\n"
         "Örnek: `/tahmin THYAO saat 120 12`\n"
         "_(Yukarıdaki komut son 120 saatlik veriye bakıp 12 saatlik tahmin yapar.)_\n\n"
-        "⚡️ *Gün İçi Tahmin (BIST 50):*\n"
-        "`/gunici` - Seans sonuna kadar en çok kazandırma potansiyeli olan 3 hisseyi (grafiksiz) listeler."
+        "⚡️ *BIST 50 Tarama ve Raporlama Komutları:*\n"
+        "`/gunici` - Seans sonuna kadar yükselme potansiyeli en yüksek 3 hisseyi (grafiksiz) listeler.\n"
+        "`/saatlik` - Hata payı (MAPE) en düşük olan 3 hisseyi ve grafiklerini gönderir.\n"
+        "`/sabah` - Günün en iyi, çoklu zaman dilimi teyitli (RSI/EMA5) 3 hissesini ve grafiklerini gönderir."
     )
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
