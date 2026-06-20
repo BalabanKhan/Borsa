@@ -76,38 +76,43 @@ def _check_crypto_1_liquidation(ctx):
 
     if current_price > last_4h['open']:
         oi_crash = fetch_crypto_oi_crash(symbol)
-        if oi_crash:
-            lowest_wick = last_4h['low']
-            sl = lowest_wick * config.CRYPTO_DIP_SL_MULT
-            sl_dist = abs(current_price - sl)
-            tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
-            _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
-            _prev_4h = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
-            dm_ratio = _get_darth_maul_ratio(last_4h)
-            
-            raw_vars = locals()
-            
-            _scores_c1 = build_dip_scores(
-                rsi_daily=last_4h.get('RSI_14', 50), rsi_hourly=last_4h.get('RSI_14', 50),
-                rsi_prev=_prev_4h.get('RSI_14', 50),
-                price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'),
-                volume=last_4h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_4h['volume'] * current_price,
-                rr=_rr_c1, has_engulfing=False, regime="BULL",
-                macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
-                dg_is_darth_maul=dm_ratio
-            )
-            _conv_c1 = calculate_conviction(_scores_c1, ctx=ctx)
-            if _conv_c1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                signals.append({
-                    "raw_indicators": _extract_raw_indicators(raw_vars),
-                    "ticker": symbol, "market": "KRIPTO",
-                    "strategy": "KRİPTO 1: LİKİDASYON VE DİP AVCILIĞI", "signal": "AL",
-                    "entry_price": current_price, "sl": sl, "tp": tp,
-                    "conviction_score": _conv_c1.total_score, "conviction_grade": _conv_c1.grade,
-                    "conviction_details": _conv_c1.component_scores, "position_size_pct": _conv_c1.position_size_pct,
-                    "indicators": {"RSI_4S": round(last_4h.get("RSI_14", 0), 2)},
-                    "reason": f"Pozitif Uyuşmazlık + OI Çöküşü (>%15) tespit edildi! Balina temizliği bitti." + _conv_c1.to_reason_suffix()
-                })
+        
+        lowest_wick = last_4h['low']
+        sl = lowest_wick * config.CRYPTO_DIP_SL_MULT
+        sl_dist = abs(current_price - sl)
+        tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
+        _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+        _prev_4h = df_4h.iloc[-2] if len(df_4h) >= 2 else last_4h
+        dm_ratio = _get_darth_maul_ratio(last_4h)
+        
+        raw_vars = locals()
+        
+        _scores_c1 = build_dip_scores(
+            rsi_daily=last_4h.get('RSI_14', 50), rsi_hourly=last_4h.get('RSI_14', 50),
+            rsi_prev=_prev_4h.get('RSI_14', 50),
+            price=current_price, ema_fast=last_4h.get('EMA_20'), ema_mid=last_4h.get('EMA_50'),
+            volume=last_4h['volume'], vol_sma=guarded_vol_sma, dollar_vol=last_4h['volume'] * current_price,
+            rr=_rr_c1, has_engulfing=False, regime="BULL",
+            macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+            dg_is_darth_maul=dm_ratio,
+            oi_crash=oi_crash
+        )
+        _conv_c1 = calculate_conviction(_scores_c1, ctx=ctx)
+        if _conv_c1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+            reason_str = "4S Pozitif Uyumsuzluk + Hacim Zirvesi"
+            if oi_crash:
+                reason_str += " + OI Çöküşü (Balina Alımı)"
+            reason_str += "." + _conv_c1.to_reason_suffix()
+
+            signals.append({
+                "raw_indicators": _extract_raw_indicators(raw_vars),
+                "ticker": symbol, "market": "KRIPTO",
+                "strategy": "KRİPTO 1: LİKİDASYON AVI", "signal": "AL",
+                "entry_price": current_price, "sl": sl, "tp": tp,
+                "conviction_score": _conv_c1.total_score, "conviction_grade": _conv_c1.grade,
+                "conviction_details": _conv_c1.component_scores, "position_size_pct": _conv_c1.position_size_pct,
+                "reason": reason_str
+            })
     return signals
 
 
@@ -182,13 +187,12 @@ def _check_crypto_2_mega_trend(ctx):
         return signals
 
     btcdom_trend = get_btc_dominance_trend()
-    if btcdom_trend == "UP":
-        return signals
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
         atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
-    raw_atr_sl = ATR_MULTIPLIER_CRYPTO * atr_val
+    dynamic_mult = ctx.get("dynamic_atr_mult", ATR_MULTIPLIER_CRYPTO)
+    raw_atr_sl = dynamic_mult * atr_val
     capped_sl_dist = min(raw_atr_sl, current_price * ATR_CAP_CRYPTO)
     sl_atr = current_price - capped_sl_dist
     sl_ema = last_4h.get('EMA_50', current_price) * config.CRYPTO_TREND_SL_EMA_MULT
@@ -211,6 +215,12 @@ def _check_crypto_2_mega_trend(ctx):
         macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
         dg_is_darth_maul=dm_ratio
     )
+
+    btcdom_warning = ""
+    if btcdom_trend == "UP":
+        _scores_c2["conflict_penalty"] -= 15.0
+        btcdom_warning = " (Riskli: BTC Dominans UP)"
+
     _conv_c2 = calculate_conviction(_scores_c2, ctx=ctx)
     if _conv_c2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
@@ -220,7 +230,7 @@ def _check_crypto_2_mega_trend(ctx):
             "entry_price": current_price, "sl": sl, "tp": _tp_c2,
             "conviction_score": _conv_c2.total_score, "conviction_grade": _conv_c2.grade,
             "conviction_details": _conv_c2.component_scores, "position_size_pct": _conv_c2.position_size_pct,
-            "reason": f"1G EMA20>50 Trendi. BTC Dominans '{btcdom_trend}' yönünde (Güvenli). Hacim onaylı. ATR Stop aktif." + _conv_c2.to_reason_suffix()
+            "reason": f"1G EMA20>50 Trendi. BTC Dominans '{btcdom_trend}' yönünde{btcdom_warning}. Hacim onaylı. ATR Stop aktif." + _conv_c2.to_reason_suffix()
         })
     return signals
 
@@ -305,7 +315,8 @@ def _check_crypto_3_breakout(ctx):
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
         atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
-    raw_atr_sl = config.ATR_MULTIPLIER_CRYPTO * atr_val
+    dynamic_mult = ctx.get("dynamic_atr_mult", config.ATR_MULTIPLIER_CRYPTO)
+    raw_atr_sl = dynamic_mult * atr_val
     sl_dist = min(max(raw_atr_sl, current_price * config.CRYPTO_BREAKOUT_MIN_SL), current_price * config.CRYPTO_BREAKOUT_MAX_SL)
     sl = current_price - sl_dist
     _tp_c3 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
@@ -429,7 +440,8 @@ def _check_crypto_short_2_waterfall(ctx):
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
         atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
-    raw_atr_sl = ATR_MULTIPLIER_CRYPTO * atr_val
+    dynamic_mult = ctx.get("dynamic_atr_mult", ATR_MULTIPLIER_CRYPTO)
+    raw_atr_sl = dynamic_mult * atr_val
     capped_sl_dist = min(raw_atr_sl, current_price * ATR_CAP_CRYPTO)
     sl = current_price + capped_sl_dist
     sl_dist = abs(sl - current_price)
@@ -1151,6 +1163,33 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     last_4h = df_4h.iloc[-1]
     current_price = last_4h['close']
 
+    # --- DYNAMIC FILTERS (Variant F: Pure Math) ---
+    body = abs(last_4h['close'] - last_4h['open'])
+    upper_wick = last_4h['high'] - max(last_4h['close'], last_4h['open'])
+    lower_wick = min(last_4h['close'], last_4h['open']) - last_4h['low']
+    is_whipsaw = (upper_wick > body * 2.0) or (lower_wick > body * 2.0)
+    
+    adx_val = last_4h.get('ADX_14', 0)
+    if pd.isna(adx_val): adx_val = 0
+    rsi_val = last_4h.get('RSI_14', 50)
+    if pd.isna(rsi_val): rsi_val = 50
+        
+    ema_20_val = last_4h.get('EMA_20', 0)
+    ema_50_val = last_4h.get('EMA_50', 0)
+    ema_diff_pct = abs(ema_20_val - ema_50_val) / current_price if current_price > 0 else 0
+    candle_body_pct = body / current_price if current_price > 0 else 0
+        
+    # Önceki Varyans D Kuralları
+    if is_whipsaw or adx_val > 45 or ema_diff_pct > 0.015:
+        return signals 
+        
+    # Yeni Varyans F (Pure Math) Kuralları
+    if adx_val < 14.2 or rsi_val > 57.82 or candle_body_pct > 0.0257:
+        return signals
+        
+    dynamic_atr_mult = 2.0 if adx_val > 25 else 1.2
+    # -----------------------------------------
+
     if metrics_collector is not None:
         metrics_collector[symbol] = {
             "Symbol": symbol, "Market": "KRIPTO", "Price": current_price,
@@ -1166,7 +1205,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     ctx = {
         "symbol": symbol, "last_1d": last_1d, "last_4h": last_4h,
         "current_price": current_price, "df_1d": df_1d, "df_4h": df_4h,
-        "btc_ok": btc_ok, "btc_sniper_bias": btc_sniper_bias
+        "btc_ok": btc_ok, "btc_sniper_bias": btc_sniper_bias,
+        "dynamic_atr_mult": dynamic_atr_mult
     }
 
     signals.extend(_check_crypto_1_liquidation(ctx))

@@ -51,8 +51,8 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     """Ağır Sıklet SHORT tarayıcı. 3 strateji + 3 çelik kalkan."""
     signals = []
 
-    if btc_bullish:
-        return signals
+    # btc_bullish parametresini artık tamamen engellemek (hard block) için değil,
+    # puanlama sisteminde 'macro_aligned' cezası olarak kullanacağız.
 
     if df_4h is None or len(df_4h) < 20:
         return signals
@@ -113,6 +113,23 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     if not funding_ok:
         return signals
 
+    # --- AM SERİSİ: KAYIP ANALİZİ FİLTRELERİ ---
+    # 1. UTC 20:00 mumu short için tehlikeli (Whipsaw/Manipülasyon)
+    if hasattr(last_4h.name, 'hour') and last_4h.name.hour == 20:
+        return signals
+        
+    # 2. Hacim teyidi (Relative Volume > 1.2) - Düşük hacimde SFP veya kırılımlar fake oluyor
+    vol = last_4h.get('volume', 0)
+    vol_sma = last_4h.get('vol_sma_20', 1)
+    if pd.isna(vol_sma) or vol_sma == 0:
+        rel_vol = 1.0
+    else:
+        rel_vol = vol / vol_sma
+        
+    if rel_vol < 1.2:
+        return signals
+    # -------------------------------------------
+
     oi_crashed = fetch_crypto_oi_crash(symbol)
     oi_note = "\n🩸 OI (Açık Pozisyon) Çöküşü: Onaylı ✅" if oi_crashed else ""
 
@@ -135,7 +152,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
                 volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
                 dollar_vol=last_4h.get('volume', 0) * current_price,
                 rr=rr_ratio, has_engulfing=False, regime="BEAR",
-                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
             )
             _conv_bh1 = calculate_conviction(_scores_bh1)
             if _conv_bh1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -174,7 +191,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
                 volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
                 dollar_vol=last_4h.get('volume', 0) * current_price,
                 rr=rr_ratio, has_engulfing=False, regime="BEAR",
-                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
             )
             _conv_bh2 = calculate_conviction(_scores_bh2)
             if _conv_bh2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -223,7 +240,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
                     volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
                     dollar_vol=last_4h.get('volume', 0) * current_price,
                     rr=rr_ratio, has_engulfing=False, regime="BEAR",
-                    macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                    macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
                 )
                 _conv_bh3 = calculate_conviction(_scores_bh3)
                 if _conv_bh3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
