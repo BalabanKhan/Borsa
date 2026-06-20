@@ -79,6 +79,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/gunici`: Seans sonuna kadarki en yüksek potansiyelli 3 hisseyi listeler.\n"
         "• `/saatlik`: Hata payı (MAPE) en düşük 3 hisseyi grafikli listeler.\n"
         "• `/tara`: Çoklu zaman dilimi teyitli (EMA5/RSI) günün en iyi 3 hissesini grafikli listeler.\n\n"
+        "📊 *Kripto Tarama Komutları:*\n"
+        "• `/taracrypto`: TimesFM ile 24 saatlik en yüksek yükseliş ve düşüş beklenen 3 kripto varlığı tarar.\n\n"
         "🧹 *Diğer:*\n"
         "• `/temizle`: Ekrandaki eski grafikleri gizlemek için boşluk bırakır.\n"
         "• `/help` veya `/start`: Bu menüyü gösterir.\n\n"
@@ -905,6 +907,167 @@ async def saatlik(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Saatlik hata: {e}", exc_info=True)
         await msg.edit_text(f"❌ Beklenmedik bir hata oluştu:\n`{str(e)}`", parse_mode='Markdown')
 
+async def taracrypto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """TimesFM ile kripto varlıkları tarayıp 24 saatlik en çok artacak ve düşecek 3 varlığı tahmin eder."""
+    if not await check_auth(update): return
+    
+    msg = await update.message.reply_text(
+        "⏳ *Kripto Yapay Zeka Taraması Başladı (24 Saatlik)*\n"
+        "Varlıklar için en düşük hata payı veren veri aralığı hesaplanıyor ve TimesFM ile 24 saatlik gelecek tahmini yapılıyor...\n"
+        "_(Bu işlem 1-2 dakika sürebilir, lütfen bekleyin)_",
+        parse_mode='Markdown'
+    )
+    
+    try:
+        from config import TOP_CRYPTO_SCAN
+        
+        def run_crypto_scan():
+            results = []
+            for symbol in TOP_CRYPTO_SCAN:
+                try:
+                    import data_sources
+                    # 1h verisini çek
+                    df_1h = data_sources.get_crypto_1h_data(symbol)
+                    if df_1h is None or df_1h.empty or len(df_1h) < 150:
+                        continue
+                    
+                    close = df_1h['close'].iloc[-1]
+                    ema_20 = df_1h['close'].ewm(span=20, adjust=False).mean().iloc[-1]
+                    ema_50 = df_1h['close'].ewm(span=50, adjust=False).mean().iloc[-1]
+                    
+                    # RSI hesaplama
+                    delta = df_1h['close'].diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / loss
+                    rsi = (100 - (100 / (1 + rs))).iloc[-1]
+                    
+                    # MAPE Optimizasyonu
+                    best_mape = float('inf')
+                    best_c = 64
+                    for c in [64, 128]:
+                        mape = evaluate_model_accuracy(
+                            symbol=symbol,
+                            asset_type='crypto',
+                            interval='1h',
+                            context_len=c,
+                            horizon_len=24,
+                            preloaded_dfs=(None, None, df_1h)
+                        )
+                        if mape is not None and mape < best_mape:
+                            best_mape = mape
+                            best_c = c
+                            
+                    if best_mape == float('inf'):
+                        best_mape = 0.0
+                        
+                    res = predict_future(
+                        symbol=symbol,
+                        asset_type='crypto',
+                        context_len=best_c,
+                        horizon_len=24,
+                        show_plot=False,
+                        save_plot=True,
+                        interval='1h',
+                        preloaded_dfs=(None, None, df_1h)
+                    )
+                    
+                    if res and res[0]:
+                        image_path, final_pred, pct_change, _ = res
+                        results.append({
+                            'symbol': symbol,
+                            'price': close,
+                            'final_pred': final_pred,
+                            'pct_change': pct_change,
+                            'mape': best_mape,
+                            'best_context': best_c,
+                            'ema_20': ema_20,
+                            'ema_50': ema_50,
+                            'rsi': rsi,
+                            'image_path': image_path
+                        })
+                except Exception as e:
+                    logger.error(f"Scan error for {symbol}: {e}")
+            
+            # Trend ve indikatör filtreleriyle adayları ayır
+            long_candidates = []
+            short_candidates = []
+            
+            for item in results:
+                is_bullish = item['price'] > item['ema_20']
+                is_bearish = item['price'] < item['ema_20']
+                
+                if item['pct_change'] > 0 and is_bullish and item['rsi'] < 70:
+                    long_candidates.append(item)
+                elif item['pct_change'] < 0 and is_bearish and item['rsi'] > 30:
+                    short_candidates.append(item)
+            
+            # Sırala
+            long_candidates.sort(key=lambda x: x['pct_change'], reverse=True)
+            short_candidates.sort(key=lambda x: x['pct_change'])
+            
+            # Yetersiz aday durumunda yedekleri kullan
+            if len(long_candidates) < 3:
+                fallback_longs = [r for r in results if r['pct_change'] > 0 and r not in long_candidates]
+                fallback_longs.sort(key=lambda x: x['pct_change'], reverse=True)
+                long_candidates.extend(fallback_longs)
+                
+            if len(short_candidates) < 3:
+                fallback_shorts = [r for r in results if r['pct_change'] < 0 and r not in short_candidates]
+                fallback_shorts.sort(key=lambda x: x['pct_change'])
+                short_candidates.extend(fallback_shorts)
+                
+            return long_candidates[:3], short_candidates[:3]
+
+        top_longs, top_shorts = await asyncio.to_thread(run_crypto_scan)
+        
+        if not top_longs and not top_shorts:
+            await msg.edit_text("⚠️ *Kripto Taraması*: Yeterli tahmin verisi üretilemedi.", parse_mode='Markdown')
+            return
+            
+        text = "🚀 *TimesFM 24 Saatlik Yapay Zeka Kripto Tarama Raporu*\n"
+        text += "_(Kriter: Trend/EMA/RSI Filtresi + TimesFM AI & MAPE Doğrulaması)_\n\n"
+        
+        text += "📈 *Yükseliş Beklenen En İyi 3 Varlık (LONG)*:\n"
+        for i, stock in enumerate(top_longs, 1):
+            text += f"{i}️⃣ 🟢 *{stock['symbol']}* - Fiyat: {stock['price']:.4f} (RSI: {stock['rsi']:.1f} | Hata: %{stock['mape']:.2f})\n"
+            text += f"   ⚙️ Optimum Veri: *{stock['best_context']} saat*\n"
+            text += f"   📈 Beklenen Değişim: *{stock['pct_change']:+.2f}%* (Hedef: {stock['final_pred']:.4f})\n\n"
+            
+        text += "📉 *Düşüş Beklenen En İyi 3 Varlık (SHORT)*:\n"
+        for i, stock in enumerate(top_shorts, 1):
+            text += f"{i}️⃣ 🔴 *{stock['symbol']}* - Fiyat: {stock['price']:.4f} (RSI: {stock['rsi']:.1f} | Hata: %{stock['mape']:.2f})\n"
+            text += f"   ⚙️ Optimum Veri: *{stock['best_context']} saat*\n"
+            text += f"   📉 Beklenen Değişim: *{stock['pct_change']:+.2f}%* (Hedef: {stock['final_pred']:.4f})\n\n"
+            
+        text += "_Not: Önümüzdeki 24 saat için geçerli yapay zeka tahminleridir._"
+        
+        await msg.edit_text(text, parse_mode='Markdown')
+        
+        # En iyi gainer ve en iyi loser grafiklerini gönder
+        sent_images = []
+        if top_longs:
+            sent_images.append((top_longs[0], "📈 En Çok Yükseliş Beklenen (LONG)"))
+        if top_shorts:
+            sent_images.append((top_shorts[0], "📉 En Çok Düşüş Beklenen (SHORT)"))
+            
+        for stock, label in sent_images:
+            try:
+                if os.path.exists(stock['image_path']):
+                    with open(stock['image_path'], 'rb') as photo:
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id,
+                            photo=photo,
+                            caption=f"🌟 *{stock['symbol']}* ({label}) 24s AI Grafiği\n(Geçmiş: {stock['best_context']}s, Hata: %{stock['mape']:.2f})",
+                            parse_mode='Markdown'
+                        )
+            except Exception as e:
+                logger.error(f"Grafik gönderme hatası {stock['symbol']}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Taracrypto hatası: {e}", exc_info=True)
+        await msg.edit_text(f"❌ Beklenmedik bir hata oluştu:\n`{str(e)}`", parse_mode='Markdown')
+
 async def temizle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sohbeti temizlemek için boşluk gönderir ve asıl temizlemenin nasıl yapılacağını açıklar."""
     if not await check_auth(update):
@@ -933,7 +1096,6 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bist_targets = TOP_BIST
         
         report_lines = ["🌅 *BIST 100 Günlük/Saatlik Yapay Zeka Taraması Sonuçları*:\n"]
-        candidates = []
         
         # Zaman alıcı işlemleri thread içinde yapabilmek için fonksiyon tanımlıyoruz
         def scan_all_bist100():
@@ -941,126 +1103,140 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             import pandas as pd
             import pandas_ta as ta
             
-            scanned_candidates = []
-            
             # 1. BIST 100 verilerini toplu olarak çekiyoruz
             print(f"BIST 100 toplu veri indiriliyor (toplam {len(bist_targets)} hisse)...")
             batch_data = data_sources.get_bist_data_batch(bist_targets, batch_size=35)
             
-            for symbol in bist_targets:
-                try:
-                    dfs = batch_data.get(symbol)
-                    if not dfs or dfs[0] is None or dfs[2] is None:
-                        continue
-                        
-                    df_1d, df_4h, df_1h = dfs
-                    
-                    # Filtre A: Saatlik Hacim Kontrolü (Son 20 saatlik ortalama hacmin en az 1.2 katı olmalı)
-                    if len(df_1h) >= 20:
-                        last_vol = df_1h['volume'].iloc[-1]
-                        avg_vol_20 = df_1h['volume'].rolling(20).mean().iloc[-1]
-                        if pd.isna(avg_vol_20) or avg_vol_20 == 0:
-                            avg_vol_20 = 1.0
-                        if last_vol <= avg_vol_20 * 1.2:
+            def apply_filter(vol_mult, rsi_limit, ema_check):
+                scanned_candidates = []
+                for symbol in bist_targets:
+                    try:
+                        dfs = batch_data.get(symbol)
+                        if not dfs or dfs[0] is None or dfs[2] is None:
                             continue
-                    else:
-                        continue
-
-                    # Filtre B: Saatlik (1h) RSI Kontrolü (RSI < 70 olmalı, aşırı şişmiş olmamalı)
-                    if len(df_1h) >= 15:
-                        df_1h_copy = df_1h.copy()
-                        df_1h_copy.ta.rsi(length=14, append=True)
-                        rsi_col = 'rsi_14' if 'rsi_14' in df_1h_copy.columns else 'RSI_14'
-                        if rsi_col in df_1h_copy.columns:
-                            rsi_1h = df_1h_copy[rsi_col].iloc[-1]
-                            if pd.isna(rsi_1h) or rsi_1h > 70.0:
+                            
+                        df_1d, df_4h, df_1h = dfs
+                        
+                        # Filtre A: Saatlik Hacim Kontrolü
+                        if len(df_1h) >= 20:
+                            last_vol = df_1h['volume'].iloc[-1]
+                            avg_vol_20 = df_1h['volume'].rolling(20).mean().iloc[-1]
+                            if pd.isna(avg_vol_20) or avg_vol_20 == 0:
+                                avg_vol_20 = 1.0
+                            if last_vol <= avg_vol_20 * vol_mult:
                                 continue
                         else:
                             continue
-                    else:
-                        continue
 
-                    # Günlük Tahmin
-                    res_1d = predict_future(
-                        symbol=symbol, 
-                        asset_type='bist', 
-                        context_len=90,
-                        horizon_len=7, 
-                        show_plot=False,
-                        save_plot=False,
-                        interval='1d',
-                        preloaded_dfs=dfs
-                    )
-                    
-                    if res_1d:
-                        _, final_pred_1d, pct_change_1d, rsi_1d = res_1d
-                        
-                        # Filtre C: Günlük trend negatifse ele
-                        if pct_change_1d <= 0:
+                        # Filtre B: Saatlik (1h) RSI Kontrolü (RSI < rsi_limit)
+                        if len(df_1h) >= 15:
+                            df_1h_copy = df_1h.copy()
+                            df_1h_copy.ta.rsi(length=14, append=True)
+                            rsi_col = 'rsi_14' if 'rsi_14' in df_1h_copy.columns else 'RSI_14'
+                            if rsi_col in df_1h_copy.columns:
+                                rsi_1h = df_1h_copy[rsi_col].iloc[-1]
+                                if pd.isna(rsi_1h) or rsi_1h > rsi_limit:
+                                    continue
+                            else:
+                                continue
+                        else:
                             continue
-                        
-                        # Vur-kaç seans içi işlem odaklı sabit 64 saatlik lookback
-                        best_c = 64
-                        best_mape_val = evaluate_model_accuracy(symbol, 'bist', '1h', best_c, 8, preloaded_dfs=dfs)
-                        if best_mape_val is None:
-                            best_mape_val = 0.0
 
-                        # Saatlik Tahmin
-                        res_1h = predict_future(
-                            symbol=symbol,
-                            asset_type='bist',
-                            context_len=best_c,
-                            horizon_len=8,
+                        # Günlük Tahmin
+                        res_1d = predict_future(
+                            symbol=symbol, 
+                            asset_type='bist', 
+                            context_len=90,
+                            horizon_len=7, 
                             show_plot=False,
                             save_plot=False,
-                            interval='1h',
+                            interval='1d',
                             preloaded_dfs=dfs
                         )
                         
-                        if res_1h:
-                            _, final_pred_1h, pct_change_1h, _ = res_1h
+                        if res_1d:
+                            _, final_pred_1d, pct_change_1d, rsi_1d = res_1d
                             
-                            # Filtre D: Saatlik trend negatifse ele
-                            if pct_change_1h <= 0:
+                            # Filtre C: Günlük trend negatifse ele
+                            if pct_change_1d <= 0:
                                 continue
-                                
-                            # Filtre E: EMA 5 Kontrolü
-                            ema5 = df_1h['close'].ewm(span=5, adjust=False).mean()
-                            last_close = df_1h['close'].iloc[-1]
-                            last_ema5 = ema5.iloc[-1]
-                            if last_close <= last_ema5:
-                                continue
-                                
-                            # ATR ve TP/SL
-                            tr1 = df_1h['high'] - df_1h['low']
-                            tr2 = (df_1h['high'] - df_1h['close'].shift(1)).abs()
-                            tr3 = (df_1h['low'] - df_1h['close'].shift(1)).abs()
-                            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                            atr = tr.rolling(window=14).mean().iloc[-1]
                             
-                            tp = last_close + (atr * 2.0)
-                            sl = last_close - (atr * 1.5)
-                            tp_pct = ((tp - last_close) / last_close) * 100
-                            sl_pct = ((last_close - sl) / last_close) * 100
+                            # Vur-kaç seans içi işlem odaklı sabit 64 saatlik lookback
+                            best_c = 64
+                            best_mape_val = evaluate_model_accuracy(symbol, 'bist', '1h', best_c, 8, preloaded_dfs=dfs)
+                            if best_mape_val is None:
+                                best_mape_val = 0.0
+
+                            # Saatlik Tahmin
+                            res_1h = predict_future(
+                                symbol=symbol,
+                                asset_type='bist',
+                                context_len=best_c,
+                                horizon_len=8,
+                                show_plot=False,
+                                save_plot=False,
+                                interval='1h',
+                                preloaded_dfs=dfs
+                            )
+                            
+                            if res_1h:
+                                _, final_pred_1h, pct_change_1h, _ = res_1h
                                 
-                            scanned_candidates.append({
-                                'symbol': symbol,
-                                'pct_change_1d': pct_change_1d,
-                                'pct_change_1h': pct_change_1h,
-                                'rsi': rsi_1h,
-                                'tp': tp,
-                                'sl': sl,
-                                'tp_pct': tp_pct,
-                                'sl_pct': sl_pct,
-                                'price': last_close,
-                                'best_context_1h': best_c,
-                                'mape_1h': best_mape_val
-                            })
-                except Exception as e:
-                    logger.error(f"Scan error for {symbol}: {e}")
-            return scanned_candidates
+                                # Filtre D: Saatlik trend negatifse ele
+                                if pct_change_1h <= 0:
+                                    continue
+                                    
+                                last_close = df_1h['close'].iloc[-1]
+                                
+                                # Filtre E: EMA 5 Kontrolü
+                                if ema_check:
+                                    ema5 = df_1h['close'].ewm(span=5, adjust=False).mean()
+                                    last_ema5 = ema5.iloc[-1]
+                                    if last_close <= last_ema5:
+                                        continue
+                                    
+                                # ATR ve TP/SL
+                                tr1 = df_1h['high'] - df_1h['low']
+                                tr2 = (df_1h['high'] - df_1h['close'].shift(1)).abs()
+                                tr3 = (df_1h['low'] - df_1h['close'].shift(1)).abs()
+                                tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                                atr = tr.rolling(window=14).mean().iloc[-1]
+                                
+                                tp = last_close + (atr * 2.0)
+                                sl = last_close - (atr * 1.5)
+                                tp_pct = ((tp - last_close) / last_close) * 100
+                                sl_pct = ((last_close - sl) / last_close) * 100
+                                    
+                                scanned_candidates.append({
+                                    'symbol': symbol,
+                                    'pct_change_1d': pct_change_1d,
+                                    'pct_change_1h': pct_change_1h,
+                                    'rsi': rsi_1h,
+                                    'tp': tp,
+                                    'sl': sl,
+                                    'tp_pct': tp_pct,
+                                    'sl_pct': sl_pct,
+                                    'price': last_close,
+                                    'best_context_1h': best_c,
+                                    'mape_1h': best_mape_val
+                                })
+                    except Exception as e:
+                        logger.error(f"Scan error for {symbol}: {e}")
+                return scanned_candidates
+
+            # Level 1 (Standart/Sabah Taraması): Hacim > 1.0, RSI < 70, EMA5 aktif
+            level = 1
+            results = apply_filter(vol_mult=1.0, rsi_limit=70.0, ema_check=True)
+            
+            # Level 2 (Esnek/Fallback): Hacim > 0.8, RSI < 75, EMA5 pasif
+            if not results:
+                print("Level 1 (Standart) filtrelerinden geçen hisse bulunamadı. Level 2 (Esnek/Fallback) deneniyor...")
+                level = 2
+                results = apply_filter(vol_mult=0.8, rsi_limit=75.0, ema_check=False)
+                
+            return results, level, batch_data
   
-        candidates = await asyncio.to_thread(scan_all_bist100)
+        candidates, level, batch_data = await asyncio.to_thread(scan_all_bist100)
         
         # 3. Kademeli öncelik sınıflandırması (A -> B -> C) ve sıralama tuşunu oluşturma
         for cand in candidates:
@@ -1082,6 +1258,11 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         top_3 = candidates[:3]
         
         if top_3:
+            if level == 2:
+                report_lines.append("⚠️ *ÖNEMLİ NOT: Bugün standart tarama filtrelerini geçen hisse bulunamadığı için ESNEK/YEDEK filtreler (Hacim Artışı > 0.8x, RSI < 75, EMA 5 pasif) kullanılmıştır.*\n")
+            else:
+                report_lines.append("✅ *Filtre Durumu: Tüm standart tarama filtreleri (Hacim > 1.0x, RSI < 70, EMA 5) başarıyla karşılanmıştır.*\n")
+                
             report_lines.append("🏆 *Günün En Çok Yükseliş Beklenen 3 Hissesi (Çoklu Zaman Dilimi Teyitli)*:\n")
             for i, cand in enumerate(top_3, 1):
                 sym = cand['symbol']
@@ -1092,7 +1273,7 @@ async def sabah_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                      f"   🎯 Hedef (TP): {cand['tp']:.2f} (+%{cand['tp_pct']:.2f})\n"
                                      f"   🛑 Stop (SL): {cand['sl']:.2f} (-%{cand['sl_pct']:.2f})\n")
         else:
-            report_lines.append("\n⚠️ *Bugün tüm filtreleri geçen (Hacim Artışı, Saatlik RSI < 70, EMA 5) BIST 100 hissesi bulunamadı.*")
+            report_lines.append("\n⚠️ *Bugün hem standart hem de esnek filtreleri geçen BIST 100 hissesi bulunamadı.*")
             
         await msg.delete()
         await update.message.reply_text("\n".join(report_lines), parse_mode='Markdown')
@@ -1150,6 +1331,7 @@ def main():
     application.add_handler(CommandHandler("saatlik", saatlik))
     application.add_handler(CommandHandler("sabah", sabah_komutu))
     application.add_handler(CommandHandler("tara", sabah_komutu))
+    application.add_handler(CommandHandler("taracrypto", taracrypto))
 
     # JobQueue for daily report at 09:00 TR Time
     # If job_queue isn't installed, this might throw an error. In PTB v20 it's typically built-in or requires python-telegram-bot[job-queue].
