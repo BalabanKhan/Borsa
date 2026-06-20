@@ -308,6 +308,16 @@ def _cb_on_trade_closed_helper(status, ticker_ct, strategy_ct, pnl_pct, hold_hou
 
 def _handle_closed_trade_accounting(closed_trades, notifications):
     _archive_closed_trades(closed_trades)
+    
+    # Generate postmortem for each closed trade
+    try:
+        from .postmortem import generate_postmortem
+        for ct in closed_trades:
+            generate_postmortem(ct)
+    except Exception as e:
+        import logging
+        logging.error(f"[_handle_closed_trade_accounting] Postmortem generation failed: {e}")
+
     cb_notifications = []
     
     def _cb_listener(msg):

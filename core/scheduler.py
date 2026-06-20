@@ -46,6 +46,9 @@ class TaskScheduler:
         # Gün Sonu Excel Snapshot Gönderimi (Her gün 23:00)
         self.scheduler.add_job(self.send_daily_snapshot, 'cron', hour=23, minute=0, id='daily_snapshot')
         
+        # Günlük AI Otopsi Raporu (Her gün 23:30)
+        self.scheduler.add_job(self.send_ai_postmortem_report, 'cron', hour=23, minute=30, id='ai_postmortem_report')
+        
         # Haftalık Darwinizm (Her Pazar 00:00)
         self.scheduler.add_job(self.run_weekly_tasks, 'cron', day_of_week='sun', hour=0, minute=0, id='weekly_tasks')
 
@@ -126,6 +129,15 @@ class TaskScheduler:
                 asyncio.create_task(send_snapshot_excel(metrics))
         except Exception as e:
             logger.warning(f"Gün sonu Excel gönderilemedi: {e}")
+
+    async def send_ai_postmortem_report(self):
+        try:
+            from trade_tracker.reporter import generate_ai_daily_report
+            report_msg = generate_ai_daily_report()
+            # Send to WATCH channel as requested
+            await self.notifier.send_message(report_msg, is_watch=True)
+        except Exception as e:
+            logger.error(f"Günlük AI Raporu gönderilemedi: {e}")
 
     async def send_heartbeat(self):
         trades = load_trades()

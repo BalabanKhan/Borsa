@@ -220,11 +220,33 @@ def _update_trailing_stop(t, current_price, profit_pct, signal, strategy_name):
     """
     Hibrit izleyen stop güncelleme motoru.
     Ters Mandal (Ratchet): LONG stop yalnızca YUKARI, SHORT stop yalnızca AŞAĞI gider.
+    Freqtrade tarzı activation threshold (R:R >= TRAILING_STOP_ACTIVATION_RR) eklenmiştir.
     """
     notifications = []
     ticker = t["ticker"]
     sl = float(t["sl"])
     trailing_dist = float(t.get("trailing_dist", abs(float(t["entry_price"]) - sl)))
+    entry_price = float(t["entry_price"])
+
+    # Freqtrade-style Trailing Stop Activation Check
+    initial_risk = trailing_dist
+    current_rr = 0.0
+    if initial_risk > 0:
+        if signal == "AL":
+            current_rr = (current_price - entry_price) / initial_risk
+        else:
+            current_rr = (entry_price - current_price) / initial_risk
+
+    is_trailing_active = t.get("trailing_active", False)
+    activation_rr = getattr(config, 'TRAILING_STOP_ACTIVATION_RR', 1.5)
+
+    if not is_trailing_active and current_rr >= activation_rr:
+        t["trailing_active"] = True
+        is_trailing_active = True
+        logging.info(f"[{ticker}] Trailing Stop aktif edildi! Mevcut R:R: {current_rr:.2f} >= Eşik: {activation_rr}")
+
+    if not is_trailing_active:
+        return t, notifications
 
     if signal == "AL":
         atr_floor = trailing_dist * 0.3

@@ -168,6 +168,33 @@ def get_open_interest(symbol):
         logging.warning(f"[get_open_interest] {symbol}: {e}")
     return 0.0
 
+def get_order_book_imbalance(symbol, depth=20):
+    """
+    Emir defterini (Order Book) çeker ve Alış (Bid) ile Satış (Ask) arasındaki
+    hacimsel dengesizliği (imbalance) hesaplar.
+    + değer: Alıcılar baskın (Buy wall)
+    - değer: Satıcılar baskın (Sell wall)
+    """
+    if IS_USA_SERVER:
+        return 0.0
+    try:
+        orderbook = exchange.fetch_order_book(symbol, limit=depth)
+        bids = orderbook['bids']
+        asks = orderbook['asks']
+        
+        bid_vol = sum([amount for price, amount in bids])
+        ask_vol = sum([amount for price, amount in asks])
+        
+        if (bid_vol + ask_vol) == 0:
+            return 0.0
+            
+        imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol)
+        return imbalance
+    except Exception as e:
+        logging.warning(f"[get_order_book_imbalance] {symbol}: {e}")
+        return 0.0
+
+
 def fetch_crypto_oi_crash(symbol):
     """Son 24 saat içinde Open Interest (OI) verisinde %15 veya daha büyük bir çöküş var mı?"""
     if IS_USA_SERVER:

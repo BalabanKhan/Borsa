@@ -128,17 +128,21 @@ def record_asset_sl(ticker: str) -> str | None:
         else:
             level_info = PENALTY_LEVELS[1]
 
+        # Her SL işleminde en az 4 saatlik Pair Lock uygula
+        lock_hours = getattr(config, 'PAIR_LOCK_HOURS', 4)
+        cooldown_hours = max(lock_hours, level_info["cooldown_hours"])
+
         # Cooldown uygula
-        if level_info["cooldown_hours"] > 0:
-            until = datetime.now(timezone.utc) + timedelta(hours=level_info["cooldown_hours"])
+        if cooldown_hours > 0:
+            until = datetime.now(timezone.utc) + timedelta(hours=cooldown_hours)
             asset["cooldown_until"] = until.isoformat()
 
             notification = (
-                f"🥊 <b>CEZA KUTUSU — {level_info['level']}</b>\n"
+                f"🥊 <b>CEZA KUTUSU — PAİR LOCK / {level_info['level']}</b>\n"
                 f"Varlık: <code>{ticker}</code>\n"
                 f"Ardışık SL: <b>{consec}</b>\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"🛑 Bu varlıkta <b>{level_info['cooldown_hours']} saat</b> sinyal üretilmeyecek.\n"
+                f"🛑 Bu varlıkta <b>{cooldown_hours} saat</b> sinyal üretilmeyecek.\n"
                 f"⏰ Yasak bitişi: <b>{until.strftime('%d/%m %H:%M')} UTC</b>\n"
             )
 
@@ -148,7 +152,7 @@ def record_asset_sl(ticker: str) -> str | None:
                     f"Stratejilerin bu varlıkla uyumunu gözden geçirin."
                 )
 
-            logging.warning(f"[PenaltyBox] 🥊 {ticker} → {level_info['level']} ({consec} ardışık SL)")
+            logging.warning(f"[PenaltyBox] 🥊 {ticker} → {level_info['level']} ({consec} ardışık SL, {cooldown_hours} saat Cooldown)")
 
         elif consec >= 2:
             notification = (

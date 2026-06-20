@@ -140,6 +140,35 @@ async def scan_all_markets():
 
         logging.info(f"[scan_all_markets] BIST tarama: {_time.time()-t0:.1f}s")
 
+        # SMC Tarama (BIST)
+        try:
+            from research.bot.scanners.smc_scanner import run_smc_scan
+            smc_longs, smc_shorts = run_smc_scan('bist')
+            for item in smc_longs:
+                sl = item['price'] - 1.5 * item['atr']
+                tp = max(item['poc'], item['price'] + 3.0 * item['atr'])
+                all_signals.append({
+                    "ticker": item['symbol'], "market": "BIST",
+                    "strategy": "SMC DİNAMİK SCANNER", "signal": "AL",
+                    "entry_price": item['price'], "sl": sl, "tp": tp,
+                    "conviction_score": item['long_score'] * 20,
+                    "conviction_grade": "STRONG" if item['long_score'] >= 4 else ("MEDIUM" if item['long_score'] >= 3 else "WATCH"),
+                    "reason": f"SMC Hacim POC ({item['poc']:.4f}) uzerinde. Z-Score: {item['z_score']:.2f}. Swing Low: {item['last_swing_low']:.4f}."
+                })
+            for item in smc_shorts:
+                sl = item['price'] + 1.5 * item['atr']
+                tp = min(item['poc'], item['price'] - 3.0 * item['atr'])
+                all_signals.append({
+                    "ticker": item['symbol'], "market": "BIST",
+                    "strategy": "SMC DİNAMİK SCANNER", "signal": "SAT",
+                    "entry_price": item['price'], "sl": sl, "tp": tp,
+                    "conviction_score": item['short_score'] * 20,
+                    "conviction_grade": "STRONG" if item['short_score'] >= 4 else ("MEDIUM" if item['short_score'] >= 3 else "WATCH"),
+                    "reason": f"SMC Hacim POC ({item['poc']:.4f}) altinda. Z-Score: {item['z_score']:.2f}. Swing High: {item['last_swing_high']:.4f}."
+                })
+        except Exception as e:
+            logging.warning(f"[scan_all_markets] BIST SMC Scan Error: {e}")
+
     # 2. KRİPTO TARAMALARI (Cycle Cache aktif)
     if scan_crypto:
         t0 = _time.time()
@@ -172,6 +201,35 @@ async def scan_all_markets():
         results = await asyncio.gather(*tasks)
         for sigs in results:
             all_signals.extend(sigs)
+
+        # SMC Tarama (Kripto)
+        try:
+            from research.bot.scanners.smc_scanner import run_smc_scan
+            smc_longs, smc_shorts = run_smc_scan('crypto')
+            for item in smc_longs:
+                sl = item['price'] - 1.5 * item['atr']
+                tp = max(item['poc'], item['price'] + 3.0 * item['atr'])
+                all_signals.append({
+                    "ticker": item['symbol'], "market": "KRIPTO",
+                    "strategy": "SMC DİNAMİK SCANNER", "signal": "AL",
+                    "entry_price": item['price'], "sl": sl, "tp": tp,
+                    "conviction_score": item['long_score'] * 20,
+                    "conviction_grade": "STRONG" if item['long_score'] >= 4 else ("MEDIUM" if item['long_score'] >= 3 else "WATCH"),
+                    "reason": f"SMC Hacim POC ({item['poc']:.4f}) uzerinde. Z-Score: {item['z_score']:.2f}. Swing Low: {item['last_swing_low']:.4f}."
+                })
+            for item in smc_shorts:
+                sl = item['price'] + 1.5 * item['atr']
+                tp = min(item['poc'], item['price'] - 3.0 * item['atr'])
+                all_signals.append({
+                    "ticker": item['symbol'], "market": "KRIPTO",
+                    "strategy": "SMC DİNAMİK SCANNER", "signal": "SAT",
+                    "entry_price": item['price'], "sl": sl, "tp": tp,
+                    "conviction_score": item['short_score'] * 20,
+                    "conviction_grade": "STRONG" if item['short_score'] >= 4 else ("MEDIUM" if item['short_score'] >= 3 else "WATCH"),
+                    "reason": f"SMC Hacim POC ({item['poc']:.4f}) altinda. Z-Score: {item['z_score']:.2f}. Swing High: {item['last_swing_high']:.4f}."
+                })
+        except Exception as e:
+            logging.warning(f"[scan_all_markets] Kripto SMC Scan Error: {e}")
 
         logging.info(f"[scan_all_markets] Kripto tarama: {_time.time()-t0:.1f}s")
 

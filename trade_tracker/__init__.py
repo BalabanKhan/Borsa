@@ -24,6 +24,7 @@ from .trailing import (
     _get_structural_floor,
     _update_trailing_stop,
 )
+from .postmortem import get_postmortems
 
 __all__ = [
     "load_trades",
@@ -33,6 +34,7 @@ __all__ = [
     "_archive_closed_trades",
     "_check_sfp_mfe_time_filter",
     "get_learning_context",
+    "get_postmortems",
     "TRADE_JOURNAL_CSV",
     "_check_time_stop",
     "_get_structural_floor",

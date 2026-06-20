@@ -352,6 +352,7 @@ CACHE_TTL_SECONDS = 300        # 5 dk cache
 SCAN_INTERVAL_MINUTES = 15
 HEARTBEAT_INTERVAL = 6 * 3600  # 6 saatte 1 heartbeat
 COOLDOWN_SECONDS = 3600        # 1 saat sinyal cooldown
+PAIR_LOCK_HOURS = 4            # Her SL sonrası bu varlığın kilitleneceği süre (saat)
 # 99 yapılmıştır
 # Veri çekim derinliği ve eksik veri durumunda uygulanacak belirsizlik cezası parametreleri eklenmiştir.
 DATA_PERIOD_1D = "12mo"            # 1D timeframe için 1 yıllık veri çekilir (en az 250+ bar, SMA 200 için şarttır)
