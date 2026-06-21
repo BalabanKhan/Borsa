@@ -56,7 +56,10 @@ class NotificationService:
             sent = False
             for attempt in range(max_retries):
                 try:
-                    await target_bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML)
+                    await asyncio.wait_for(
+                        target_bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML),
+                        timeout=15.0
+                    )
                     logger.info(f"[Telegram] Mesaj gönderildi: chat_id={chat_id}")
                     sent = True
                     break
@@ -106,10 +109,13 @@ class NotificationService:
         remaining = []
         for item in failed:
             try:
-                await self.bot.send_message(
-                    chat_id=item["chat_id"],
-                    text=f"⏰ <i>Gecikmeli mesaj ({item['timestamp'][:16]}):</i>\n\n{item['message']}",
-                    parse_mode=ParseMode.HTML
+                await asyncio.wait_for(
+                    self.bot.send_message(
+                        chat_id=item["chat_id"],
+                        text=f"⏰ <i>Gecikmeli mesaj ({item['timestamp'][:16]}):</i>\n\n{item['message']}",
+                        parse_mode=ParseMode.HTML
+                    ),
+                    timeout=15.0
                 )
             except Exception as e:
                 logger.warning(f"Retry başarısız chat_id={item.get('chat_id')}: {e}")
