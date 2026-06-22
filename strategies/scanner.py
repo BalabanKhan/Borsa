@@ -85,7 +85,7 @@ async def scan_all_markets():
     else:
         bist_open = is_bist_open()
         scan_bist = bist_open
-        scan_crypto = not bist_open
+        scan_crypto = True
         logging.info(f"[ZAMANLAYICI] BIST Açık mı: {bist_open} | Aktif Tarama -> BIST: {scan_bist}, Kripto: {scan_crypto}")
 
     # 1. BIST TARAMALARI (Batch Download)

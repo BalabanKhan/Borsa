@@ -1017,8 +1017,9 @@ def calculate_conviction(
 
     for factor, weight in w.items():
         factor_score = scores.get(factor, 0.0)
-        result.component_scores[factor] = round(factor_score, 1)
-        total += factor_score * weight
+        net_contribution = factor_score * weight
+        result.component_scores[factor] = round(net_contribution, 1)
+        total += net_contribution
 
     # V3.4: Data Guard & Conflict Resolver Soft Cezaları
     data_guard_penalty = scores.get("data_guard_penalty", 0.0)
