@@ -287,7 +287,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 data = json.loads(post_data)
                 ticker_to_close = data.get("ticker")
                 
-                from trade_tracker import load_trades, save_trades, _archive_closed_trades
+                from trade_tracker.repository import load_trades, save_trades, _archive_closed_trades
                 trades = load_trades()
                 
                 closed_any = False

@@ -33,6 +33,16 @@ exchange_futures = ccxt.binance({
 })
 exchange_fallback = ccxt.kraken({'enableRateLimit': True})
 
+import ccxt.async_support as ccxt_async
+import asyncio
+exchange_async = ccxt_async.binance({'enableRateLimit': True})
+exchange_fallback_async = ccxt_async.kraken({'enableRateLimit': True})
+
+    'enableRateLimit': True,
+    'options': {'defaultType': 'future'}
+})
+exchange_fallback = ccxt.kraken({'enableRateLimit': True})
+
 # ════════════════════════════════════════
 # Unified Cache
 # ════════════════════════════════════════
@@ -77,6 +87,16 @@ def get_crypto_data_cached(symbol):
         if symbol in _ohlcv_cycle_cache:
             return _ohlcv_cycle_cache[symbol]
     result = get_crypto_data(symbol)
+    with _cycle_cache_lock:
+        _ohlcv_cycle_cache[symbol] = result
+    return result
+
+async def get_crypto_data_async_cached(symbol):
+    """Async cache check for scanner."""
+    with _cycle_cache_lock:
+        if symbol in _ohlcv_cycle_cache:
+            return _ohlcv_cycle_cache[symbol]
+    result = await async_get_crypto_data(symbol)
     with _cycle_cache_lock:
         _ohlcv_cycle_cache[symbol] = result
     return result
@@ -383,6 +403,88 @@ def get_bist_15m_batch(symbols, batch_size=25):
         _time.sleep(0.3)
 
     return results
+
+async def async_get_crypto_data(symbol):
+    """Fully asynchronous crypto data fetcher with retry logic for scanner."""
+    limit = OHLCV_LIMIT
+    retries = 3
+    base_delay = 1.0
+
+    if not IS_USA_SERVER:
+        for attempt in range(retries):
+            try:
+                ohlcv_1d = await exchange_async.fetch_ohlcv(symbol, '1d', limit=limit)
+                df_1d = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+                ohlcv_4h = await exchange_async.fetch_ohlcv(symbol, '4h', limit=limit)
+                df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+                for df in [df_1d, df_4h]:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                    df.set_index('timestamp', inplace=True)
+
+                df_1d = guard_dataframe(df_1d, symbol, "1d")
+                df_4h = guard_dataframe(df_4h, symbol, "4h")
+                if df_1d is not None and df_4h is not None:
+                    return df_1d, df_4h
+                break  # If DataGuard fails, don't retry, move to fallback
+            except Exception as e:
+                logging.warning(f"[async_get_crypto_data] attempt {attempt+1} failed for {symbol}: {e}")
+                if attempt < retries - 1:
+                    await asyncio.sleep(base_delay * (2 ** attempt))
+                else:
+                    logging.info(f"[async_get_crypto_data] Binance failed completely, trying fallbacks.")
+
+    # Fallback to Kraken Async
+    try:
+        try:
+            ohlcv_1d = await exchange_fallback_async.fetch_ohlcv(symbol, '1d', limit=limit)
+            ohlcv_4h = await exchange_fallback_async.fetch_ohlcv(symbol, '4h', limit=limit)
+        except Exception:
+            usd_sym = symbol.replace("/USDT", "/USD")
+            ohlcv_1d = await exchange_fallback_async.fetch_ohlcv(usd_sym, '1d', limit=limit)
+            ohlcv_4h = await exchange_fallback_async.fetch_ohlcv(usd_sym, '4h', limit=limit)
+
+        df_1d = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+        for df in [df_1d, df_4h]:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+
+        df_1d = guard_dataframe(df_1d, symbol, '1d')
+        df_4h = guard_dataframe(df_4h, symbol, '4h')
+        if df_1d is not None and df_4h is not None:
+            return df_1d, df_4h
+        raise ValueError(f'[async_get_crypto_data] {symbol}: Kraken data rejected by DataGuard')
+    except Exception as ekr:
+        # Fallback to synchronous yfinance via thread
+        try:
+            yf_ticker = symbol.replace("/USDT", "-USD")
+            
+            def fetch_yf():
+                df1 = yf.download(yf_ticker, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
+                df1 = clean_yf_df(df1)
+                df_h = yf.download(yf_ticker, period=config.DATA_PERIOD_1H, interval="1h", progress=False)
+                df_h = clean_yf_df(df_h)
+                return df1, df_h
+
+            df_1d, df_1h = await asyncio.to_thread(fetch_yf)
+            
+            if df_1h.empty or df_1d.empty: return None, None
+
+            df_4h = df_1h.resample('4h').agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}).dropna()
+
+            df_1d = guard_dataframe(df_1d, symbol, '1d')
+            df_4h = guard_dataframe(df_4h, symbol, '4h')
+            if df_1d is None or df_4h is None:
+                logging.warning(f'[async_get_crypto_data] {symbol}: yfinance rejected by DataGuard')
+                return None, None
+            return df_1d, df_4h
+        except Exception as eyf:
+            logging.warning(f"[async_get_crypto_data] {symbol} failed all sources: {eyf}")
+            return None, None
+
 
 def get_crypto_data(symbol):
     limit = OHLCV_LIMIT

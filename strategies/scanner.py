@@ -30,7 +30,7 @@ from config import (
     RR_MINIMUM,
 )
 from data_sources import (
-    get_emtia_data, get_bist_data_batch, get_bist_15m_batch, get_crypto_data_cached,
+    get_emtia_data, get_bist_data_batch, get_bist_15m_batch, get_crypto_data_cached, get_crypto_data_async_cached,
     clear_cycle_cache, purge_expired_cache,
     is_bist_open, check_xu100_wind, get_btc_status, _get_btc_htf_bias, _check_dxy_shield,
     _is_macro_news_hour, _is_btc_bullish_for_shorts, _get_xu100_daily_data,
@@ -156,7 +156,7 @@ async def scan_all_markets():
         async def fetch_and_analyze_crypto(sym):
             async with semaphore:
                 try:
-                    df_1d, df_4h = await asyncio.to_thread(get_crypto_data_cached, sym)
+                    df_1d, df_4h = await get_crypto_data_async_cached(sym)
                     if df_1d is not None:
                         # DG-05: MTF hizalama kontrolü
                         if not guard_mtf_bundle(sym, df_1d, df_4h):
@@ -238,7 +238,7 @@ async def scan_all_markets():
                     continue
                 try:
                     # Cache'den okur → API çağrısı SIFIR (Kripto'da zaten çekildi)
-                    df_1d, df_4h = get_crypto_data_cached(sym)
+                    df_1d, df_4h = await get_crypto_data_async_cached(sym)
                     if df_1d is not None and df_4h is not None:
                         sigs = analyze_bear_hunter(sym, df_1d, df_4h, btc_bullish, metrics_collector=scan_metrics)
                         all_signals.extend(sigs)
