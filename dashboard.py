@@ -389,7 +389,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     <div class="section fade-in" style="animation-delay: 160ms">
         <div class="section-hdr"><h3>Active Deployments (<span id="trade-count">0</span>)</h3></div>
         <table id="trade-table">
-            <thead><tr><th>Ticker</th><th>Dir</th><th>Strategy</th><th>Entry</th><th>SL</th><th>TP</th><th>Conviction</th><th>Status</th></tr></thead>
+            <thead><tr><th onclick="sortTrades('ticker')" style="cursor:pointer" title="Sırala">Ticker ↕</th><th>Dir</th><th>Strategy</th><th>Entry</th><th>SL</th><th>TP</th><th onclick="sortTrades('conviction_score')" style="cursor:pointer" title="Sırala">Conviction ↕</th><th>Status</th></tr></thead>
             <tbody id="trade-body"><tr><td colspan="8" class="empty">No active deployments.</td></tr></tbody>
         </table>
     </div>
@@ -410,6 +410,64 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     <script>
         function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+        let sortCol = 'conviction_score';
+        let sortDesc = true;
+        let currentTrades = [];
+
+        function sortTrades(col) {
+            if (sortCol === col) {
+                sortDesc = !sortDesc;
+            } else {
+                sortCol = col;
+                sortDesc = true;
+            }
+            renderTrades();
+        }
+
+        function renderTrades() {
+            const trades = currentTrades;
+            document.getElementById('trade-count').textContent=trades.length;
+            const tBody=document.getElementById('trade-body');
+            
+            if(trades.length){
+                let sortedTrades = [...trades];
+                sortedTrades.sort((a,b) => {
+                    let valA = a[sortCol];
+                    let valB = b[sortCol];
+                    if (valA === undefined || valA === null) valA = sortCol === 'conviction_score' ? -9999 : '';
+                    if (valB === undefined || valB === null) valB = sortCol === 'conviction_score' ? -9999 : '';
+                    
+                    if (valA < valB) return sortDesc ? 1 : -1;
+                    if (valA > valB) return sortDesc ? -1 : 1;
+                    return 0;
+                });
+                
+                tBody.innerHTML=sortedTrades.map(t=>{
+                    const cs=t.conviction_score;
+                    const cg=t.conviction_grade||'';
+                    let convHtml='—';
+                    if(cs!==undefined&&cs!==null){
+                        const bc=cg==='STRONG'?'b-strong':cg==='MEDIUM'?'b-medium':cg==='WATCH'?'b-watch':'b-reject';
+                        convHtml=`${Math.round(cs)} <span class="badge ${bc}">${cg}</span>`;
+                    }
+                    const status=t.status||'ACTIVE';
+                    const stColor=status==='ACTIVE'?'#EAEAEA':'#787774';
+                    return `<tr>
+                        <td style="font-family:'Geist Mono',monospace">${esc(t.ticker)}</td>
+                        <td style="color:${t.signal==='AL'?'#EAEAEA':'#787774'}">${t.signal}</td>
+                        <td>${esc(t.strategy)}</td>
+                        <td style="font-family:'Geist Mono',monospace">${t.entry_price}</td>
+                        <td style="font-family:'Geist Mono',monospace;color:#787774">${t.sl}</td>
+                        <td style="font-family:'Geist Mono',monospace">${t.tp}</td>
+                        <td>${convHtml}</td>
+                        <td style="color:${stColor};font-family:'Geist Mono',monospace;font-size:11px">${status}</td>
+                    </tr>`;
+                }).join('');
+            } else {
+                tBody.innerHTML='<tr><td colspan="8" class="empty">No active deployments.</td></tr>';
+            }
+        }
 
         function updateAllData(){
             fetch('/api/all')
@@ -465,34 +523,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 }
 
                 // AKTİF İŞLEMLER
-                const trades=d.trades||[];
-                document.getElementById('trade-count').textContent=trades.length;
-                const tBody=document.getElementById('trade-body');
-                if(trades.length){
-                    tBody.innerHTML=trades.map(t=>{
-                        const cs=t.conviction_score;
-                        const cg=t.conviction_grade||'';
-                        let convHtml='—';
-                        if(cs!==undefined&&cs!==null){
-                            const bc=cg==='STRONG'?'b-strong':cg==='MEDIUM'?'b-medium':cg==='WATCH'?'b-watch':'b-reject';
-                            convHtml=`${Math.round(cs)} <span class="badge ${bc}">${cg}</span>`;
-                        }
-                        const status=t.status||'ACTIVE';
-                        const stColor=status==='ACTIVE'?'#EAEAEA':'#787774';
-                        return `<tr>
-                            <td style="font-family:'Geist Mono',monospace">${esc(t.ticker)}</td>
-                            <td style="color:${t.signal==='AL'?'#EAEAEA':'#787774'}">${t.signal}</td>
-                            <td>${esc(t.strategy)}</td>
-                            <td style="font-family:'Geist Mono',monospace">${t.entry_price}</td>
-                            <td style="font-family:'Geist Mono',monospace;color:#787774">${t.sl}</td>
-                            <td style="font-family:'Geist Mono',monospace">${t.tp}</td>
-                            <td>${convHtml}</td>
-                            <td style="color:${stColor};font-family:'Geist Mono',monospace;font-size:11px">${status}</td>
-                        </tr>`;
-                    }).join('');
-                }else{
-                    tBody.innerHTML='<tr><td colspan="8" class="empty">No active deployments.</td></tr>';
-                }
+                currentTrades = d.trades || [];
+                renderTrades();
 
                 // STRATEGY ANALYTICS
                 let analyticsHtml = '<div style="display:flex; gap:48px; flex-wrap:wrap;">';
