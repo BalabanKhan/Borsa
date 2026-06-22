@@ -38,10 +38,6 @@ import asyncio
 exchange_async = ccxt_async.binance({'enableRateLimit': True})
 exchange_fallback_async = ccxt_async.kraken({'enableRateLimit': True})
 
-    'enableRateLimit': True,
-    'options': {'defaultType': 'future'}
-})
-exchange_fallback = ccxt.kraken({'enableRateLimit': True})
 
 # ════════════════════════════════════════
 # Unified Cache
