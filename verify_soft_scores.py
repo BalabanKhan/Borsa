@@ -148,9 +148,61 @@ def test_sniper_soft_scoring():
     # Ensure weights sum test passes
     print("Sniper tests passed!")
 
+def test_autopsy_soft_penalty():
+    print("\nTesting Autopsy Soft Penalty...")
+    from conviction_scorer import calculate_autopsy_soft_penalty
+
+    # 1. Trend strategy (Long) below SMA 200, overbought RSI, low volume ratio
+    # price = 90, sma200 = 100 (below by 10% -> 15.0 max penalty)
+    # rsi_1h = 65 (>55 by 10 -> 10.0 max penalty)
+    # volume_ratio = 2.0 (below 6.0 threshold -> (6.0 - 2.0)/6.0 * 10 = 6.67 penalty)
+    # Total trend penalty should be -15.0 - 10.0 - 6.67 = -31.67
+    pen_trend = calculate_autopsy_soft_penalty(
+        price=90.0,
+        sma200_1d=100.0,
+        rsi_1h=65.0,
+        volume_ratio=2.0,
+        is_long=True,
+        strategy_type="TREND_BREAKOUT"
+    )
+    print(f"Trend strategy penalty: {pen_trend}")
+    assert pen_trend == -31.67
+
+    # 2. Mean Reversion strategy (Long) with same params
+    # below SMA 200 -> no penalty
+    # overbought RSI -> no penalty
+    # volume_ratio = 2.0 (below 3.0 threshold -> (3.0 - 2.0)/3.0 * 10.0 = 3.33 penalty)
+    # Total MR penalty should be -3.33
+    pen_mr = calculate_autopsy_soft_penalty(
+        price=90.0,
+        sma200_1d=100.0,
+        rsi_1h=65.0,
+        volume_ratio=2.0,
+        is_long=True,
+        strategy_type="MEAN_REVERSION_DIP"
+    )
+    print(f"Mean Reversion strategy penalty: {pen_mr}")
+    assert pen_mr == -3.33
+
+    # 3. Mean Reversion strategy (Long) above volume threshold 3.0 -> no penalty at all
+    pen_mr_clean = calculate_autopsy_soft_penalty(
+        price=90.0,
+        sma200_1d=100.0,
+        rsi_1h=65.0,
+        volume_ratio=3.5,
+        is_long=True,
+        strategy_type="MEAN_REVERSION_DIP"
+    )
+    print(f"Mean Reversion clean penalty: {pen_mr_clean}")
+    assert pen_mr_clean == 0.0
+
+    print("Autopsy soft penalty tests passed!")
+
 if __name__ == "__main__":
     test_data_guard_soft_penalties()
     test_conflict_resolver_soft_penalties()
     test_calculate_conviction()
     test_sniper_soft_scoring()
+    test_autopsy_soft_penalty()
     print("\nAll tests passed successfully!")
+

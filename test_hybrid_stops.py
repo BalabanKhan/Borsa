@@ -151,7 +151,8 @@ class TestHybridStops(unittest.TestCase):
             "entry_price": 50000.0,
             "sl": 48000.0,
             "highest_high": 50000.0,
-            "trailing_dist": 2000.0
+            "trailing_dist": 2000.0,
+            "trailing_active": True
         }
         
         # Kar: %2.0, ATR Çarpanı: 2.5 (Çünkü profit_pct < 5.0). multiplier/2.5 = 1.0. current_trailing_dist = 2000.0
@@ -183,7 +184,8 @@ class TestHybridStops(unittest.TestCase):
             "entry_price": 100.0,
             "sl": 90.0,
             "highest_high": 100.0,
-            "trailing_dist": 5.0
+            "trailing_dist": 5.0,
+            "trailing_active": True
         }
         
         current_price = 100.0
@@ -209,8 +211,8 @@ class TestHybridStops(unittest.TestCase):
         test_csv = "test_trade_journal.csv"
         
         # Orijinal dosyayı geçici olarak değiştir
-        original_csv = trade_tracker.TRADE_JOURNAL_CSV
-        trade_tracker.TRADE_JOURNAL_CSV = test_csv
+        original_csv = trade_tracker.repository.TRADE_JOURNAL_CSV
+        trade_tracker.repository.TRADE_JOURNAL_CSV = test_csv
         
         try:
             # 1. Eski 18-kolonlu bir dosya yapısı simüle et
@@ -252,7 +254,8 @@ class TestHybridStops(unittest.TestCase):
             }
             
             # Yazma metodunu çağır (bu metot içten migrasyonu da tetikler)
-            trade_tracker._write_trade_journal_csv(new_trade)
+            repo = trade_tracker.repository.JsonTradeRepository()
+            repo._write_trade_journal_csv(new_trade)
             
             # 3. Dosyayı oku ve doğrula
             with open(test_csv, "r", newline="", encoding="utf-8-sig") as f:
@@ -280,7 +283,7 @@ class TestHybridStops(unittest.TestCase):
             
         finally:
             # Temizlik
-            trade_tracker.TRADE_JOURNAL_CSV = original_csv
+            trade_tracker.repository.TRADE_JOURNAL_CSV = original_csv
             if os.path.exists(test_csv):
                 os.remove(test_csv)
 

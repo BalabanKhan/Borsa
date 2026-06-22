@@ -17,8 +17,9 @@ from core.defensive_engine import DefensiveStateGuard
 
 # V3.3.4 Hibrit Şalter: Global günlük limit
 GLOBAL_DAILY_MAX_SL = 99
+import config
 
-CB_STATE_FILE = "circuit_breaker_state.json"
+CB_STATE_FILE = config.CIRCUIT_BREAKER_STATE_FILE
 _cb_lock = threading.RLock()
 
 _STATE_CACHE = None

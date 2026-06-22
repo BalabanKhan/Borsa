@@ -205,7 +205,6 @@ def calculate_orb_cage(df_15m):
     """BIST 10:00-11:00 kafesi + günlük VWAP. Returns: (cage_high, cage_low, cage_mid, vwap)"""
     if df_15m is None or df_15m.empty:
         return None, None, None, None
-    today = df_15m.index[-1].date()
 
     df = df_15m.copy()
     try:
@@ -217,6 +216,7 @@ def calculate_orb_cage(df_15m):
         logging.warning(f"[calculate_orb_cage] Timezone dönüşüm hatası: {e}")
         return None, None, None, None
 
+    today = df.index[-1].date()
     df_today = df[df.index.date == today]
     if len(df_today) < config.ORB_MIN_BARS:
         return None, None, None, None

@@ -4,6 +4,8 @@ Tüm sabitler, eşikler, varlık listeleri ve magic number'lar burada toplanır.
 Hiçbir strateji parametresi başka dosyada hardcoded olmamalıdır.
 """
 import os
+import json
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,89 +18,71 @@ CCXT_EXCHANGE: str = os.getenv("CCXT_EXCHANGE", "binance")  # CCXT borsa seçimi
 CCXT_FETCH_FUTURES_DATA: bool = True  # OI ve Funding rate çekilsin mi?
 
 # ════════════════════════════════════════
-# Varlık Listeleri
+# Dosya / Durum Yönetim Yolları (Modüler Konfigürasyon)
 # ════════════════════════════════════════
-TOP_BIST_10 = ["THYAO.IS", "TUPRS.IS", "KCHOL.IS", "AKBNK.IS", "YKBNK.IS", "ISCTR.IS", "SAHOL.IS", "EREGL.IS", "BIMAS.IS", "PGSUS.IS"]
-TOP_CRYPTO_8 = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT"]
-TOP_CRYPTO_SCAN = [
-    # Top 20 (Majors & L1s)
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT",
-    "AVAX/USDT", "LINK/USDT", "DOT/USDT", "TRX/USDT", "TON/USDT", "NEAR/USDT", 
-    "SUI/USDT", "APT/USDT", "ARB/USDT", "OP/USDT", "POL/USDT", "LTC/USDT", 
-    "BCH/USDT", "UNI/USDT",
-    
-    # Next 30 (Mid caps, established, DeFi, AI, L2s)
-    "XLM/USDT", "ATOM/USDT", "ICP/USDT", "FIL/USDT", "HBAR/USDT", "VET/USDT", 
-    "MKR/USDT", "AAVE/USDT", "RUNE/USDT", "QNT/USDT", "SNX/USDT", "THETA/USDT", 
-    "STX/USDT", "IMX/USDT", "EGLD/USDT", "SAND/USDT", "MANA/USDT", "AXS/USDT",
-    "GRT/USDT", "CHZ/USDT", "GALA/USDT", "CRV/USDT", "ROSE/USDT", "MINA/USDT", 
-    "WLD/USDT", "TIA/USDT", "SEI/USDT", "INJ/USDT", "FET/USDT", "RENDER/USDT",
+ACTIVE_TRADES_FILE = os.getenv("ACTIVE_TRADES_FILE", "active_trades.json")
+TRADE_HISTORY_FILE = os.getenv("TRADE_HISTORY_FILE", "trade_history.json")
+TRADE_JOURNAL_CSV = os.getenv("TRADE_JOURNAL_CSV", "trade_journal.csv")
+POSTMORTEM_FILE = os.getenv("POSTMORTEM_FILE", "trade_postmortems.json")
+SCORECARD_STATE_FILE = os.getenv("SCORECARD_STATE_FILE", "strategy_scorecard_state.json")
+QUARANTINE_STATE_FILE = os.getenv("QUARANTINE_STATE_FILE", "quarantine_state.json")
+CIRCUIT_BREAKER_STATE_FILE = os.getenv("CIRCUIT_BREAKER_STATE_FILE", "circuit_breaker_state.json")
 
-    # Next 50 (Solid recent additions, strong DeFi, legacy solids)
-    "JUP/USDT", "ONDO/USDT", "PENDLE/USDT", "TAO/USDT", "AR/USDT", "KAS/USDT", 
-    "ORDI/USDT", "ALGO/USDT", "EOS/USDT", "COMP/USDT", "DYDX/USDT", "ENS/USDT", 
-    "LDO/USDT", "BLUR/USDT", "NEO/USDT", "FLOW/USDT", "CAKE/USDT", "DASH/USDT",
-    "XTZ/USDT", "YFI/USDT", "ZEC/USDT", "1INCH/USDT", "SSV/USDT", "RPL/USDT", 
-    "MASK/USDT", "LRC/USDT", "ZRX/USDT", "BAL/USDT", "CELO/USDT", "ONE/USDT", 
-    "KAVA/USDT", "CFX/USDT", "ACH/USDT", "LISTA/USDT", "ZK/USDT", "STRK/USDT", 
-    "PYTH/USDT", "ENA/USDT", "W/USDT", "DYM/USDT", "ALT/USDT", "AEVO/USDT", 
-    "ETHFI/USDT", "TRB/USDT", "IOTA/USDT", "BICO/USDT", "MAGIC/USDT", "ILV/USDT",
-    "GMX/USDT", "CVX/USDT"
-]
+# ════════════════════════════════════════
+# Varlık Listeleri Yükleyici
+# ════════════════════════════════════════
+def _load_assets():
+    default_bist10 = ["THYAO.IS", "TUPRS.IS", "KCHOL.IS", "AKBNK.IS", "YKBNK.IS", "ISCTR.IS", "SAHOL.IS", "EREGL.IS", "BIMAS.IS", "PGSUS.IS"]
+    default_crypto8 = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT"]
+    default_crypto_scan = [
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT",
+        "AVAX/USDT", "LINK/USDT", "DOT/USDT", "TRX/USDT", "TON/USDT", "NEAR/USDT", 
+        "SUI/USDT", "APT/USDT", "ARB/USDT", "OP/USDT", "POL/USDT", "LTC/USDT", 
+        "BCH/USDT", "UNI/USDT"
+    ]
+    default_bist = ["THYAO.IS", "ISCTR.IS", "SASA.IS", "HEKTS.IS", "TUPRS.IS", "EREGL.IS"]
+    default_emtia_usd = ["GC=F", "SI=F", "CL=F", "BZ=F", "NG=F", "HG=F", "ZW=F"]
+    default_emtia_try = ["GLDTR.IS", "GMSTR.IS"]
+    default_blacklist = {
+        "DOGE/USDT", "SHIB/USDT", "PEPE/USDT", "WIF/USDT", "FLOKI/USDT",
+        "BONK/USDT", "MEME/USDT", "BABYDOGE/USDT", "NEIRO/USDT", "TURBO/USDT",
+        "BRETT/USDT", "POPCAT/USDT", "BOME/USDT", "BOOK/USDT", "MEW/USDT",
+        "NOT/USDT", "PEOPLE/USDT", "SATS/USDT"
+    }
+
+    assets_path = os.path.join(os.path.dirname(__file__), "assets.json")
+    if os.path.exists(assets_path):
+        try:
+            with open(assets_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return (
+                    data.get("TOP_BIST_10", default_bist10),
+                    data.get("TOP_CRYPTO_8", default_crypto8),
+                    data.get("TOP_CRYPTO_SCAN", default_crypto_scan),
+                    data.get("TOP_BIST", default_bist),
+                    data.get("TOP_EMTIA_USD", default_emtia_usd),
+                    data.get("TOP_EMTIA_TRY", default_emtia_try),
+                    set(data.get("MEME_BLACKLIST", default_blacklist))
+                )
+        except Exception as e:
+            logging.error(f"[config] assets.json yuklenirken hata olustu: {e}")
+    
+    return default_bist10, default_crypto8, default_crypto_scan, default_bist, default_emtia_usd, default_emtia_try, set(default_blacklist)
+
+(
+    TOP_BIST_10,
+    TOP_CRYPTO_8,
+    TOP_CRYPTO_SCAN,
+    TOP_BIST,
+    TOP_EMTIA_USD,
+    TOP_EMTIA_TRY,
+    MEME_BLACKLIST
+) = _load_assets()
 
 TOP_CRYPTO = TOP_CRYPTO_SCAN
-
-TOP_BIST = list(dict.fromkeys([
-    "THYAO.IS", "ISCTR.IS", "SASA.IS", "HEKTS.IS", "TUPRS.IS", "EREGL.IS",
-    "KCHOL.IS", "SISE.IS", "AKBNK.IS", "YKBNK.IS", "GARAN.IS",
-    "SAHOL.IS", "BIMAS.IS", "ASELS.IS", "KRDMD.IS",
-    "FROTO.IS", "TTKOM.IS", "TCELL.IS", "ENKAI.IS", "PETKM.IS",
-    "TOASO.IS", "PGSUS.IS", "ARCLK.IS", "TAVHL.IS", "DOHOL.IS",
-    "ODAS.IS", "ASTOR.IS", "MIATK.IS", "GESAN.IS", "SMRTG.IS",
-    "ALFAS.IS", "EUPWR.IS", "CVKMD.IS", "CANTE.IS", "ZOREN.IS",
-    "AKSA.IS", "ISMEN.IS", "TSKB.IS", "SKBNK.IS", "VAKBN.IS",
-    "HALKB.IS", "CIMSA.IS", "AKSEN.IS", "ENJSA.IS", "GWIND.IS",
-    "KONTR.IS", "MGROS.IS", "SOKM.IS", "KCAER.IS",
-    "EKGYO.IS", "ISGYO.IS", "GUBRF.IS",
-    "EGEEN.IS", "VESTL.IS", "VESBE.IS", "KLRHO.IS", "OTKAR.IS",
-    "OYAKC.IS", "TTRAK.IS", "BRISA.IS", "AEFES.IS", "ULKER.IS",
-    "ANHYT.IS", "ANSGR.IS", "TMSN.IS", "TRGYO.IS", "KORDS.IS",
-    "BUCIM.IS", "ALARK.IS", "TURSG.IS", "AGHOL.IS", "ISDMR.IS",
-    "SARKY.IS", "LOGO.IS", "MPARK.IS", "SUNTK.IS", "BASGZ.IS",
-    "CEMAS.IS", "INDES.IS", "PAPIL.IS", "PENTA.IS", "YATAS.IS",
-    "CWENE.IS", "NETAS.IS", "AYGAZ.IS",
-    "TKFEN.IS", "ECILC.IS", "BERA.IS", "BTCIM.IS", "BRYAT.IS",
-    "IEYHO.IS", "KENT.IS", "AVOD.IS", "OBAMS.IS", "QUAGR.IS",
-    "BIOEN.IS",
-]))
-
 TOP_BIST_50 = TOP_BIST[:50]
-
-TOP_EMTIA_USD = [
-    "GC=F",   # Altın (Gold)
-    "SI=F",   # Gümüş (Silver)
-    "CL=F",   # WTI Petrol
-    "BZ=F",   # Brent Petrol
-    "NG=F",   # Doğal Gaz
-    "HG=F",   # Bakır
-    "ZW=F",   # Buğday
-]
-TOP_EMTIA_TRY = [
-    "GLDTR.IS",  # Altın/TL (QNB Finans Portföy Altın Fonu - BIST)
-    "GMSTR.IS",  # Gümüş/TL (QNB Finans Portföy Gümüş Fonu - BIST)
-]
 TOP_EMTIA = TOP_EMTIA_USD + TOP_EMTIA_TRY
-
-# 🐻 Ayı Avcısı — Ağır Sıklet SHORT Tarama Evreni (Top 100)
 TOP_HEAVY_SHORT = TOP_CRYPTO_SCAN
-
-# 🚫 Meme Coin Kalıcı Kara Liste (SHORT yasağı)
-MEME_BLACKLIST = {
-    "DOGE/USDT", "SHIB/USDT", "PEPE/USDT", "WIF/USDT", "FLOKI/USDT",
-    "BONK/USDT", "MEME/USDT", "BABYDOGE/USDT", "NEIRO/USDT", "TURBO/USDT",
-    "BRETT/USDT", "POPCAT/USDT", "BOME/USDT", "BOOK/USDT", "MEW/USDT",
-    "NOT/USDT", "PEOPLE/USDT", "SATS/USDT",
-}
 
 # ════════════════════════════════════════
 # ATR & Stop Parametreleri
@@ -191,6 +175,10 @@ IND_OBV_ACC_VOL_MULTIPLIER = 1.5
 # ════════════════════════════════════════
 SOFT_ADX_CENTER = 28.0
 SOFT_ADX_K = 0.35
+
+# V3.5 Gaussian (Bell Curve) ADX Model Sınırları
+SOFT_ADX_GAUSSIAN_CENTER = 18.5
+SOFT_ADX_GAUSSIAN_WIDTH = 5.0
 
 SOFT_VOL_RATIO_CENTER = 1.8
 SOFT_VOL_RATIO_K = 3.0
@@ -390,7 +378,7 @@ SINGLE_CANDLE_ANOMALY_PCT_EMTIA = 25.0
 
 
 # RED-03: Swing point minimum amplitude
-SWING_MIN_AMPLITUDE_PCT = 1.5  # %1.5 altı swing → gürültü
+SWING_MIN_AMPLITUDE_PCT = 0.5  # %0.5 altı swing → gürültü
 
 # RED-16: Divergence tazelik kontrolü
 DIVERGENCE_MAX_AGE_CANDLES = 10 # Divergence en fazla 10 mum eski olabilir
@@ -424,7 +412,7 @@ VOL_ABSOLUTE_MIN_BIST = 1_000_000        # Hard block alt sınır (BIST)
 FUNDING_SHORT_BLOCK_THRESHOLD = 0.0  # Negatif fonlamada SHORT AÇMA
 
 # AM-05: Minimum Dalga Amplitüdü (Fraktal Körlüğü)
-OTE_MIN_WAVE_PCT = 3.0          # SMC OTE: Dalga boyu en az %3 olmalı
+OTE_MIN_WAVE_PCT = 0.5          # SMC OTE: Dalga boyu en az %0.5 olmalı
 
 # AM-06: Likidite Saatleri Zaman Kilidi (Zıt Korelasyon)
 LIQUIDITY_WINDOW_START_HOUR = 15  # TSİ 15:30
@@ -644,7 +632,7 @@ BEAR_HUNTER_DEFAULT_ATR_MULT = 0.02
 BEAR_HUNTER_SFP_ATR_SL_MULT = 0.3
 BEAR_HUNTER_PREMIUM_ATR_SL_MULT = 0.5
 BEAR_HUNTER_DIV_ATR_SL_MULT = 0.5
-BEAR_HUNTER_TP_RR = 3.0
+BEAR_HUNTER_TP_RR = 1.5
 
 # --- BIST Strategy Specific ---
 BIST_DIP_HUNTER_RSI_1D_LIMIT = 35.0
@@ -745,7 +733,8 @@ MEANINGFUL_VOLUME_MULT = 1.5
 COOLDOWN_SECONDS_1H = 3600
 
 
-
-
-
-
+# --- VWAP Strategy Filters ---
+VWAP_LONG_MAX_RSI = 60.0
+VWAP_MAX_ATR_RATIO = 2.0
+OTE_TOLERANCE_PCT = 0.02
+MSB_TOLERANCE_PCT = 0.001

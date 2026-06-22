@@ -168,6 +168,27 @@ def _is_nan(value):
     return False
 
 
+def gaussian_score(value: float, center: float, width: float) -> float:
+    """
+    Gaussian (Bell Curve) tabanlı yumuşak eşik puanlama.
+    
+    Belirli bir 'center' noktasında maksimum puanı (100) verir.
+    'width' parametresi eğrinin genişliğini belirler.
+    
+    Örnek (center=18.5, width=5.0):
+      ADX=18.5 → 100
+      ADX=13.5 → ~60
+      ADX=23.5 → ~60
+      ADX=28.5 → ~13
+    """
+    if _is_nan(value):
+        return 0.0
+    try:
+        return 100.0 * math.exp(-0.5 * ((value - center) / width) ** 2)
+    except OverflowError:
+        return 0.0
+
+
 def sigmoid_score(value: float, center: float, k: float = 0.3) -> float:
     """
     Sigmoid tabanlı yumuşak eşik puanlama.
@@ -220,24 +241,119 @@ def log_score(value: float, min_val: float, max_val: float) -> float:
 # Soft Score Hesaplayıcılar
 # ════════════════════════════════════════
 
-def score_adx(adx_value: float, adx_prev: float = None) -> float:
+def calculate_autopsy_soft_penalty(
+    price: float,
+    sma200_1d: float,
+    rsi_1h: float,
+    volume_ratio: float,
+    is_long: bool = True,
+    strategy_type: str = "TREND"
+) -> float:
     """
-    ADX puanlama — sigmoid ile yumuşak geçiş + olgunlaşma cezası.
+    Simülasyon otopsi bulgularına göre soft puan cezası hesaplar (V3.5).
+    Hard block uygulamaz, puanı düşürerek pozisyon büyüklüğünü (grade) aşağı çeker.
+    Strateji tipine duyarlıdır (Trend-Following vs Mean Reversion).
+    """
+    # Dynamic parameter auto-resolution from caller frame stack
+    if sma200_1d is None or rsi_1h is None or volume_ratio is None or strategy_type == "TREND":
+        try:
+            import inspect
+            curr_frame = inspect.currentframe()
+            for _ in range(5):
+                if curr_frame is None:
+                    break
+                locs = curr_frame.f_locals
+                if "last_1d" in locs and sma200_1d is None:
+                    last_1d = locs["last_1d"]
+                    if hasattr(last_1d, "get"):
+                        sma200_1d = last_1d.get("SMA_200")
+                if "last_1h" in locs and rsi_1h is None:
+                    last_1h = locs["last_1h"]
+                    if hasattr(last_1h, "get"):
+                        rsi_1h = last_1h.get("RSI_14")
+                elif "last_4h" in locs and rsi_1h is None:
+                    last_4h = locs["last_4h"]
+                    if hasattr(last_4h, "get"):
+                        rsi_1h = last_4h.get("RSI_14")
+                if "volume_ratio" in locs and volume_ratio is None:
+                    volume_ratio = locs["volume_ratio"]
+                if "strategy_type" in locs and strategy_type == "TREND":
+                    strategy_type = locs["strategy_type"]
+                curr_frame = curr_frame.f_back
+        except Exception:
+            pass
 
-    Eski: ADX <= 25 → REJECT, ADX > 45 → REJECT (binary uçurum)
-    Yeni: Sürekli S-eğrisi + 40 sonrası azalan getiri
+    penalty = 0.0
+    
+    # Check if strategy is Trend-Following/Breakout
+    strat_upper = str(strategy_type).upper() if strategy_type else "TREND"
+    is_trend = "TREND" in strat_upper or "BREAKOUT" in strat_upper
 
-    ADX=20→18, 25→50, 30→82, 35→95, 40→97, 45→75, 50→50
+    if is_trend:
+        # 1. Günlük SMA 200 Uzaklık Soft Cezası - Sadece Trend/Breakout stratejilerinde
+        if not _is_nan(price) and not _is_nan(sma200_1d) and sma200_1d > 0:
+            if is_long:
+                # Long işlem: Fiyat SMA 200'ün altındaysa ceza uygula
+                if price < sma200_1d:
+                    dist_pct = ((sma200_1d - price) / sma200_1d) * 100
+                    # %0-%10 arası lineer ceza (maks -15 puan)
+                    penalty -= min(15.0, dist_pct * 1.5)
+            else:
+                # Short işlem: Fiyat SMA 200'ün üzerindeyken ceza uygula
+                if price > sma200_1d:
+                    dist_pct = ((price - sma200_1d) / sma200_1d) * 100
+                    # %0-%10 arası lineer ceza (maks -15 puan)
+                    penalty -= min(15.0, dist_pct * 1.5)
+                    
+        # 2. 1H RSI Soft Cezası - Sadece Trend/Breakout stratejilerinde
+        if not _is_nan(rsi_1h):
+            if is_long:
+                # Long işlem: RSI 55'in üzerindeyken (aşırı şişme) ceza uygula
+                if rsi_1h > 55.0:
+                    penalty -= min(10.0, (rsi_1h - 55.0) * 1.0)
+            else:
+                # Short işlem: RSI 45'in altındayken (aşırı düşüş/exhaustion) ceza uygula
+                if rsi_1h < 45.0:
+                    penalty -= min(10.0, (45.0 - rsi_1h) * 1.0)
+
+    # 3. Kırılım Hacmi (Volume Ratio) Soft Cezası
+    # Zayıf breakout volume (displacement eksikliği) cezalandırılır
+    # Eşik: Trend/Breakout için 6.0x, Mean Reversion/Dip için 3.0x
+    # Gelen hacim oranına göre ceza lineer ölçeklenir (sabit -10 yerine)
+    if not _is_nan(volume_ratio):
+        threshold = 6.0 if is_trend else 3.0
+        if volume_ratio < threshold:
+            ratio_clamped = max(0.0, volume_ratio)
+            penalty -= ((threshold - ratio_clamped) / threshold) * 10.0
+            
+    return round(penalty, 2)
+
+
+def score_adx(
+    adx_value: float, 
+    adx_prev: float = None,
+    adx_mode: str = "sigmoid",
+    adx_center: float = SOFT_ADX_CENTER,
+    adx_width: float = SOFT_ADX_K
+) -> float:
+    """
+    ADX puanlama — sigmoid veya gaussian (bell curve) geçişi.
+
+    Sigmoid modu: Düşükten yükseğe S-eğrisi (k=keskinlik) + olgunlaşma cezası.
+    Gaussian modu: Optimum bir 'center' etrafında zirve yapan çan eğrisi (width=genişlik).
     """
     if _is_nan(adx_value):
         return 0.0
 
-    base = sigmoid_score(adx_value, center=SOFT_ADX_CENTER, k=SOFT_ADX_K)
+    if adx_mode == "gaussian":
+        base = gaussian_score(adx_value, center=adx_center, width=adx_width)
+    else:
+        base = sigmoid_score(adx_value, center=adx_center, k=adx_width)
 
-    # Olgunlaşma cezası: trend olgunlaştı, azalan fırsat
-    if adx_value > SOFT_ADX_MATURITY_START:
-        decay = (adx_value - SOFT_ADX_MATURITY_START) * SOFT_ADX_MATURITY_MULT
-        base = max(SOFT_ADX_MATURITY_MIN, base - decay)
+        # Olgunlaşma cezası (sadece sigmoid modunda eski davranış korunsun)
+        if adx_value > SOFT_ADX_MATURITY_START:
+            decay = (adx_value - SOFT_ADX_MATURITY_START) * SOFT_ADX_MATURITY_MULT
+            base = max(SOFT_ADX_MATURITY_MIN, base - decay)
 
     # Momentum bonusu/cezası: yükselen ADX = güç artıyor
     if not _is_nan(adx_prev):
@@ -848,22 +964,41 @@ def calculate_conviction(
     result = ConvictionResult()
     
     # 99 yapılmıştır
-    # Gönderilen soft skorlar içinde NaN varsa halüsinasyonu önlemek için HB-8 ile veto edilir.
+    # Gönderilen soft skorlar içinde NaN varsa halüsinasyonu önlemek için HB-8 ile veto edilirdi.
+    # Yeni yapı: Direkt reddetmek yerine -9.0 soft ceza (Soft Penalty) verilir.
     is_core_indicators_nan = False
     for factor in (weights or WEIGHTS).keys():
         if factor in scores and _is_nan(scores[factor]):
             is_core_indicators_nan = True
             break
 
+    nan_penalty = 0.0
     if is_core_indicators_nan:
-        hard_blocked = True
-        block_reason = "HB-8: Kritik teknik gösterge verisi eksik (NaN) — işlem yapılamaz"
+        nan_penalty = -9.0
+        logger.debug("[Conviction] NaN veri tespit edildi, -9.0 soft ceza uygulandı.")
 
     if not hard_blocked and ctx is not None:
-        if ctx.get("is_quarantined", False):
+        symbol = ctx.get("symbol")
+        is_q = ctx.get("is_quarantined", False)
+        is_cb = ctx.get("is_circuit_open", False)
+
+        if symbol and not is_q:
+            try:
+                from quarantine import is_quarantined as _is_q
+                is_q = _is_q(symbol)
+            except Exception:
+                pass
+        if symbol and not is_cb:
+            try:
+                from circuit_breaker import is_circuit_open as _is_cb
+                is_cb = _is_cb(symbol)
+            except Exception:
+                pass
+
+        if is_q:
             hard_blocked = True
             block_reason = "HB-2: Varlık karantinada — veri güvenilmez"
-        elif ctx.get("is_circuit_open", False):
+        elif is_cb:
             hard_blocked = True
             block_reason = "HB-3: Devre Kesici aktif — sistem korumada"
 
@@ -889,9 +1024,20 @@ def calculate_conviction(
     data_guard_penalty = scores.get("data_guard_penalty", 0.0)
     conflict_penalty = scores.get("conflict_penalty", 0.0)
     apply_bear_penalty = scores.get("apply_bear_penalty", False)
+    # V3.5: Autopsy Soft Penalty
+    autopsy_penalty = scores.get("autopsy_penalty", 0.0)
+    # V3.6: Weak Setup Penalty (BIST 10 vb. için)
+    setup_weak_penalty = scores.get("setup_weak_penalty", 0.0)
     
     total += data_guard_penalty
     total += conflict_penalty
+    total += autopsy_penalty
+    total += nan_penalty
+    total += setup_weak_penalty
+    
+    result.component_scores["autopsy_penalty"] = round(autopsy_penalty, 1)
+    result.component_scores["nan_penalty"] = round(nan_penalty, 1)
+    result.component_scores["setup_weak_penalty"] = round(setup_weak_penalty, 1)
     
     if apply_bear_penalty:
         from config import CONFLICT_RESOLVER_BEAR_TREND_PENALTY
@@ -969,9 +1115,19 @@ def build_trend_scores(
     is_liquidity_window=True,
     strategy_type="TREND_BREAKOUT",
     is_long=True,
+    adx_mode="gaussian",
+    adx_center=None,
+    adx_width=None,
+    sma200_1d=None,
+    rsi_1h=None,
+    volume_ratio=None,
 ):
     """Trend stratejileri (BIST 2, KRİPTO 2) için skor paketi."""
-    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
+    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN, SOFT_ADX_GAUSSIAN_CENTER, SOFT_ADX_GAUSSIAN_WIDTH
+    
+    if adx_center is None: adx_center = SOFT_ADX_GAUSSIAN_CENTER
+    if adx_width is None: adx_width = SOFT_ADX_GAUSSIAN_WIDTH
+    
     is_gap = (dg_gap_pct >= GAP_THRESHOLD_PCT) if dg_gap_pct else False
     
     optimum_vol = 500_000 if market == "KRIPTO" else 10_000_000
@@ -994,8 +1150,21 @@ def build_trend_scores(
         is_long=is_long
     )
 
+    vol_ratio_calc = volume_ratio
+    if vol_ratio_calc is None and volume is not None and vol_sma and vol_sma > 0:
+        vol_ratio_calc = volume / vol_sma
+
+    autopsy_pen = calculate_autopsy_soft_penalty(
+        price=price,
+        sma200_1d=sma200_1d,
+        rsi_1h=rsi_1h,
+        volume_ratio=vol_ratio_calc,
+        is_long=is_long,
+        strategy_type=strategy_type
+    )
+
     return {
-        "adx":           score_adx(adx, adx_prev),
+        "adx":           score_adx(adx, adx_prev, adx_mode=adx_mode, adx_center=adx_center, adx_width=adx_width),
         "ema_alignment": score_ema_alignment(price, ema_fast, ema_mid, ema_slow),
         "rsi":           score_rsi_trend(rsi, market),
         "rsi_direction": score_rsi_direction(rsi, rsi_prev),
@@ -1011,6 +1180,7 @@ def build_trend_scores(
         "data_guard_penalty": dg_penalty,
         "conflict_penalty": conflict_penalty,
         "apply_bear_penalty": apply_bear,
+        "autopsy_penalty": autopsy_pen,
     }
 
 
@@ -1032,6 +1202,9 @@ def build_dip_scores(
     is_liquidity_window=True,
     strategy_type="MEAN_REVERSION_DIP",
     is_long=True,
+    sma200_1d=None,
+    rsi_1h=None,
+    volume_ratio=None,
 ):
     """Dip avcılığı stratejileri (BIST 1, KRİPTO 1) için skor paketi."""
     from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
@@ -1057,6 +1230,19 @@ def build_dip_scores(
         is_long=is_long
     )
 
+    vol_ratio_calc = volume_ratio
+    if vol_ratio_calc is None and volume is not None and vol_sma and vol_sma > 0:
+        vol_ratio_calc = volume / vol_sma
+
+    autopsy_pen = calculate_autopsy_soft_penalty(
+        price=price,
+        sma200_1d=sma200_1d,
+        rsi_1h=rsi_1h,
+        volume_ratio=vol_ratio_calc,
+        is_long=is_long,
+        strategy_type=strategy_type
+    )
+
     return {
         "adx":           50.0,  # Dip avcılığında ADX önemsiz → nötr
         "ema_alignment": score_ema_dip_distance(price, ema_fast, ema_mid),
@@ -1074,6 +1260,7 @@ def build_dip_scores(
         "data_guard_penalty": dg_penalty,
         "conflict_penalty": conflict_penalty,
         "apply_bear_penalty": apply_bear,
+        "autopsy_penalty": autopsy_pen,
     }
 
 
@@ -1095,6 +1282,11 @@ def build_breakout_scores(
     strategy_type="TREND_BREAKOUT",
     is_long=True,
     rsi=None,
+    sma200_1d=None,
+    rsi_1h=None,
+    volume_ratio=None,
+    rsi_prev=None,
+    has_engulfing=None,
 ):
     """Kırılım/Squeeze stratejileri (BIST 3/5, KRİPTO 3) için skor paketi."""
     from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
@@ -1130,23 +1322,37 @@ def build_breakout_scores(
 
     squeeze_score = inverse_linear_score(bb_width, SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX) if bb_width else SOFT_UNCERTAINTY_PENALTY
 
+    vol_ratio_calc = volume_ratio
+    if vol_ratio_calc is None and volume is not None and vol_sma and vol_sma > 0:
+        vol_ratio_calc = volume / vol_sma
+
+    autopsy_pen = calculate_autopsy_soft_penalty(
+        price=price,
+        sma200_1d=sma200_1d,
+        rsi_1h=rsi_1h,
+        volume_ratio=vol_ratio_calc,
+        is_long=is_long,
+        strategy_type=strategy_type
+    )
+
     return {
         "adx":           squeeze_score,
         "ema_alignment": score_ema_alignment(price, ema_fast, ema_mid, ema_slow),
-        "rsi":           70.0,
-        "rsi_direction": 70.0,
+        "rsi":           score_rsi_trend(rsi, market) if rsi is not None else 50.0,
+        "rsi_direction": score_rsi_direction(rsi, rsi_prev) if rsi is not None and rsi_prev is not None else 50.0,
         "volume_ratio":  score_volume_ratio(volume, vol_sma),
         "dollar_volume": score_dollar_volume(dollar_vol, market),
         "rr_ratio":      score_rr_ratio(rr, regime),
-        "engulfing":     70.0,
+        "engulfing":     score_engulfing(has_engulfing) if has_engulfing is not None else score_engulfing(False),
         "regime":        score_regime(regime),
         "macro":         score_macro_alignment(macro_aligned),
         "penalty":       score_penalty_level(consecutive_sl),
         "oi_crash":      score_oi_crash(oi_crash),
-        "funding_rate":  score_funding_rate(funding_rate, direction="long"),
+        "funding_rate":  score_funding_rate(funding_rate, direction="long" if is_long else "short"),
         "data_guard_penalty": dg_penalty,
         "conflict_penalty": conflict_penalty,
         "apply_bear_penalty": apply_bear,
+        "autopsy_penalty": autopsy_pen,
     }
 
 
@@ -1169,9 +1375,19 @@ def build_short_scores(
     is_liquidity_window=True,
     strategy_type="TREND_BREAKOUT",
     is_long=False,
+    adx_mode="gaussian",
+    adx_center=None,
+    adx_width=None,
+    sma200_1d=None,
+    rsi_1h=None,
+    volume_ratio=None,
 ):
     """SHORT stratejileri (SHORT 1-4, Bear Hunter) için skor paketi."""
-    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
+    from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN, SOFT_ADX_GAUSSIAN_CENTER, SOFT_ADX_GAUSSIAN_WIDTH
+    
+    if adx_center is None: adx_center = SOFT_ADX_GAUSSIAN_CENTER
+    if adx_width is None: adx_width = SOFT_ADX_GAUSSIAN_WIDTH
+    
     is_gap = (dg_gap_pct >= GAP_THRESHOLD_PCT) if dg_gap_pct else False
     
     optimum_vol = 500_000 if market == "KRIPTO" else 10_000_000
@@ -1194,8 +1410,21 @@ def build_short_scores(
         is_long=is_long
     )
 
+    vol_ratio_calc = volume_ratio
+    if vol_ratio_calc is None and volume is not None and vol_sma and vol_sma > 0:
+        vol_ratio_calc = volume / vol_sma
+
+    autopsy_pen = calculate_autopsy_soft_penalty(
+        price=price,
+        sma200_1d=sma200_1d,
+        rsi_1h=rsi_1h,
+        volume_ratio=vol_ratio_calc,
+        is_long=is_long,
+        strategy_type=strategy_type
+    )
+
     return {
-        "adx":           score_adx(adx, adx_prev),
+        "adx":           score_adx(adx, adx_prev, adx_mode=adx_mode, adx_center=adx_center, adx_width=adx_width),
         "ema_alignment": score_ema_short(price, ema_fast, ema_mid, ema_slow),
         "rsi":           score_rsi_trend(rsi, market),
         "rsi_direction": score_rsi_direction(rsi, rsi_prev),
@@ -1211,6 +1440,7 @@ def build_short_scores(
         "data_guard_penalty": dg_penalty,
         "conflict_penalty": conflict_penalty,
         "apply_bear_penalty": apply_bear,
+        "autopsy_penalty": autopsy_pen,
     }
 
 
@@ -1280,26 +1510,14 @@ def _calculate_sniper_base_scores(
     """
     BIST veya diğer marketler için base (bbw, pb, fvg_sfp) skorlarını hesaplar.
     """
-    if market == "BIST":
-        sfp_val = 40.0 if sfp_present else 0.0
-        fvg_val = 30.0 if fvg_present else 0.0
-        is_sq = is_squeeze if is_squeeze is not None else (bbw >= kcw * 0.90)
-        squeeze_val = 20.0 if is_sq else 0.0
-        pb_val = 10.0 if pb <= 0.1 else 0.0
+    bbw_score = score_bbw_squeeze(bbw, kcw)
+    if market == "BIST" and is_squeeze:
+        bbw_score = max(bbw_score, 100.0)
         
-        base_points = sfp_val + fvg_val + squeeze_val + pb_val
-        if sfp_present and fvg_present:
-            total_setup = base_points * BIST_SNIPER_CONFLUENCE_BONUS
-        else:
-            total_setup = base_points
-        total_setup = min(total_setup, 100.0)
-        
-        return total_setup, total_setup, total_setup
-    else:
-        bbw_score = score_bbw_squeeze(bbw, kcw)
-        pb_score = score_percent_b(pb, pb_min=pb_min, pb_max=pb_max)
-        fvg_sfp_score = score_fvg_sfp(fvg_present, sfp_present)
-        return bbw_score, pb_score, fvg_sfp_score
+    pb_score = score_percent_b(pb, pb_min=pb_min, pb_max=pb_max)
+    fvg_sfp_score = score_fvg_sfp(fvg_present, sfp_present)
+    
+    return bbw_score, pb_score, fvg_sfp_score
 
 
 def build_sniper_scores(
@@ -1323,6 +1541,9 @@ def build_sniper_scores(
     is_long=True,
     is_squeeze=None,
     asset_trend_aligned=True,
+    sma200_1d=None,
+    rsi_1h=None,
+    volume_ratio=None,
 ):
     """Keskin Nişancı stratejisi (BIST Sniper, KRIPTO Sniper) için skor paketi."""
     from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
@@ -1353,11 +1574,17 @@ def build_sniper_scores(
 
     pb_min, pb_max = _get_sniper_pb_limits(market, is_long)
 
-    # Formasyon Kontrolü: FVG, SFP veya Sıkışma (Squeeze) Kırılımından en az biri olmalı
-    # Hiçbiri yoksa yumuşak ceza puanı uygulayarak puanı düşür (-12 puan)
-    has_squeeze_breakout = bbw >= (kcw * 0.90)
-    if not fvg_present and not sfp_present and not has_squeeze_breakout:
-        conflict_penalty -= SNIPER_NO_SETUP_PENALTY
+    # Formasyon Kontrolü: FVG, SFP veya Sıkışma (Squeeze) Kırılımı durumlarına göre kademeli soft ceza
+    has_squeeze_breakout = is_squeeze if is_squeeze is not None else (bbw >= (kcw * 0.90))
+    
+    if not has_squeeze_breakout and not fvg_present and not sfp_present:
+        conflict_penalty -= 10.0  # Hiçbir setup yok
+    elif not has_squeeze_breakout and not fvg_present:
+        conflict_penalty -= 9.0   # Sadece SFP var
+    elif not has_squeeze_breakout and not sfp_present:
+        conflict_penalty -= 9.0   # Sadece FVG var
+    elif not fvg_present and not sfp_present:
+        conflict_penalty -= 8.0   # Sadece Squeeze var (likidite yok)
 
     # ════════════════════════════════════════
     # Dinamik Confluence (Ödül / Ceza) Mekanizması
@@ -1385,6 +1612,19 @@ def build_sniper_scores(
         is_squeeze=is_squeeze
     )
 
+    vol_ratio_calc = volume_ratio
+    if vol_ratio_calc is None and volume is not None and vol_sma and vol_sma > 0:
+        vol_ratio_calc = volume / vol_sma
+
+    autopsy_pen = calculate_autopsy_soft_penalty(
+        price=price,
+        sma200_1d=sma200_1d,
+        rsi_1h=rsi_1h,
+        volume_ratio=vol_ratio_calc,
+        is_long=is_long,
+        strategy_type=strategy_type
+    )
+
     return {
         "bbw_squeeze":   bbw_score,
         "percent_b":     pb_score,
@@ -1398,4 +1638,5 @@ def build_sniper_scores(
         "data_guard_penalty": dg_penalty,
         "conflict_penalty": conflict_penalty,
         "apply_bear_penalty": apply_bear,
+        "autopsy_penalty": autopsy_pen,
     }

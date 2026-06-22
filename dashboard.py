@@ -286,25 +286,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quant Bot v3.3 — Login</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist+Mono&family=Inter:wght@400;500;600&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        body{background:#0d1117;color:#c9d1d9;font-family:'JetBrains Mono','Fira Code','Cascadia Code','Consolas',monospace;height:100vh;display:flex;align-items:center;justify-content:center}
-        .login{border:1px solid #30363d;padding:32px;width:360px;border-radius:4px;background:#161b22}
-        h2{color:#58a6ff;font-size:16px;margin-bottom:4px;border-left:3px solid #58a6ff;padding-left:8px}
-        .sub{color:#8b949e;font-size:11px;margin-bottom:20px;padding-left:11px}
-        input{width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;font-family:inherit;font-size:13px;border-radius:2px;margin-bottom:12px}
-        input:focus{outline:none;border-color:#58a6ff}
-        button{width:100%;padding:8px;background:#238636;border:none;color:#fff;font-family:inherit;font-size:13px;cursor:pointer;border-radius:2px}
-        button:hover{background:#2ea043}
-        .err{color:#f85149;font-size:11px;margin-top:8px;display:none}
+        body{background:#111111;color:#EAEAEA;font-family:'Inter','Helvetica Neue',sans-serif;height:100vh;display:flex;align-items:center;justify-content:center;line-height:1.6}
+        .login{width:360px;padding:40px;border:1px solid #2F3437}
+        h2{font-family:'Geist Mono',monospace;font-size:14px;font-weight:500;margin-bottom:8px;letter-spacing:-0.02em}
+        .sub{color:#787774;font-size:12px;margin-bottom:32px}
+        input{width:100%;padding:10px 0;background:transparent;border:none;border-bottom:1px solid #2F3437;color:#EAEAEA;font-family:'Geist Mono',monospace;font-size:13px;margin-bottom:24px;border-radius:0}
+        input:focus{outline:none;border-bottom-color:#EAEAEA}
+        button{width:100%;padding:10px;background:#EAEAEA;color:#111111;border:none;font-family:'Geist Mono',monospace;font-size:12px;font-weight:600;cursor:pointer;transition:transform 0.2s}
+        button:hover{transform:scale(0.98)}
+        .err{color:#FDEBEC;background:#9F2F2D;padding:4px 8px;font-size:11px;margin-top:16px;display:none;text-align:center;font-family:'Geist Mono',monospace}
     </style>
 </head>
 <body>
     <div class="login">
-        <h2>QUANT BOT v3.3</h2>
-        <div class="sub">kimlik doğrulama gerekli</div>
-        <input type="password" id="pw" placeholder="şifre" autofocus>
-        <button onclick="doLogin()">GİRİŞ</button>
-        <div class="err" id="err">hatalı şifre</div>
+        <h2>QUANT.BOT_V3.3</h2>
+        <div class="sub">Authentication Required</div>
+        <input type="password" id="pw" placeholder="Enter passphrase" autofocus>
+        <button onclick="doLogin()">AUTHENTICATE</button>
+        <div class="err" id="err">ACCESS DENIED</div>
     </div>
     <script>
         document.getElementById('pw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
@@ -326,141 +327,89 @@ class DashboardHandler(BaseHTTPRequestHandler):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quant Bot v3.3 Cockpit</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist+Mono&family=Inter:wght@400;500;600&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        body{background:#0d1117;color:#c9d1d9;font-family:'JetBrains Mono','Fira Code','Cascadia Code','Consolas',monospace;font-size:12px;padding:16px}
-        .hdr{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #30363d;padding-bottom:10px;margin-bottom:12px}
-        .hdr h1{font-size:14px;color:#58a6ff;font-weight:600}
-        .hdr .st{font-size:11px;color:#3fb950}
-        .hdr .st.off{color:#f85149}
-        .hdr a{color:#8b949e;font-size:11px;text-decoration:none}
-        .hdr a:hover{color:#f85149}
-        .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
-        .panel{border:1px solid #30363d;border-radius:4px;padding:10px;background:#161b22}
-        .panel h3{font-size:11px;color:#58a6ff;border-left:3px solid #58a6ff;padding-left:8px;margin-bottom:8px;font-weight:600;text-transform:uppercase}
-        .kv{display:flex;flex-wrap:wrap;gap:12px}
-        .kv .k{color:#8b949e;font-size:10px}
-        .kv .v{color:#c9d1d9;font-size:14px;font-weight:600}
-        .kv .item{display:flex;flex-direction:column;gap:2px}
-        .full{grid-column:1/-1}
-        table{width:100%;border-collapse:collapse;font-size:11px}
-        th{text-align:left;color:#8b949e;font-weight:400;padding:4px 6px;border-bottom:1px solid #30363d}
-        td{padding:4px 6px;border-bottom:1px solid #21262d}
-        .al{color:#3fb950}
-        .sat{color:#f85149}
-        .badge{display:inline-block;padding:1px 6px;border-radius:2px;font-size:10px;font-weight:600}
-        .b-strong{background:#238636;color:#fff}
-        .b-medium{background:#9e6a03;color:#fff}
-        .b-watch{background:#bd561d;color:#fff}
-        .b-reject{background:#da3633;color:#fff}
-        .bar{display:inline-block;height:10px;border-radius:1px}
-        .log-box{background:#010409;border:1px solid #30363d;border-radius:4px;padding:8px;max-height:260px;overflow-y:auto;font-size:10px;line-height:1.6}
-        .log-box .info{color:#8b949e}
-        .log-box .warn{color:#d29922}
-        .log-box .error{color:#f85149}
-        .log-box .conviction{color:#58a6ff}
-        .dg-row{display:flex;gap:16px;flex-wrap:wrap}
-        .dg-item{display:flex;flex-direction:column;align-items:center;gap:2px}
-        .dg-item .code{color:#8b949e;font-size:10px}
-        .dg-item .cnt{font-size:16px;font-weight:700}
-        .ab-row{display:flex;gap:20px}
-        .ab-group{flex:1}
-        .ab-group .lbl{color:#8b949e;font-size:10px;margin-bottom:4px}
-        .active-badge{color:#3fb950}
-        .disabled-badge{color:#f85149}
-        .empty{color:#8b949e;font-style:italic;padding:8px}
+        body{background:#111111;color:#EAEAEA;font-family:'Inter','Helvetica Neue',sans-serif;font-size:13px;padding:32px;max-width:1100px;margin:0 auto;line-height:1.6}
+        .hdr{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2F3437;padding-bottom:16px;margin-bottom:48px}
+        .hdr h1{font-family:'Geist Mono',monospace;font-size:16px;font-weight:500;letter-spacing:-0.02em}
+        .hdr .st{font-family:'Geist Mono',monospace;font-size:11px;color:#787774}
+        .hdr a{color:#787774;font-family:'Geist Mono',monospace;font-size:11px;text-decoration:none;transition:color 0.2s}
+        .hdr a:hover{color:#EAEAEA}
+        .section{margin-bottom:48px;border-top:1px solid #2F3437;padding-top:24px}
+        .section-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:24px}
+        h3{font-family:'Geist Mono',monospace;font-size:11px;color:#787774;text-transform:uppercase;letter-spacing:0.05em;font-weight:500}
+        .kv{display:flex;flex-wrap:wrap;gap:32px}
+        .kv .k{color:#787774;font-family:'Geist Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;display:block}
+        .kv .v{color:#EAEAEA;font-size:15px;font-weight:400}
+        table{width:100%;border-collapse:collapse;font-size:13px}
+        th{text-align:left;color:#787774;font-family:'Geist Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;font-weight:400;padding:8px 0;border-bottom:1px solid #2F3437}
+        td{padding:12px 0;border-bottom:1px solid #2F3437;color:#EAEAEA}
+        .badge{display:inline-block;padding:2px 8px;border-radius:9999px;font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.05em}
+        .b-strong{background:#EDF3EC;color:#346538}
+        .b-medium{background:#FBF3DB;color:#956400}
+        .b-watch{background:#EAEAEA;color:#111111}
+        .b-reject{background:#FDEBEC;color:#9F2F2D}
+        .bar-container{display:flex;gap:2px;margin-top:8px;height:4px;width:100%}
+        .bar{height:100%;border-radius:2px}
+        .log-box{font-family:'Geist Mono',monospace;font-size:11px;line-height:1.8;max-height:300px;overflow-y:auto;color:#EAEAEA}
+        .log-box .info{color:#787774}
+        .log-box .warn{color:#956400}
+        .log-box .error{color:#9F2F2D}
+        .log-box .conviction{color:#1F6C9F}
+        .empty{color:#787774;font-style:italic}
+        .metric-block{display:flex;flex-direction:column}
+        .fade-in{animation:fadeIn 0.6s cubic-bezier(0.16,1,0.3,1) both}
+        @keyframes fadeIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
     </style>
 </head>
 <body>
-    <div class="hdr">
-        <h1>QUANT BOT v3.3 COCKPIT</h1>
+    <div class="hdr fade-in">
+        <h1>QUANT.BOT_V3.3</h1>
         <div>
-            <span class="st" id="bot-status">AKTIF</span>
-            &nbsp;&nbsp;
-            <a href="#" onclick="document.cookie='token=;Max-Age=0;Path=/';location.reload()">ÇIKIŞ</a>
+            <span class="st" id="s-uptime">—</span>
+            &nbsp;&nbsp;&nbsp;&nbsp;
+            <a href="#" onclick="document.cookie='token=;Max-Age=0;Path=/';location.reload()">LOGOUT</a>
         </div>
     </div>
 
-    <div class="grid">
-        <!-- SYSTEM -->
-        <div class="panel">
-            <h3>SYSTEM</h3>
-            <div class="kv">
-                <div class="item"><span class="k">uptime</span><span class="v" id="s-uptime">—</span></div>
-                <div class="item"><span class="k">ram</span><span class="v" id="s-ram">—</span></div>
-                <div class="item"><span class="k">son güncelleme</span><span class="v" id="s-scan">—</span></div>
-                <div class="item"><span class="k">circuit breaker</span><span class="v" id="s-cb">—</span></div>
-                <div class="item"><span class="k">penalty box</span><span class="v" id="s-pb">—</span></div>
-            </div>
+    <!-- SYSTEM & SCAN -->
+    <div class="section fade-in" style="animation-delay: 80ms">
+        <div class="section-hdr"><h3>System Intelligence</h3></div>
+        <div class="kv">
+            <div class="metric-block"><span class="k">Last Scan</span><span class="v" id="s-scan">—</span></div>
+            <div class="metric-block"><span class="k">Duration</span><span class="v" id="sc-dur">—</span></div>
+            <div class="metric-block"><span class="k">Signals</span><span class="v" id="sc-sig">—</span></div>
+            <div class="metric-block"><span class="k">Win Rate</span><span class="v" id="s-winrate">—</span></div>
+            <div class="metric-block"><span class="k">Circuit Breaker</span><span class="v" id="s-cb" style="font-family:'Geist Mono',monospace;font-size:12px">—</span></div>
         </div>
+        <div id="conv-dist" style="margin-top:24px;width:300px"></div>
+    </div>
 
-        <!-- TARAMA -->
-        <div class="panel">
-            <h3>TARAMA (Son Döngü)</h3>
-            <div class="kv" style="margin-bottom:8px">
-                <div class="item"><span class="k">süre</span><span class="v" id="sc-dur">—</span></div>
-                <div class="item"><span class="k">sinyal</span><span class="v" id="sc-sig">—</span></div>
-                <div class="item"><span class="k">DG red</span><span class="v" id="sc-dg">—</span></div>
-                <div class="item"><span class="k">ort.score</span><span class="v" id="sc-avg">—</span></div>
-            </div>
-            <div id="conv-dist" style="font-size:11px;line-height:1.8"></div>
-        </div>
+    <!-- ACTIVE TRADES -->
+    <div class="section fade-in" style="animation-delay: 160ms">
+        <div class="section-hdr"><h3>Active Deployments (<span id="trade-count">0</span>)</h3></div>
+        <table id="trade-table">
+            <thead><tr><th>Ticker</th><th>Dir</th><th>Strategy</th><th>Entry</th><th>SL</th><th>TP</th><th>Conviction</th><th>Status</th></tr></thead>
+            <tbody id="trade-body"><tr><td colspan="8" class="empty">No active deployments.</td></tr></tbody>
+        </table>
+    </div>
 
-        <!-- A/B TEST -->
-        <div class="panel">
-            <h3>A/B TEST</h3>
-            <div id="ab-panel"><span class="empty">veri bekleniyor...</span></div>
+    <!-- PERFORMANCE ANALYTICS -->
+    <div class="section fade-in" style="animation-delay: 200ms">
+        <div class="section-hdr"><h3>Performance Analytics</h3></div>
+        <div id="analytics-content">
+            <div style="color:#787774;font-style:italic">Loading analytics...</div>
         </div>
+    </div>
 
-        <!-- DATAGUARD -->
-        <div class="panel">
-            <h3>DATAGUARD</h3>
-            <div class="dg-row" id="dg-panel">
-                <span class="empty">veri bekleniyor...</span>
-            </div>
-        </div>
-
-        <!-- SCORECARD -->
-        <div class="panel full">
-            <h3>SCORECARD</h3>
-            <table id="sc-table">
-                <thead><tr><th>strateji</th><th>TP</th><th>SL</th><th>durum</th></tr></thead>
-                <tbody id="sc-body"><tr><td colspan="4" class="empty">veri bekleniyor...</td></tr></tbody>
-            </table>
-        </div>
-
-        <!-- AKTİF İŞLEMLER -->
-        <div class="panel full">
-            <h3>AKTİF İŞLEMLER (<span id="trade-count">0</span>)</h3>
-            <table id="trade-table">
-                <thead><tr><th>varlık</th><th>yön</th><th>strateji</th><th>giriş</th><th>SL</th><th>TP</th><th>conviction</th><th>durum</th></tr></thead>
-                <tbody id="trade-body"><tr><td colspan="8" class="empty">aktif işlem yok</td></tr></tbody>
-            </table>
-        </div>
-
-        <!-- PENALTY BOX -->
-        <div class="panel full" id="pb-panel" style="display:none">
-            <h3>PENALTY BOX</h3>
-            <table>
-                <thead><tr><th>varlık</th><th>SL sayısı</th><th>bitiş</th></tr></thead>
-                <tbody id="pb-body"></tbody>
-            </table>
-        </div>
-
-        <!-- CANLI LOG -->
-        <div class="panel full">
-            <h3>CANLI LOG</h3>
-            <div class="log-box" id="log-box"></div>
-        </div>
+    <!-- LOGS -->
+    <div class="section fade-in" style="animation-delay: 240ms">
+        <div class="section-hdr"><h3>System Logs</h3></div>
+        <div class="log-box" id="log-box"></div>
     </div>
 
     <script>
         function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-
-        function makeBar(count, max, color){
-            if(!max||!count) return '';
-            const w = Math.min(Math.round((count/max)*120), 120);
-            return `<span class="bar" style="width:${w}px;background:${color}"></span>`;
-        }
 
         function updateAllData(){
             fetch('/api/all')
@@ -468,88 +417,51 @@ class DashboardHandler(BaseHTTPRequestHandler):
             .then(d=>{
                 // SYSTEM
                 const s=d.status||{};
-                document.getElementById('s-uptime').textContent=s.uptime||'—';
-                document.getElementById('s-ram').textContent=s.ram||'N/A';
+                document.getElementById('s-uptime').textContent='UPTIME: '+ (s.uptime||'—');
                 document.getElementById('s-scan').textContent=s.last_scan||'—';
+                
                 const cb=d.circuit_breaker||{};
                 const strats=cb.strategies||{};
                 const keys=Object.keys(strats);
                 let cbHtml='';
                 if(keys.length===0){
-                    cbHtml='<span style="color:#3fb950">KAPALI (Veri Yok)</span>';
+                    cbHtml='<span style="color:#787774">ALL SYSTEMS NOMINAL</span>';
                 }else{
                     cbHtml=keys.map(k=>{
-                        const st=strats[k];
-                        const isOpen=st.silent_mode;
-                        const status=isOpen?'AÇIK':'KAPALI';
-                        const color=isOpen?'#f85149':'#3fb950';
-                        return `<span style="color:${color}">${k}: ${status}</span>`;
-                    }).join(' | ');
+                        const isOpen=strats[k].silent_mode;
+                        return `<span style="color:${isOpen?'#9F2F2D':'#787774'}">${k}:${isOpen?'SILENT':'ACTIVE'}</span>`;
+                    }).join(' · ');
                 }
-                const cbEl=document.getElementById('s-cb');
-                cbEl.innerHTML=cbHtml;
-                const pb=d.penalty_box||[];
-                document.getElementById('s-pb').textContent=pb.length>0?pb.length+' varlık':'temiz';
+                document.getElementById('s-cb').innerHTML=cbHtml;
+
+                // WIN RATE (Analysis)
+                const scard=d.scorecard||[];
+                let totalTP=0, totalSL=0;
+                scard.forEach(x=>{ totalTP+=x.tp; totalSL+=x.sl; });
+                const totalTrades = totalTP+totalSL;
+                const winRate = totalTrades>0 ? ((totalTP/totalTrades)*100).toFixed(1)+'%' : 'N/A';
+                document.getElementById('s-winrate').textContent = winRate;
 
                 // TARAMA
                 const sc=d.scan_stats||{};
                 document.getElementById('sc-dur').textContent=sc.scan_duration||'N/A';
                 document.getElementById('sc-sig').textContent=sc.total_signals||0;
-                document.getElementById('sc-dg').textContent=sc.dg_rejects||0;
-                document.getElementById('sc-avg').textContent=sc.avg_conviction||0;
+                
                 const cd=sc.conviction_distribution||{};
-                const maxC=Math.max(cd.strong||0,cd.medium||0,cd.watch||0,cd.reject||0,1);
-                let distHtml='';
-                if(cd.strong!==undefined){
-                    distHtml+=`${makeBar(cd.strong,maxC,'#3fb950')} <span style="color:#3fb950">STRONG:${cd.strong}</span> `;
-                    distHtml+=`${makeBar(cd.medium,maxC,'#d29922')} <span style="color:#d29922">MEDIUM:${cd.medium}</span> `;
-                    distHtml+=`${makeBar(cd.watch,maxC,'#f0883e')} <span style="color:#f0883e">WATCH:${cd.watch}</span> `;
-                    distHtml+=`${makeBar(cd.reject,maxC,'#f85149')} <span style="color:#f85149">REJECT:${cd.reject}</span>`;
-                }
-                document.getElementById('conv-dist').innerHTML=distHtml;
-
-                // A/B TEST
-                const ab=d.ab_test;
-                const abEl=document.getElementById('ab-panel');
-                if(ab&&ab.total_evaluations){
-                    const divPct=ab.divergence_count?((ab.divergence_count/ab.total_evaluations)*100).toFixed(1):'0';
-                    const cg=ab.control_grades||{};
-                    const eg=ab.experiment_grades||{};
-                    abEl.innerHTML=`
-                        <div class="kv" style="margin-bottom:6px">
-                            <div class="item"><span class="k">toplam</span><span class="v">${ab.total_evaluations}</span></div>
-                            <div class="item"><span class="k">fark</span><span class="v">${ab.divergence_count||0} (%${divPct})</span></div>
+                const totC=(cd.strong||0)+(cd.medium||0)+(cd.watch||0)+(cd.reject||0);
+                if(totC>0){
+                    const pS=(cd.strong/totC)*100; const pM=(cd.medium/totC)*100; const pW=(cd.watch/totC)*100; const pR=(cd.reject/totC)*100;
+                    document.getElementById('conv-dist').innerHTML=`
+                        <div style="font-family:'Geist Mono',monospace;font-size:10px;color:#787774;margin-bottom:4px;letter-spacing:0.05em">SIGNAL QUALITY DISTRIBUTION</div>
+                        <div class="bar-container">
+                            <div class="bar" style="width:${pS}%;background:#EDF3EC"></div>
+                            <div class="bar" style="width:${pM}%;background:#FBF3DB"></div>
+                            <div class="bar" style="width:${pW}%;background:#EAEAEA"></div>
+                            <div class="bar" style="width:${pR}%;background:#FDEBEC"></div>
                         </div>
-                        <div class="ab-row">
-                            <div class="ab-group"><div class="lbl">control</div>S:${cg.STRONG||0} M:${cg.MEDIUM||0} W:${cg.WATCH||0} R:${cg.REJECT||0}</div>
-                            <div class="ab-group"><div class="lbl">experiment</div>S:${eg.STRONG||0} M:${eg.MEDIUM||0} W:${eg.WATCH||0} R:${eg.REJECT||0}</div>
-                        </div>`;
-                }else{
-                    abEl.innerHTML='<span class="empty">henüz A/B test verisi yok</span>';
-                }
-
-                // DATAGUARD
-                const dg=d.dataguard||{};
-                const dgEl=document.getElementById('dg-panel');
-                const dgKeys=['DG-01','DG-02','DG-04','DG-06'];
-                let dgHtml='';
-                dgKeys.forEach(k=>{
-                    const c=dg[k]||0;
-                    const color=c>5?'#f85149':c>0?'#d29922':'#3fb950';
-                    dgHtml+=`<div class="dg-item"><span class="code">${k}</span><span class="cnt" style="color:${color}">${c}</span></div>`;
-                });
-                dgEl.innerHTML=dgHtml;
-
-                // SCORECARD
-                const scard=d.scorecard||[];
-                const scBody=document.getElementById('sc-body');
-                if(scard.length){
-                    scBody.innerHTML=scard.map(s=>{
-                        const status=s.active?'<span class="active-badge">aktif</span>':'<span class="disabled-badge">devre dışı</span>';
-                        return `<tr><td>${esc(s.strategy)}</td><td style="color:#3fb950">${s.tp}</td><td style="color:#f85149">${s.sl}</td><td>${status}</td></tr>`;
-                    }).join('');
-                }else{
-                    scBody.innerHTML='<tr><td colspan="4" class="empty">scorecard verisi yok</td></tr>';
+                    `;
+                } else {
+                    document.getElementById('conv-dist').innerHTML='';
                 }
 
                 // AKTİF İŞLEMLER
@@ -558,8 +470,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 const tBody=document.getElementById('trade-body');
                 if(trades.length){
                     tBody.innerHTML=trades.map(t=>{
-                        const dir=t.signal||'AL';
-                        const dirClass=dir==='AL'?'al':'sat';
                         const cs=t.conviction_score;
                         const cg=t.conviction_grade||'';
                         let convHtml='—';
@@ -568,31 +478,44 @@ class DashboardHandler(BaseHTTPRequestHandler):
                             convHtml=`${Math.round(cs)} <span class="badge ${bc}">${cg}</span>`;
                         }
                         const status=t.status||'ACTIVE';
-                        const stColor=status==='ACTIVE'?'#3fb950':'#8b949e';
+                        const stColor=status==='ACTIVE'?'#EAEAEA':'#787774';
                         return `<tr>
-                            <td>${esc(t.ticker)}</td>
-                            <td class="${dirClass}">${dir}</td>
+                            <td style="font-family:'Geist Mono',monospace">${esc(t.ticker)}</td>
+                            <td style="color:${t.signal==='AL'?'#EAEAEA':'#787774'}">${t.signal}</td>
                             <td>${esc(t.strategy)}</td>
-                            <td>${t.entry_price}</td>
-                            <td style="color:#f85149">${t.sl}</td>
-                            <td style="color:#3fb950">${t.tp}</td>
+                            <td style="font-family:'Geist Mono',monospace">${t.entry_price}</td>
+                            <td style="font-family:'Geist Mono',monospace;color:#787774">${t.sl}</td>
+                            <td style="font-family:'Geist Mono',monospace">${t.tp}</td>
                             <td>${convHtml}</td>
-                            <td style="color:${stColor}">${status}</td>
+                            <td style="color:${stColor};font-family:'Geist Mono',monospace;font-size:11px">${status}</td>
                         </tr>`;
                     }).join('');
                 }else{
-                    tBody.innerHTML='<tr><td colspan="8" class="empty">aktif işlem yok</td></tr>';
+                    tBody.innerHTML='<tr><td colspan="8" class="empty">No active deployments.</td></tr>';
                 }
 
-                // PENALTY BOX
-                const pbPanel=document.getElementById('pb-panel');
-                const pbBody=document.getElementById('pb-body');
-                if(pb.length){
-                    pbPanel.style.display='block';
-                    pbBody.innerHTML=pb.map(p=>`<tr><td>${esc(p.ticker)}</td><td style="color:#f85149">${p.sl_count}</td><td>${esc(p.until)}</td></tr>`).join('');
-                }else{
-                    pbPanel.style.display='none';
-                }
+                // STRATEGY ANALYTICS
+                let analyticsHtml = '<div style="display:flex; gap:48px; flex-wrap:wrap;">';
+                analyticsHtml += `<div><span style="color:#787774;font-family:'Geist Mono',monospace;font-size:10px;text-transform:uppercase;">Global Win Rate</span><br><span style="font-size:24px;color:#EAEAEA;">${winRate}</span><br><span style="color:#787774;font-size:11px;">${totalTP} TP / ${totalSL} SL</span></div>`;
+                
+                let topStrat = 'N/A', topWinRate = -1;
+                let strategyStatsHtml = '<table style="width:100%;max-width:400px;margin-top:24px;"><thead><tr><th>Strategy</th><th>Win Rate</th><th>TP/SL</th></tr></thead><tbody>';
+                let scard_sorted = [...scard].sort((a,b)=>(b.tp+b.sl)-(a.tp+a.sl));
+                scard_sorted.slice(0,5).forEach(s => {
+                    const stTotal = s.tp + s.sl;
+                    if(stTotal > 0) {
+                        const stWR = (s.tp / stTotal) * 100;
+                        if(stWR > topWinRate && stTotal >= 1) { topWinRate = stWR; topStrat = s.strategy; }
+                        strategyStatsHtml += `<tr><td style="font-family:'Geist Mono',monospace">${s.strategy}</td><td style="font-family:'Geist Mono',monospace">${stWR.toFixed(1)}%</td><td style="font-family:'Geist Mono',monospace;color:#787774">${s.tp}/${s.sl}</td></tr>`;
+                    }
+                });
+                if(topStrat === 'N/A') strategyStatsHtml += '<tr><td colspan="3" style="color:#787774;padding-top:12px;">Not enough data.</td></tr>';
+                strategyStatsHtml += '</tbody></table>';
+
+                analyticsHtml += `<div><span style="color:#787774;font-family:'Geist Mono',monospace;font-size:10px;text-transform:uppercase;">Top Strategy</span><br><span style="font-size:15px;color:#EAEAEA;font-family:'Geist Mono',monospace;">${topStrat}</span><br><span style="color:#787774;font-size:11px;">Based on highest win rate</span></div>`;
+                
+                analyticsHtml += '</div>' + strategyStatsHtml;
+                document.getElementById('analytics-content').innerHTML = analyticsHtml;
 
                 // CANLI LOG
                 const logs=d.logs||[];
@@ -602,7 +525,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     if(l.includes('[WARN]')||l.includes('[WARNING]'))cls='warn';
                     else if(l.includes('[ERROR]'))cls='error';
                     else if(l.includes('Score=')||l.includes('Conviction'))cls='conviction';
-                    return `<div class="${cls}">&gt; ${esc(l)}</div>`;
+                    return `<div class="${cls}">> ${esc(l)}</div>`;
                 }).join('');
                 logBox.scrollTop=logBox.scrollHeight;
             })

@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 # 99 yapılmıştır
 import config
 
-SCORECARD_STATE_FILE = "strategy_scorecard_state.json"
+SCORECARD_STATE_FILE = config.SCORECARD_STATE_FILE
 _scorecard_lock = threading.Lock()
 
 

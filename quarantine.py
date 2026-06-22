@@ -8,12 +8,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict
 from core.defensive_engine import DefensiveStateGuard
-
-QUARANTINE_STATE_FILE = "quarantine_state.json"
-_quarantine_lock = threading.Lock()
-
-# 99 yapılmıştır
 import config
+
+QUARANTINE_STATE_FILE = config.QUARANTINE_STATE_FILE
+_quarantine_lock = threading.Lock()
 
 # Karantina eşikleri (Config.py SSOT eşleşmesi)
 STALE_DATA_THRESHOLD_SEC = getattr(config, 'QUARANTINE_STALE_SECONDS', 1800)

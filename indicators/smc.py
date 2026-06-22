@@ -74,6 +74,7 @@ def sniper_detect_sweep(df, swing_points, point_type="low", lookback=10):
         return False, None
 
     check_start = max(0, len(df) - lookback)
+    tolerance = getattr(config, 'MSB_TOLERANCE_PCT', 0.001)
 
     for i in range(check_start, len(df)):
         row = df.iloc[i]
@@ -82,10 +83,12 @@ def sniper_detect_sweep(df, swing_points, point_type="low", lookback=10):
                 continue
 
             if point_type == "low":
-                if row['low'] < sw_price and row['close'] > sw_price:
+                target_price = sw_price * (1 + tolerance)
+                if row['low'] < target_price and row['close'] > sw_price:
                     return True, sw_price
             else:
-                if row['high'] > sw_price and row['close'] < sw_price:
+                target_price = sw_price * (1 - tolerance)
+                if row['high'] > target_price and row['close'] < sw_price:
                     return True, sw_price
 
     return False, None
@@ -100,11 +103,19 @@ def sniper_detect_msb(df, swing_points, point_type="high"):
 
     last_sw_idx, last_sw_price = swing_points[-1]
     current_close = df['close'].iloc[-1]
+    current_high = df['high'].iloc[-1]
+    current_low = df['low'].iloc[-1]
+    
+    tolerance = getattr(config, 'MSB_TOLERANCE_PCT', 0.001)
 
-    if point_type == "high" and current_close > last_sw_price:
-        return True, last_sw_price, last_sw_idx
-    elif point_type == "low" and current_close < last_sw_price:
-        return True, last_sw_price, last_sw_idx
+    if point_type == "high":
+        target_price = last_sw_price * (1 - tolerance)
+        if current_close > target_price or current_high > last_sw_price:
+            return True, last_sw_price, last_sw_idx
+    elif point_type == "low":
+        target_price = last_sw_price * (1 + tolerance)
+        if current_close < target_price or current_low < last_sw_price:
+            return True, last_sw_price, last_sw_idx
 
     return False, None, None
 
@@ -114,12 +125,14 @@ def sniper_calculate_ote(sweep_price, msb_price):
     if math.isclose(fib_range, 0.0, abs_tol=1e-10):
         return 0, 0
 
+    tolerance = getattr(config, 'OTE_TOLERANCE_PCT', 0.0)
+
     if sweep_price < msb_price:
-        ote_top = msb_price - (fib_range * config.FIB_618)
-        ote_bottom = msb_price - (fib_range * config.FIB_786)
+        ote_top = msb_price - (fib_range * (config.FIB_618 - tolerance))
+        ote_bottom = msb_price - (fib_range * (config.FIB_786 + tolerance))
     else:
-        ote_bottom = msb_price + (fib_range * config.FIB_618)
-        ote_top = msb_price + (fib_range * config.FIB_786)
+        ote_bottom = msb_price + (fib_range * (config.FIB_618 - tolerance))
+        ote_top = msb_price + (fib_range * (config.FIB_786 + tolerance))
     return ote_top, ote_bottom
 
 def sniper_detect_fvg(df, ote_top, ote_bottom, lookback=15, direction="bullish"):

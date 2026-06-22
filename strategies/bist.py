@@ -48,7 +48,7 @@ def _check_bist_1_dip_hunter(ctx):
     dynamic_sl_dist = ctx["dynamic_sl_dist"]
     sl_pct = ctx["sl_pct"]
 
-    if pd.isna(last_1d.get('RSI_14')) or last_1d['RSI_14'] >= config.BIST_DIP_HUNTER_RSI_1D_LIMIT:
+    if pd.isna(last_1d.get('RSI_14')):
         return signals
 
     trend_sma = get_trend_sma(last_1d)
@@ -138,7 +138,7 @@ def _check_bist_2_trend_following(ctx):
     if not has_needed:
         return signals
 
-    if not (_adx_momentum_ok(df_4h, last_4h) and last_4h['EMA_8'] > last_4h['EMA_21']):
+    if last_4h['EMA_8'] <= last_4h['EMA_21']:
         return signals
 
     if pd.isna(last_1h.get('EMA_21')):
@@ -239,6 +239,10 @@ def _check_bist_3_squeeze_breakout(ctx):
 
     if pd.isna(last_1h.get('vol_sma_20')):
         return signals
+        
+    # (Relaxed)
+    # if last_1h.get('RSI_14', 0) <= 51.94:
+    #     return signals
         
     guarded_vol_sma = _apply_volume_sma_guard(df_1h, last_1h['vol_sma_20'])
     if not _is_meaningful_volume(last_1h['volume'], guarded_vol_sma, current_price, "BIST"):
@@ -609,6 +613,22 @@ def _check_bist_7_vwap(ctx):
     if is_bear_regime or mtf_trend_down or xu100_down:
         return signals
 
+    # VWAP Golden Filters (RSI & Volatilite/ATR) (Relaxed)
+    # if not pd.isna(last_1h.get('RSI_14')) and last_1h['RSI_14'] >= getattr(config, 'VWAP_LONG_MAX_RSI', 60.0):
+    #     return signals
+        
+    if f'ATRr_14' not in df_1h.columns:
+        df_1h.ta.atr(length=14, append=True)
+    if 'ATR_SMA_14' not in df_1h.columns:
+        df_1h['ATR_SMA_14'] = df_1h['ATRr_14'].rolling(window=14).mean()
+
+    current_atr = df_1h['ATRr_14'].iloc[-1]
+    atr_sma = df_1h['ATR_SMA_14'].iloc[-1]
+    
+    if pd.notna(current_atr) and pd.notna(atr_sma) and atr_sma > 0:
+        if (current_atr / atr_sma) > getattr(config, 'VWAP_MAX_ATR_RATIO', 2.0):
+            return signals # Aşırı Volatilite İptali
+
     vwap_val = calculate_anchored_vwap(df_1h, anchor_type="weekly")
     if vwap_val is None:
         return signals
@@ -621,7 +641,7 @@ def _check_bist_7_vwap(ctx):
     guarded_vol_sma = _apply_volume_sma_guard(df_1h, vol_sma_20)
     
     if not _has_absolute_hourly_volume(last_1h['volume'], current_price, "BIST"):
-        return signals
+        pass  # Volume check handled by conviction scorer penalty
 
     sl = wick_low * (1.0 - config.VWAP_SL_BUFFER_PCT / 100.0)
     _tp7 = current_price + (dynamic_sl_dist * config.BEAR_HUNTER_TP_RR)
@@ -669,6 +689,9 @@ def _check_bist_8_obv(ctx):
 
     obv_ok, obv_box_high, obv_box_low = detect_obv_accumulation_bist(df_1d, max_change_pct=config.BIST_OBV_ACC_MAX_CHANGE_PCT)
     if obv_ok and obv_box_high is not None:
+        # (Relaxed)
+        # if last_1h.get('RSI_14', 50) >= 52.20:
+        #     return signals
         cmf_val = calculate_cmf(df_1d)
         if cmf_val is not None and not pd.isna(cmf_val) and cmf_val >= config.BIST_OBV_CMF_THRESHOLD:
             sl = (obv_box_high + obv_box_low) / 2
@@ -677,15 +700,16 @@ def _check_bist_8_obv(ctx):
             
             raw_vars = locals()
             
-            _scores8 = build_dip_scores(
-                rsi_daily=last_1d.get('RSI_14', 50), rsi_hourly=last_1h.get('RSI_14', 50),
-                rsi_prev=prev_1h.get('RSI_14', 50) if len(df_1h) >= 2 else 50,
-                price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'),
+            _scores8 = build_breakout_scores(
+                bb_width=None, price=current_price, ema_fast=last_1h.get('EMA_8'), ema_mid=last_1h.get('EMA_21'), ema_slow=None,
                 volume=last_1h.get('volume', 0), vol_sma=last_1h.get('vol_sma_20', 0),
                 dollar_vol=last_1h.get('volume', 0) * current_price,
-                rr=_rr8, has_engulfing=False, regime=bist_regime,
+                rr=_rr8, regime=bist_regime,
                 macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
-                cmf=cmf_val
+                rsi=last_1d.get('RSI_14', 50),
+                rsi_prev=df_1d['RSI_14'].iloc[-2] if len(df_1d) >= 2 else last_1d.get('RSI_14', 50),
+                rsi_1h=last_1h.get('RSI_14', 50),
+                has_engulfing=False, cmf=cmf_val
             )
             _conv8 = calculate_conviction(_scores8, ctx=ctx)
             if _conv8.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -726,8 +750,7 @@ def _get_bist_10_sniper_setup(df_1h_sniper):
     bb_pct_series = (df_1h_sniper['close'] - bbl_s) / (bbu_s - bbl_s)
     has_bb_pct_touch = (bb_pct_series.iloc[-3:] <= config.BIST_SQUEEZE_BB_PCT_TOUCH_LIMIT).any()
     
-    if not (is_squeeze or has_bb_pct_touch):
-        return None
+    is_weak = not (is_squeeze or has_bb_pct_touch)
 
     bbw = bbw_series.iloc[-1]
     kcu = df_1h_sniper[kc_upper_col[0]].iloc[-1]
@@ -740,7 +763,8 @@ def _get_bist_10_sniper_setup(df_1h_sniper):
         "bbw": bbw,
         "kcw": kcw,
         "bb_pct": bb_pct,
-        "bbl_s_last": bbl_s.iloc[-1]
+        "bbl_s_last": bbl_s.iloc[-1],
+        "is_weak": is_weak
     }
 
 
@@ -769,6 +793,7 @@ def _check_bist_10_sniper(ctx):
     kcw = setup["kcw"]
     bb_pct = setup["bb_pct"]
     bbl_s_last = setup["bbl_s_last"]
+    is_weak = setup.get("is_weak", False)
     
     has_fvg, _, _ = sniper_detect_fvg(df_1h_sniper, df_1h_sniper['high'].iloc[-1], df_1h_sniper['low'].iloc[-1], direction="bullish")
     swing_lows_s = sniper_find_swing_points(df_1h_sniper, point_type="low")
@@ -795,8 +820,11 @@ def _check_bist_10_sniper(ctx):
         market="BIST", is_squeeze=is_squeeze,
         asset_trend_aligned=asset_trend_aligned
     )
+    if is_weak:
+        _scores_sn["setup_weak_penalty"] = -8.0
+        
     _conv_sn = calculate_conviction(_scores_sn, weights=SNIPER_BIST_WEIGHTS, ctx=ctx)
-    if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
+    if _conv_sn.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "BIST",
@@ -839,7 +867,7 @@ def _verify_bist11_volume(df_4h):
     volume_ok = vol_ratio >= config.BIST11_VOLUME_MULT
     return volume_ok, vol_ratio, avg_vol_prev
 
-def _build_bist11_signal(ctx, pattern_name, support_reason, vol_ratio, avg_vol_prev, div_ok):
+def _build_bist11_signal(ctx, pattern_name, support_reason, vol_ratio, avg_vol_prev, div_ok, is_weak=False):
     df_1d = ctx["df_1d"]
     df_4h = ctx["df_4h"]
     current_price = ctx["current_price"]
@@ -861,19 +889,22 @@ def _build_bist11_signal(ctx, pattern_name, support_reason, vol_ratio, avg_vol_p
     rsi_h = df_4h['RSI_14'].iloc[-1] if 'RSI_14' in df_4h.columns else 50.0
     rsi_p = df_4h['RSI_14'].iloc[-2] if len(df_4h) >= 2 and 'RSI_14' in df_4h.columns else rsi_h
     
+    is_engulfing = "Engulfing" in pattern_name
     _scores_cand = build_dip_scores(
         rsi_daily=rsi_d, rsi_hourly=rsi_h, rsi_prev=rsi_p,
         price=current_price,
         ema_fast=df_4h['EMA_8'].iloc[-1] if 'EMA_8' in df_4h.columns else None,
         ema_mid=df_4h['EMA_21'].iloc[-1] if 'EMA_21' in df_4h.columns else None,
         volume=vol_4h[-1], vol_sma=avg_vol_prev, dollar_vol=vol_4h[-1] * current_price,
-        rr=rr, has_engulfing=True, regime=bist_regime,
+        rr=rr, has_engulfing=is_engulfing, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
     )
     
     if div_ok:
-        _scores_cand['rsi'] = 100.0
-        _scores_cand['rsi_direction'] = 100.0
+        _scores_cand['rsi'] = min(100.0, _scores_cand.get('rsi', 0) + 15.0)
+
+    if is_weak:
+        _scores_cand["setup_weak_penalty"] = -8.0
 
     _conv_cand = calculate_conviction(_scores_cand, ctx=ctx)
     if _conv_cand.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -905,22 +936,22 @@ def _check_bist_11_candlestick(ctx):
             return signals
 
         pattern_name, pattern_details, pattern_ok = _detect_bist11_pattern(df_4h, df_1d)
-        if not pattern_ok:
+        if not pattern_name:
             return signals
+
+        is_weak = not pattern_ok
 
         near_support, support_reason = check_near_support(current_price, df_4h, df_1d, tolerance_pct=config.BIST11_SUPPORT_TOLERANCE_PCT)
         if not near_support:
-            return signals
+            is_weak = True
 
         volume_ok, vol_ratio, avg_vol_prev = _verify_bist11_volume(df_4h)
         if not volume_ok:
-            return signals
+            is_weak = True
 
         div_ok = not config.BIST11_DIVERGENCE_REQUIRED or detect_bullish_divergence(df_4h, neighbors=3)[0]
-        if not div_ok:
-            return signals
 
-        sig = _build_bist11_signal(ctx, pattern_name, support_reason, vol_ratio, avg_vol_prev, div_ok)
+        sig = _build_bist11_signal(ctx, pattern_name, support_reason, vol_ratio, avg_vol_prev, div_ok, is_weak)
         if sig:
             signals.append(sig)
     except Exception as e:
@@ -936,11 +967,12 @@ def _check_bist12_timing_filters(df_1d, df_4h, current_price):
     
     if rsi_1d >= config.BIST_CHART_RSI_D_LIMIT or dist_to_ema21 >= config.BIST_CHART_EMA21_DIST_LIMIT:
         return False
-    if adx_4h < 20.0:
-        return False
+    # HARD FILTER REMOVED: ADX Threshold delegated to conviction_scorer
+    # if adx_4h < 20.0:
+    #     return False
     return True
 
-def _build_bist12_signal(ctx, pattern_name, pattern_details):
+def _build_bist12_signal(ctx, pattern_name, pattern_details, is_weak=False):
     df_1d = ctx["df_1d"]
     df_4h = ctx["df_4h"]
     current_price = ctx["current_price"]
@@ -987,7 +1019,10 @@ def _build_bist12_signal(ctx, pattern_name, pattern_details):
         rr=rr, has_engulfing=False, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
     )
-    
+    # Manual double penalty removed: volume checks are handled by conviction scorer / autopsy penalty
+    if is_weak:
+        _scores_pattern["setup_weak_penalty"] = -8.0
+        
     _conv_pattern = calculate_conviction(_scores_pattern, ctx=ctx)
     if _conv_pattern.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         raw_vars = locals()
@@ -1022,10 +1057,9 @@ def _check_bist_12_chart_patterns(ctx):
         if not pattern_name or pattern_details.get("signal") != "AL":
             return signals
 
-        if not _check_bist12_timing_filters(df_1d, df_4h, current_price):
-            return signals
+        is_weak = not _check_bist12_timing_filters(df_1d, df_4h, current_price)
 
-        sig = _build_bist12_signal(ctx, pattern_name, pattern_details)
+        sig = _build_bist12_signal(ctx, pattern_name, pattern_details, is_weak)
         if sig:
             signals.append(sig)
     except Exception as e:
@@ -1077,7 +1111,7 @@ def analyze_strategies_bist(symbol, df_1d, df_4h, df_1h, xu100_down=False, xu100
     if volume_ma20_tl.empty or pd.isna(volume_ma20_tl.iloc[-1]) or volume_ma20_tl.iloc[-1] < config.BIST_SWING_MIN_VOLUME_TL:
         return signals
     if current_price < config.BIST_MIN_STOCK_PRICE_TL:
-        return signals
+        pass # return signals
 
     atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
@@ -1145,6 +1179,12 @@ def _check_orb_long(symbol, current_price, cage_high, cage_low, cage_mid, today_
             _risk9u = entry_price - _sl9u
             _tp9u = entry_price + (_risk9u * 2.0)
             
+            ctx = {"symbol": symbol}
+            df_15m_copy = df_15m.copy()
+            df_15m_copy.ta.rsi(length=14, append=True)
+            rsi_val = float(df_15m_copy['RSI_14'].iloc[-1]) if 'RSI_14' in df_15m_copy.columns and not pd.isna(df_15m_copy['RSI_14'].iloc[-1]) else 50.0
+            rsi_prev_val = float(df_15m_copy['RSI_14'].iloc[-2]) if 'RSI_14' in df_15m_copy.columns and len(df_15m_copy) >= 2 and not pd.isna(df_15m_copy['RSI_14'].iloc[-2]) else rsi_val
+            
             raw_vars = locals()
             
             _scores9u = build_breakout_scores(
@@ -1152,7 +1192,8 @@ def _check_orb_long(symbol, current_price, cage_high, cage_low, cage_mid, today_
                 ema_fast=ema21, ema_mid=today_vwap, ema_slow=None,
                 volume=last['volume'], vol_sma=rvol, dollar_vol=last['volume'] * entry_price,
                 rr=2.0, regime="BULL",
-                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+                rsi=rsi_val, rsi_prev=rsi_prev_val
             )
             _conv9u = calculate_conviction(_scores9u, ctx=ctx)
             if _conv9u.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -1193,13 +1234,20 @@ def _check_orb_short(symbol, current_price, cage_high, cage_low, cage_mid, today
             _risk9d = _sl9d - entry_price
             _tp9d = entry_price - (_risk9d * 2.0)
             
+            ctx = {"symbol": symbol}
+            df_15m_copy = df_15m.copy()
+            df_15m_copy.ta.rsi(length=14, append=True)
+            rsi_val = float(df_15m_copy['RSI_14'].iloc[-1]) if 'RSI_14' in df_15m_copy.columns and not pd.isna(df_15m_copy['RSI_14'].iloc[-1]) else 50.0
+            rsi_prev_val = float(df_15m_copy['RSI_14'].iloc[-2]) if 'RSI_14' in df_15m_copy.columns and len(df_15m_copy) >= 2 and not pd.isna(df_15m_copy['RSI_14'].iloc[-2]) else rsi_val
+            
             raw_vars = locals()
             
             _scores9d = build_breakout_scores(
                 bb_width=None, price=entry_price, ema_fast=today_vwap, ema_mid=ema21, ema_slow=None,
                 volume=last['volume'], vol_sma=rvol, dollar_vol=last['volume'] * entry_price,
                 rr=2.0, regime="BEAR", macro_aligned=True,
-                consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
+                consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
+                is_long=False, rsi=rsi_val, rsi_prev=rsi_prev_val
             )
             _conv9d = calculate_conviction(_scores9d, ctx=ctx)
             if _conv9d.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):

@@ -74,6 +74,10 @@ def _check_crypto_1_liquidation(ctx):
     if not _is_meaningful_volume(last_4h['volume'], guarded_vol_sma, current_price, "KRIPTO"):
         return signals
 
+    # Golden Filter: ADX > 64.14 (Relaxed/Removed to increase signals)
+    # if last_4h.get('ADX_14', 0) <= 64.14:
+    #     return signals
+
     if current_price > last_4h['open']:
         oi_crash = fetch_crypto_oi_crash(symbol)
         
@@ -144,8 +148,9 @@ def _check_mega_trend_4h_indicators(last_4h, current_price):
     atr_col = 'ATRr_14' if 'ATRr_14' in last_4h.index else 'ATR_14'
     if pd.isna(last_4h.get('ADX_14')) or pd.isna(last_4h.get('EMA_20')) or pd.isna(last_4h.get(atr_col)):
         return False
-    if last_4h['ADX_14'] <= config.CRYPTO_TREND_ADX_MIN:
-        return False
+    # HARD FILTER REMOVED: ADX Threshold delegated to conviction_scorer
+    # if last_4h['ADX_14'] <= config.CRYPTO_TREND_ADX_MIN:
+    #     return False
     ema_mid_4h = last_4h.get(f'EMA_{config.IND_EMA_MID}')
     if ema_mid_4h is None or pd.isna(ema_mid_4h):
         return False
@@ -187,6 +192,11 @@ def _check_crypto_2_mega_trend(ctx):
         return signals
 
     btcdom_trend = get_btc_dominance_trend()
+
+    # Golden Filter: CMF < -0.0357 (Relaxed/Removed to increase signals)
+    # cmf = calculate_cmf(df_4h)
+    # if cmf is not None and cmf >= -0.0357:
+    #     return signals
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
@@ -292,10 +302,11 @@ def _check_crypto_3_breakout(ctx):
     df_4h = ctx["df_4h"]
     btc_ok = ctx["btc_ok"]
 
-    if last_4h.get('RSI_14', 0) >= config.CRYPTO_RETEST_RSI_MAX:
-        return signals
-    if last_4h.get('ADX_14', 0) < config.CRYPTO_RETEST_ADX_MIN:
-        return signals
+    # HARD FILTER REMOVED: RSI and ADX constraints delegated to conviction_scorer
+    # if last_4h.get('RSI_14', 0) >= config.CRYPTO_RETEST_RSI_MAX:
+    #     return signals
+    # if last_4h.get('ADX_14', 0) < config.CRYPTO_RETEST_ADX_MIN:
+    #     return signals
 
     ok_setup, last_width = _is_breakout_setup(symbol, last_4h, current_price, df_1d, df_4h)
     if not ok_setup:
@@ -331,7 +342,10 @@ def _check_crypto_3_breakout(ctx):
         volume=last_4h['volume'], vol_sma=last_4h['vol_sma_20'], dollar_vol=last_4h['volume'] * current_price,
         rr=_rr_c3, regime="BULL",
         macro_aligned=btc_ok, consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
-        dg_is_darth_maul=dm_ratio
+        dg_is_darth_maul=dm_ratio, funding_rate=funding_rate,
+        rsi=last_4h.get('RSI_14'),
+        rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else last_4h.get('RSI_14'),
+        has_engulfing=False
     )
     _conv_c3 = calculate_conviction(_scores_c3, ctx=ctx)
     if _conv_c3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -355,8 +369,9 @@ def _check_crypto_short_1_fomo(ctx):
     current_price = ctx["current_price"]
     df_4h = ctx["df_4h"]
 
-    if pd.isna(last_4h.get('RSI_14')) or last_4h['RSI_14'] <= config.SHORT_RSI_OVERBOUGHT_LIMIT:
-        return signals
+    # HARD FILTER REMOVED: RSI constraint delegated to conviction_scorer
+    # if pd.isna(last_4h.get('RSI_14')) or last_4h['RSI_14'] <= config.SHORT_RSI_OVERBOUGHT_LIMIT:
+    #     return signals
 
     trend_aligned = True
     if config.SHORT_TREND_ALIGN_REQUIRED:
@@ -380,6 +395,14 @@ def _check_crypto_short_1_fomo(ctx):
     
     if not (div_found or msb_ok):
         return signals
+
+    # Golden Filter: Vortex_Diff > 0.5207 (Relaxed/Removed to increase signals)
+    # if 'high' in df_4h and 'low' in df_4h and 'close' in df_4h:
+    #     vortex = ta.vortex(df_4h['high'], df_4h['low'], df_4h['close'], length=14)
+    #     if vortex is not None and not vortex.empty:
+    #         vortex_diff = vortex.iloc[-1, 0] - vortex.iloc[-1, 1]  # VIp - VIm
+    #         if vortex_diff <= 0.5207:
+    #             return signals
 
     sl = last_4h['high'] * config.CRYPTO_SHORT1_SL_MULT
     sl_dist = abs(sl - current_price)
@@ -423,8 +446,9 @@ def _check_crypto_short_2_waterfall(ctx):
     if not (last_1d[f'EMA_{config.IND_EMA_MID}'] < last_1d[f'EMA_{config.IND_EMA_SLOW}'] and current_price < last_1d[f'EMA_{config.IND_EMA_MID}']):
         return signals
 
-    if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.CRYPTO_SHORT2_ADX_MIN:
-        return signals
+    # HARD FILTER REMOVED: ADX constraint delegated to conviction_scorer
+    # if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.CRYPTO_SHORT2_ADX_MIN:
+    #     return signals
         
     vol_sma = last_4h.get('vol_sma_20', 0)
     if vol_sma > 0 and last_4h.get('volume', 0) < vol_sma * config.CRYPTO_SHORT2_VOLUME_SMA_MULT:
@@ -436,6 +460,19 @@ def _check_crypto_short_2_waterfall(ctx):
     btcdom_trend = get_btc_dominance_trend()
     if btcdom_trend != "UP":
         return signals
+
+    # Golden Filter: BB Width < 0.0544 (Relaxed/Removed to increase signals)
+    # bb_upper = [c for c in df_4h.columns if 'BBU' in c]
+    # bb_lower = [c for c in df_4h.columns if 'BBL' in c]
+    # bb_mid = [c for c in df_4h.columns if 'BBM' in c]
+    # if bb_upper and bb_lower and bb_mid:
+    #     bbu = last_4h[bb_upper[0]]
+    #     bbl = last_4h[bb_lower[0]]
+    #     bbm = last_4h[bb_mid[0]]
+    #     if bbm > 0:
+    #         bbw = (bbu - bbl) / bbm
+    #         if bbw >= 0.0544:
+    #             return signals
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if atr_val is None or pd.isna(atr_val):
@@ -568,40 +605,43 @@ def _check_crypto_4_sniper_ote_long(ctx):
     swing_highs_s = sniper_find_swing_points(df_4h, point_type="high")
     sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows_s, point_type="low")
     if not sweep_ok:
+        print("FAIL: No sweep")
         return signals
 
     msb_ok, msb_high, msb_idx = sniper_detect_msb(df_4h, swing_highs_s, point_type="high")
     if not msb_ok:
+        print("FAIL: No MSB")
         return signals
 
     sweep_idx = swing_lows_s[-1][0] if swing_lows_s else None
     ote_top, ote_bottom = sniper_calculate_ote_body(df_4h, sweep_idx, msb_idx, direction="long")
     if ote_top <= 0 or ote_bottom <= 0 or not (ote_bottom <= current_price <= ote_top):
+        print(f"FAIL: Not in OTE {ote_bottom} < {current_price} < {ote_top}")
         return signals
 
     has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
     if config.SMC_FVG_REQUIRED and not has_fvg:
+        print("FAIL: No FVG")
         return signals
 
-    ltf_confirm = True
-    df_1h_crypto = None
-    if config.SMC_LTF_MSB_CONFIRM:
-        df_1h_crypto = get_crypto_1h_data(symbol)
-        if df_1h_crypto is not None and not df_1h_crypto.empty:
-            df_1h_crypto = df_1h_crypto.copy()
-            df_1h_crypto.ta.ema(length=config.IND_EMA_FAST, append=True)
-            df_1h_crypto.ta.ema(length=config.IND_EMA_21, append=True)
-            swing_highs_1h = sniper_find_swing_points(df_1h_crypto, point_type="high", neighbors=2)
-            ltf_confirm, _, _ = sniper_detect_msb(df_1h_crypto, swing_highs_1h, point_type="high")
-        else:
-            ltf_confirm = False
+    # ltf_confirm = True
+    # df_1h_crypto = None
+    # if config.SMC_LTF_MSB_CONFIRM:
+    #     df_1h_crypto = get_crypto_1h_data(symbol)
+    #     if df_1h_crypto is not None and not df_1h_crypto.empty:
+    #         df_1h_crypto = df_1h_crypto.copy()
+    #         df_1h_crypto.ta.ema(length=config.IND_EMA_FAST, append=True)
+    #         df_1h_crypto.ta.ema(length=config.IND_EMA_21, append=True)
+    #         swing_highs_1h = sniper_find_swing_points(df_1h_crypto, point_type="high", neighbors=2)
+    #         ltf_confirm, _, _ = sniper_detect_msb(df_1h_crypto, swing_highs_1h, point_type="high")
+    #     else:
+    #         ltf_confirm = False
 
-    if not ltf_confirm:
-        return signals
+    # if not ltf_confirm:
+    #     return signals
 
     funding_rate = get_funding_rate(symbol)
-    if funding_rate > 0.0:
-        return signals
+    df_1h_crypto = None
 
     sl = sweep_low * config.CRYPTO_LONG4_SL_MULT
     sl_dist = max(current_price - sl, 1e-8)
@@ -626,7 +666,11 @@ def _check_crypto_4_sniper_ote_long(ctx):
         volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
         dollar_vol=last_4h['volume'] * current_price,
         rr=_rr_c4l, regime="BULL", macro_aligned=True,
-        consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+        consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+        funding_rate=funding_rate,
+        rsi=last_4h.get('RSI_14'),
+        rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else last_4h.get('RSI_14'),
+        has_engulfing=False
     )
     if has_fvg:
         _scores_c4l["engulfing"] = min(100.0, _scores_c4l["engulfing"] + config.SMC_FVG_BONUS)
@@ -681,25 +725,24 @@ def _check_crypto_4_sniper_ote_short(ctx):
     if config.SMC_FVG_REQUIRED and not has_fvg:
         return signals
 
-    ltf_confirm = True
-    df_1h_crypto = None
-    if config.SMC_LTF_MSB_CONFIRM:
-        df_1h_crypto = get_crypto_1h_data(symbol)
-        if df_1h_crypto is not None and not df_1h_crypto.empty:
-            df_1h_crypto = df_1h_crypto.copy()
-            df_1h_crypto.ta.ema(length=config.IND_EMA_FAST, append=True)
-            df_1h_crypto.ta.ema(length=config.IND_EMA_21, append=True)
-            swing_lows_1h = sniper_find_swing_points(df_1h_crypto, point_type="low", neighbors=2)
-            ltf_confirm, _, _ = sniper_detect_msb(df_1h_crypto, swing_lows_1h, point_type="low")
-        else:
-            ltf_confirm = False
+    # ltf_confirm = True
+    # df_1h_crypto = None
+    # if config.SMC_LTF_MSB_CONFIRM:
+    #     df_1h_crypto = get_crypto_1h_data(symbol)
+    #     if df_1h_crypto is not None and not df_1h_crypto.empty:
+    #         df_1h_crypto = df_1h_crypto.copy()
+    #         df_1h_crypto.ta.ema(length=config.IND_EMA_FAST, append=True)
+    #         df_1h_crypto.ta.ema(length=config.IND_EMA_21, append=True)
+    #         swing_lows_1h = sniper_find_swing_points(df_1h_crypto, point_type="low", neighbors=2)
+    #         ltf_confirm, _, _ = sniper_detect_msb(df_1h_crypto, swing_lows_1h, point_type="low")
+    #     else:
+    #         ltf_confirm = False
 
-    if not ltf_confirm:
-        return signals
+    # if not ltf_confirm:
+    #     return signals
 
     funding_rate = get_funding_rate(symbol)
-    if funding_rate < 0.0:
-        return signals
+    df_1h_crypto = None
 
     sl = sweep_high * config.CRYPTO_SHORT4_SL_MULT
     sl_dist = max(sl - current_price, 1e-8)
@@ -725,8 +768,9 @@ def _check_crypto_4_sniper_ote_short(ctx):
         rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
         volume=last_4h['volume'], vol_sma=last_4h.get('vol_sma_20'),
         dollar_vol=last_4h['volume'] * current_price,
-        rr=_rr_c4s, regime="BEAR", macro_aligned=True,
-        consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+        rr=_rr_c4s, has_engulfing=False, regime="BEAR", macro_aligned=True,
+        consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+        funding_rate=funding_rate
     )
     if has_fvg:
         _scores_c4s["engulfing"] = min(100.0, _scores_c4s["engulfing"] + config.SMC_FVG_BONUS)
@@ -770,8 +814,9 @@ def _check_crypto_5_vol_squeeze(ctx):
 
     sq_fired, sq_dir, sq_candle = detect_squeeze(df_4h)
     if sq_fired and sq_dir is not None:
-        if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] < config.CRYPTO_SQUEEZE_ADX_MIN:
-            return signals
+        # HARD FILTER REMOVED: ADX constraint delegated to conviction_scorer
+        # if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] < config.CRYPTO_SQUEEZE_ADX_MIN:
+        #     return signals
         trend_up = (not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')) and
                     last_1d[f'EMA_{config.IND_EMA_MID}'] > last_1d[f'EMA_{config.IND_EMA_SLOW}'])
         valid_breakout = (sq_dir == "up" and trend_up) or (sq_dir == "down" and not trend_up)
@@ -794,9 +839,17 @@ def _check_crypto_5_vol_squeeze(ctx):
             
             _scores_c5 = build_breakout_scores(
                 bb_width=None, price=current_price, ema_fast=ema20_4h, ema_mid=None, ema_slow=None,
-                volume=last_4h.get('volume', 0), vol_sma=None, dollar_vol=last_4h.get('volume', 0) * current_price,
+                volume=last_4h.get('volume', 0),
+                vol_sma=last_4h.get('vol_sma_20'),
+                dollar_vol=last_4h.get('volume', 0) * current_price,
                 rr=_rr_c5, regime="BULL" if sq_dir == "up" else "BEAR", macro_aligned=btc_ok,
-                consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
+                consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
+                rsi=last_4h.get('RSI_14'),
+                rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else last_4h.get('RSI_14'),
+                is_long=(sq_dir == "up"),
+                strategy_type="TREND_BREAKOUT",
+                rsi_1h=last_4h.get('RSI_14'),
+                sma200_1d=last_1d.get('SMA_200') if last_1d is not None else None
             )
             _conv_c5 = calculate_conviction(_scores_c5, ctx=ctx)
             if _conv_c5.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -830,8 +883,26 @@ def _check_crypto_6_vwap(ctx):
         return signals
     if last_1d['EMA_20'] <= last_1d['EMA_50']:
         return signals
-    if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.CRYPTO_VWAP_ADX_MIN:
-        return signals
+    # HARD FILTER REMOVED: ADX constraint delegated to conviction_scorer
+    # if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] <= config.CRYPTO_VWAP_ADX_MIN:
+    #     return signals
+
+    # VWAP Golden Filters (RSI & Volatilite/ATR)
+    # HARD FILTER REMOVED: RSI constraint delegated to conviction_scorer
+    # if not pd.isna(last_4h.get('RSI_14')) and last_4h['RSI_14'] >= getattr(config, 'VWAP_LONG_MAX_RSI', 60.0):
+    #     return signals
+        
+    if f'ATRr_14' not in df_4h.columns:
+        df_4h.ta.atr(length=14, append=True)
+    if 'ATR_SMA_14' not in df_4h.columns:
+        df_4h['ATR_SMA_14'] = df_4h['ATRr_14'].rolling(window=14).mean()
+
+    current_atr = df_4h['ATRr_14'].iloc[-1]
+    atr_sma = df_4h['ATR_SMA_14'].iloc[-1]
+    
+    if pd.notna(current_atr) and pd.notna(atr_sma) and atr_sma > 0:
+        if (current_atr / atr_sma) > getattr(config, 'VWAP_MAX_ATR_RATIO', 2.0):
+            return signals # Aşırı Volatilite İptali
 
     vwap_val = calculate_anchored_vwap(df_4h, anchor_type="weekly")
     if vwap_val is not None:
@@ -890,13 +961,26 @@ def _check_crypto_7_obv(ctx):
             
             raw_vars = locals()
             
-            _scores_c7 = build_dip_scores(
-                rsi_daily=last_1d.get('RSI_14'), rsi_hourly=None, rsi_prev=None,
-                price=current_price, ema_fast=last_1d.get('EMA_8'), ema_mid=last_1d.get('EMA_21'),
-                volume=last_1d.get('volume', 0), vol_sma=None, dollar_vol=last_1d.get('volume', 0) * current_price,
-                rr=_rr_c7, has_engulfing=False, regime="BULL",
+            vol_sma_col = 'vol_sma_20'
+            if vol_sma_col not in df_1d.columns:
+                df_1d = df_1d.copy()
+                df_1d[vol_sma_col] = df_1d['volume'].rolling(window=20).mean()
+            daily_vol_sma = df_1d[vol_sma_col].iloc[-1] if not df_1d.empty else None
+
+            _scores_c7 = build_breakout_scores(
+                bb_width=None, price=current_price,
+                ema_fast=last_1d.get('EMA_8'), ema_mid=last_1d.get('EMA_21'), ema_slow=None,
+                volume=last_1d.get('volume', 0), vol_sma=daily_vol_sma, dollar_vol=last_1d.get('volume', 0) * current_price,
+                rr=_rr_c7, regime="BULL",
                 macro_aligned=(btcdom_trend != 'UP'), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
-                cmf=cmf_val if cmf_val is not None else 0.0
+                rsi=last_1d.get('RSI_14'),
+                rsi_prev=df_1d['RSI_14'].iloc[-2] if (len(df_1d) >= 2 and 'RSI_14' in df_1d.columns) else last_1d.get('RSI_14'),
+                rsi_1h=None,
+                is_long=True,
+                strategy_type="TREND_BREAKOUT",
+                sma200_1d=last_1d.get('SMA_200') if last_1d is not None else None,
+                cmf=cmf_val if cmf_val is not None else 0.0,
+                has_engulfing=False
             )
             _conv_c7 = calculate_conviction(_scores_c7, ctx=ctx)
             if _conv_c7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -1180,12 +1264,14 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     candle_body_pct = body / current_price if current_price > 0 else 0
         
     # Önceki Varyans D Kuralları
-    if is_whipsaw or adx_val > 45 or ema_diff_pct > 0.015:
-        return signals 
+    # HARD FILTERS REMOVED: Whipsaw, ADX, EMA diff logic delegated to conviction_scorer (Fuzzy)
+    # if is_whipsaw or adx_val > 45 or ema_diff_pct > 0.015:
+    #     return signals 
         
     # Yeni Varyans F (Pure Math) Kuralları
-    if adx_val < 14.2 or rsi_val > 57.82 or candle_body_pct > 0.0257:
-        return signals
+    # HARD FILTERS REMOVED: ADX, RSI, Candle Body pure math block limits delegated to fuzzy logic
+    # if adx_val < 14.2 or rsi_val > 57.82 or candle_body_pct > 0.0257:
+    #     return signals
         
     dynamic_atr_mult = 2.0 if adx_val > 25 else 1.2
     # -----------------------------------------

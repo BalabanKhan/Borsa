@@ -4,9 +4,10 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Any
 
+import config
 from core.defensive_engine import DefensiveStateGuard
 
-POSTMORTEM_FILE = "trade_postmortems.json"
+POSTMORTEM_FILE = config.POSTMORTEM_FILE
 
 def generate_postmortem(trade: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -78,11 +79,11 @@ def generate_postmortem(trade: Dict[str, Any]) -> Dict[str, Any]:
             max_adverse_excursion = ((highest - entry_price) / entry_price) * 100
 
         postmortem_data = {
-            "trade_id": trade.get("id", f"{ticker}_{datetime.now().timestamp()}"),
+            "trade_id": trade.get("id") or f"{ticker}_{datetime.now().timestamp()}",
             "ticker": ticker,
-            "strategy": trade.get("strategy", "Unknown"),
-            "entry_time": trade.get("entry_time", ""),
-            "exit_time": trade.get("exit_time", datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S+00:00')),
+            "strategy": trade.get("strategy") or "Unknown",
+            "entry_time": trade.get("entry_time") or "",
+            "exit_time": trade.get("exit_time") or datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S+00:00'),
             "duration": _calculate_duration(trade.get("entry_time"), trade.get("exit_time")),
             "pnl_pct": round(pnl_pct, 2),
             "planned_rr": planned_rr,
@@ -91,7 +92,7 @@ def generate_postmortem(trade: Dict[str, Any]) -> Dict[str, Any]:
             "max_adverse_excursion": round(max_adverse_excursion, 2),
             "classification": classification,
             "insights": insights,
-            "market": trade.get("market", "")
+            "market": trade.get("market") or "Unknown"
         }
 
         # Save postmortem

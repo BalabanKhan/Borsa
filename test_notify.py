@@ -1,7 +1,9 @@
 import asyncio
 import sys
+import pytest
 from core.notifier import NotificationService
 
+@pytest.mark.anyio
 async def test_telegram():
     print("Test başlatılıyor...")
     notifier = NotificationService()

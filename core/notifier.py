@@ -157,15 +157,9 @@ class NotificationService:
         if conv_details and isinstance(conv_details, dict):
             details_str = "<b>Puanlama Detayları:</b>\n"
             for k, v in conv_details.items():
-                if v > 0:
-                    details_str += f" ├ {k}: <code>+{v:.1f}</code>\n"
-            details_str += " └────────────────\n"
-
-        raw_inds = trade_data.get('raw_indicators')
-        if raw_inds and isinstance(raw_inds, dict):
-            details_str += "<b>Giriş Metrikleri:</b>\n"
-            for k, v in raw_inds.items():
-                details_str += f" ├ {k}: <code>{v}</code>\n"
+                if v != 0:
+                    sign = "+" if v > 0 else ""
+                    details_str += f" ├ {k}: <code>{sign}{v:.1f}</code>\n"
             details_str += " └────────────────\n"
 
         ttl_pct = 0.015

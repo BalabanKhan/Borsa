@@ -50,6 +50,7 @@ from .helpers import _extract_raw_indicators, _get_consecutive_sl
 def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collector=None):
     """Ağır Sıklet SHORT tarayıcı. 3 strateji + 3 çelik kalkan."""
     signals = []
+    ctx = {"symbol": symbol}
 
     # btc_bullish parametresini artık tamamen engellemek (hard block) için değil,
     # puanlama sisteminde 'macro_aligned' cezası olarak kullanacağız.
@@ -154,7 +155,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
                 rr=rr_ratio, has_engulfing=False, regime="BEAR",
                 macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
             )
-            _conv_bh1 = calculate_conviction(_scores_bh1)
+            _conv_bh1 = calculate_conviction(_scores_bh1, ctx=ctx)
             if _conv_bh1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "AYI_AVCISI",
@@ -193,7 +194,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
                 rr=rr_ratio, has_engulfing=False, regime="BEAR",
                 macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
             )
-            _conv_bh2 = calculate_conviction(_scores_bh2)
+            _conv_bh2 = calculate_conviction(_scores_bh2, ctx=ctx)
             if _conv_bh2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                     "ticker": symbol, "market": "AYI_AVCISI",
@@ -242,7 +243,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
                     rr=rr_ratio, has_engulfing=False, regime="BEAR",
                     macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
                 )
-                _conv_bh3 = calculate_conviction(_scores_bh3)
+                _conv_bh3 = calculate_conviction(_scores_bh3, ctx=ctx)
                 if _conv_bh3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
                         "ticker": symbol, "market": "AYI_AVCISI",

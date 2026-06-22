@@ -54,11 +54,26 @@ async def main():
         if getattr(notifier, 'system_bot_token', None):
             print('✅ SYSTEM Telegram Bot bağlantısı kuruldu.')
         
+        import data_guard
+        import circuit_breaker as cb_observer
+        import penalty_box
+        import strategy_scorecard
+        import trade_tracker.postmortem as postmortem
+        from trade_tracker import TradeEngine
+
+        trade_engine = TradeEngine(
+            data_guard=data_guard,
+            cb_observer=cb_observer,
+            penalty_box=penalty_box,
+            strategy_scorecard=strategy_scorecard,
+            postmortem=postmortem
+        )
+
         # 2. Tarayıcı Servisi (Piyasa Taraması & Kaos Modülleri)
-        scanner = ScannerService(notifier=notifier)
+        scanner = ScannerService(notifier=notifier, trade_engine=trade_engine)
         
         # 3. Görev Zamanlayıcı (APScheduler)
-        scheduler = TaskScheduler(scanner=scanner, notifier=notifier)
+        scheduler = TaskScheduler(scanner=scanner, notifier=notifier, trade_engine=trade_engine)
         scheduler.start()
         
         # Sistemi ilk açılışta bir kez tara

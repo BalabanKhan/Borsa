@@ -4,7 +4,7 @@ import asyncio
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from trade_tracker import load_trades, check_active_trades, save_trades, _archive_closed_trades
+from trade_tracker import load_trades, save_trades, _archive_closed_trades
 from data_fetcher import get_current_prices
 from market_snapshot import send_snapshot_excel
 from quarantine import check_staleness, generate_quarantine_alert, is_quarantined, remove_from_quarantine, cleanup_expired_quarantines
@@ -17,9 +17,10 @@ import config
 logger = logging.getLogger("quant_bot.scheduler")
 
 class TaskScheduler:
-    def __init__(self, scanner, notifier):
+    def __init__(self, scanner, notifier, trade_engine):
         self.scanner = scanner
         self.notifier = notifier
+        self.trade_engine = trade_engine
         self.scheduler = AsyncIOScheduler(
             timezone=ZoneInfo("Europe/Istanbul"),
             job_defaults={'misfire_grace_time': 15}
@@ -89,7 +90,7 @@ class TaskScheduler:
                     await self.notifier.send_message(generate_quarantine_alert(q_report), is_system=True)
 
         loop = asyncio.get_event_loop()
-        notifications = await loop.run_in_executor(None, check_active_trades, current_prices)
+        notifications = await loop.run_in_executor(None, self.trade_engine.check_active_trades, current_prices)
         for msg in notifications:
             await self.notifier.send_message(msg, is_system=True)
 

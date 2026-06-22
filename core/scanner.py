@@ -7,7 +7,7 @@ import tempfile
 import os
 
 from data_fetcher import scan_all_markets
-from trade_tracker import load_trades, add_trade
+from trade_tracker import load_trades
 from circuit_breaker import is_circuit_open
 from penalty_box import is_asset_penalized, is_daily_commission_exceeded, record_trade_commission
 from strategy_scorecard import is_strategy_disabled
@@ -20,8 +20,9 @@ class ScannerService:
     COOLDOWN_FILE = "signal_cooldown.json"
     COOLDOWN_SECONDS = 3600
 
-    def __init__(self, notifier):
+    def __init__(self, notifier, trade_engine):
         self.notifier = notifier
+        self.trade_engine = trade_engine
         self.signal_cooldown = self._load_cooldown()
 
     def _load_cooldown(self):
@@ -99,28 +100,42 @@ class ScannerService:
             ticker = decision.get("ticker", "Bilinmiyor")
             strategy = decision.get("strategy", "")
             
-            if self._is_on_cooldown(ticker, strategy): continue
-            if self._is_already_active(ticker): continue
+            if self._is_on_cooldown(ticker, strategy):
+                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Cooldown aktif.")
+                continue
+            if self._is_already_active(ticker):
+                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Zaten aktif pozisyon var.")
+                continue
             
-            if is_circuit_open(ticker, strategy): continue
-            if is_asset_penalized(ticker): continue
-            if is_strategy_disabled(strategy): continue
-            if is_quarantined(ticker): continue
+            if is_circuit_open(ticker, strategy):
+                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Devre kesici açık.")
+                continue
+            if is_asset_penalized(ticker):
+                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Varlık ceza kutusunda.")
+                continue
+            if is_strategy_disabled(strategy):
+                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Strateji devre dışı.")
+                continue
+            if is_quarantined(ticker):
+                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Varlık karantinada.")
+                continue
 
             entry_price, sl_price, tp_price = decision.get("entry_price", 0), decision.get("sl", 0), decision.get("tp", 0)
             
             if entry_price > 0 and sl_price > 0 and tp_price > 0:
-                should_block, _ = should_block_entry({
+                should_block, block_reason = should_block_entry({
                     "ticker": ticker, "entry_price": entry_price, "sl": sl_price, "tp": tp_price,
                     "signal": decision.get("signal", "AL"), "signal_time": datetime.now(timezone.utc).isoformat(),
                     "market": decision.get("market", "KRİPTO")
                 }, entry_price)
-                if should_block: continue
+                if should_block:
+                    logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Signal Decay: {block_reason}")
+                    continue
 
             conv_grade = decision.get("conviction_grade", "N/A")
             is_watch = (conv_grade == 'WATCH')
 
-            trade = add_trade(
+            trade = self.trade_engine.add_trade(
                 ticker=ticker,
                 signal=decision.get("signal", "AL"),
                 entry_price=entry_price,
@@ -139,7 +154,9 @@ class ScannerService:
                 conviction_details=decision.get("conviction_details", {})
             )
 
-            if trade is None: continue
+            if trade is None:
+                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Trade Engine işlemi kaydetmedi.")
+                continue
 
             if not is_watch:
                 record_trade_commission(ticker)

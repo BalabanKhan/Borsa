@@ -243,8 +243,22 @@ def _handle_bist_stop_hit(row, open_trade, curr_time, df_1h, sym):
     return open_trade
 
 def _simulate_bist_trade(row, open_trade, curr_time, df_1h, sym):
+    if 'tp' not in open_trade:
+        atr = open_trade.get('entry_atr')
+        if not atr: atr = open_trade['entry_price'] * 0.02
+        open_trade['tp'] = open_trade['entry_price'] + (1.5 * atr)
+
+    if row['high'] >= open_trade['tp']:
+        open_trade['exit_time'] = curr_time
+        open_trade['exit_price'] = open_trade['tp']
+        open_trade['status'] = 'KAR AL (TP)'
+        pnl_val = ((open_trade['exit_price'] - open_trade['entry_price']) / open_trade['entry_price']) * 100
+        open_trade['pnl_pct'] = pnl_val
+        completed_trades.append(open_trade)
+        return None
+
     profit_pct = ((row['high'] - open_trade['entry_price']) / open_trade['entry_price']) * 100
-    if profit_pct >= 5.0 and not open_trade.get("partial_tp_hit", False):
+    if profit_pct >= 1.5 and not open_trade.get("partial_tp_hit", False):
         open_trade["partial_tp_hit"] = True
         if open_trade['sl'] < open_trade['entry_price']:
             open_trade['sl'] = open_trade['entry_price']
@@ -578,8 +592,22 @@ def _handle_crypto_long_stop_hit(row, open_trade, curr_time, df_4h, sym):
     return open_trade
 
 def _simulate_crypto_long_trade(row, open_trade, curr_time, df_4h, sym):
+    if 'tp' not in open_trade:
+        atr = open_trade.get('entry_atr')
+        if not atr: atr = open_trade['entry_price'] * 0.02
+        open_trade['tp'] = open_trade['entry_price'] + (1.5 * atr)
+
+    if row['high'] >= open_trade['tp']:
+        open_trade['exit_time'] = curr_time
+        open_trade['exit_price'] = open_trade['tp']
+        open_trade['status'] = 'KAR AL (TP)'
+        pnl_val = ((open_trade['exit_price'] - open_trade['entry_price']) / open_trade['entry_price']) * 100
+        open_trade['pnl_pct'] = pnl_val
+        completed_trades.append(open_trade)
+        return None
+
     profit_pct = ((row['high'] - open_trade['entry_price']) / open_trade['entry_price']) * 100
-    if profit_pct >= 5.0 and not open_trade.get("partial_tp_hit", False):
+    if profit_pct >= 1.5 and not open_trade.get("partial_tp_hit", False):
         open_trade["partial_tp_hit"] = True
         if open_trade['sl'] < open_trade['entry_price']:
             open_trade['sl'] = open_trade['entry_price']
@@ -643,9 +671,23 @@ def _update_crypto_short_trailing(row, open_trade, profit_pct, strategy_name):
     return current_trailing_dist
 
 def _simulate_crypto_short_trade(row, open_trade, curr_time, df_4h, sym):
+    if 'tp' not in open_trade:
+        atr = open_trade.get('entry_atr')
+        if not atr: atr = open_trade['entry_price'] * 0.02
+        open_trade['tp'] = open_trade['entry_price'] - (1.5 * atr)
+
+    if row['low'] <= open_trade['tp']:
+        open_trade['exit_time'] = curr_time
+        open_trade['exit_price'] = open_trade['tp']
+        open_trade['status'] = 'KAR AL (TP)'
+        pnl_val = ((open_trade['entry_price'] - open_trade['exit_price']) / open_trade['entry_price']) * 100
+        open_trade['pnl_pct'] = pnl_val
+        completed_trades.append(open_trade)
+        return None
+
     profit_pct = ((open_trade['entry_price'] - row['low']) / open_trade['entry_price']) * 100
     strategy_name = open_trade['strategy']
-    scale_out_target = 10.0 if "FOMO İNFAZI" in strategy_name else 5.0
+    scale_out_target = 10.0 if "FOMO İNFAZI" in strategy_name else 1.5
     
     if profit_pct >= scale_out_target and not open_trade.get("partial_tp_hit", False):
         open_trade["partial_tp_hit"] = True

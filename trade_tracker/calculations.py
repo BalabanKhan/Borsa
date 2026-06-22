@@ -2,9 +2,15 @@ import logging
 import math
 import config
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
-from data_sources import get_funding_rate
+from typing import Optional
 from core.defensive_engine import DefensiveExceptionManager
+import pandas as pd
+import data_sources
+# Aliases for patching compatibility in tests
+get_funding_rate = data_sources.get_funding_rate
+get_bist_data = data_sources.get_bist_data
+get_crypto_data = data_sources.get_crypto_data
+get_crypto_1h_data = data_sources.get_crypto_1h_data
 
 def _check_scale_out(t, profit_pct, signal, strategy_name, current_price=0):
     """
@@ -241,14 +247,16 @@ def _check_black_swan(t, current_price, signal):
     if signal == "AL":
         if current_price < sl * 0.97:
             is_black_swan = True
-            close_msg = trade_tracker._format_close_message(t, current_price, signal, "BLACK_SWAN")
+            from .engine import TradeEngine
+            close_msg = TradeEngine._format_close_message(None, t, current_price, signal, "BLACK_SWAN")
             notifications.append(close_msg)
             t["status"] = "CLOSED_BLACK_SWAN"
 
     elif signal == "SAT":
         if current_price > sl * 1.03:
             is_black_swan = True
-            close_msg = trade_tracker._format_close_message(t, current_price, signal, "BLACK_SWAN")
+            from .engine import TradeEngine
+            close_msg = TradeEngine._format_close_message(None, t, current_price, signal, "BLACK_SWAN")
             notifications.append(close_msg)
             t["status"] = "CLOSED_BLACK_SWAN"
 
@@ -258,10 +266,6 @@ def _get_last_completed_candle_close(ticker: str, timeframe: str) -> Optional[fl
     """
     Belirtilen ticker ve timeframe için son tamamlanan mumun kapanış fiyatını döner.
     """
-    from data_sources import get_bist_data, get_crypto_data, get_crypto_1h_data
-    import pandas as pd
-    from datetime import datetime, timezone
-
     timeframe_lower = timeframe.lower()
     df = None
 
