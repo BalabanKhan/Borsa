@@ -275,6 +275,52 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
             return
+            
+        if self.path == "/api/close":
+            if not self.check_auth():
+                self.send_response(401)
+                self.end_headers()
+                return
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            try:
+                data = json.loads(post_data)
+                ticker_to_close = data.get("ticker")
+                
+                from trade_tracker import load_trades, save_trades, _archive_closed_trades
+                trades = load_trades()
+                
+                closed_any = False
+                closed_trades = []
+                remaining_trades = []
+                for t in trades:
+                    if t.get("ticker") == ticker_to_close and t.get("status") == "ACTIVE":
+                        t["status"] = "CLOSED_MANUAL"
+                        # Exit price and time are updated here to reflect manual close
+                        t["exit_time"] = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S+00:00')
+                        closed_trades.append(t)
+                        closed_any = True
+                    else:
+                        remaining_trades.append(t)
+                
+                if closed_any:
+                    _archive_closed_trades(closed_trades)
+                    save_trades(remaining_trades)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+                else:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": False, "message": "Aktif pozisyon bulunamadı."}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode('utf-8'))
+            return
+            
         self.send_response(404)
         self.end_headers()
 
@@ -358,6 +404,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         .log-box .conviction{color:#1F6C9F}
         .empty{color:#787774;font-style:italic}
         .metric-block{display:flex;flex-direction:column}
+        .close-btn{background:#9F2F2D;color:#FDEBEC;border:none;padding:4px 8px;border-radius:4px;font-family:'Geist Mono',monospace;font-size:10px;cursor:pointer;transition:transform 0.2s}
+        .close-btn:hover{transform:scale(0.95)}
         .fade-in{animation:fadeIn 0.6s cubic-bezier(0.16,1,0.3,1) both}
         @keyframes fadeIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
     </style>
@@ -389,8 +437,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
     <div class="section fade-in" style="animation-delay: 160ms">
         <div class="section-hdr"><h3>Active Deployments (<span id="trade-count">0</span>)</h3></div>
         <table id="trade-table">
-            <thead><tr><th onclick="sortTrades('ticker')" style="cursor:pointer" title="Sırala">Ticker ↕</th><th>Dir</th><th>Strategy</th><th>Entry</th><th>SL</th><th>TP</th><th onclick="sortTrades('conviction_score')" style="cursor:pointer" title="Sırala">Conviction ↕</th><th>Status</th></tr></thead>
-            <tbody id="trade-body"><tr><td colspan="8" class="empty">No active deployments.</td></tr></tbody>
+            <thead><tr><th onclick="sortTrades('ticker')" style="cursor:pointer" title="Sırala">Ticker ↕</th><th>Dir</th><th>Strategy</th><th>Entry</th><th>SL</th><th>TP</th><th onclick="sortTrades('conviction_score')" style="cursor:pointer" title="Sırala">Conviction ↕</th><th>Status</th><th>Aksiyon</th></tr></thead>
+            <tbody id="trade-body"><tr><td colspan="9" class="empty">No active deployments.</td></tr></tbody>
         </table>
     </div>
 
@@ -425,6 +473,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
             renderTrades();
         }
 
+        function closeTrade(ticker) {
+            if(!confirm(ticker + ' pozisyonunu manuel olarak kapatmak istediginize emin misiniz?')) return;
+            fetch('/api/close', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ticker: ticker})
+            })
+            .then(r=>r.json())
+            .then(d=>{
+                if(d.success) { updateAllData(); }
+                else { alert('Hata: ' + d.message); }
+            })
+            .catch(err=>alert('Bağlantı hatası: '+err));
+        }
+
         function renderTrades() {
             const trades = currentTrades;
             document.getElementById('trade-count').textContent=trades.length;
@@ -453,6 +516,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     }
                     const status=t.status||'ACTIVE';
                     const stColor=status==='ACTIVE'?'#EAEAEA':'#787774';
+                    let actionHtml = '';
+                    if(status === 'ACTIVE') {
+                        actionHtml = `<button class="close-btn" onclick="closeTrade('${t.ticker}')">KAPAT</button>`;
+                    }
                     return `<tr>
                         <td style="font-family:'Geist Mono',monospace">${esc(t.ticker)}</td>
                         <td style="color:${t.signal==='AL'?'#EAEAEA':'#787774'}">${t.signal}</td>
@@ -462,10 +529,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         <td style="font-family:'Geist Mono',monospace">${t.tp}</td>
                         <td>${convHtml}</td>
                         <td style="color:${stColor};font-family:'Geist Mono',monospace;font-size:11px">${status}</td>
+                        <td>${actionHtml}</td>
                     </tr>`;
                 }).join('');
             } else {
-                tBody.innerHTML='<tr><td colspan="8" class="empty">No active deployments.</td></tr>';
+                tBody.innerHTML='<tr><td colspan="9" class="empty">No active deployments.</td></tr>';
             }
         }
 

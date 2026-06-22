@@ -8,6 +8,9 @@ import logging
 from logging.handlers import RotatingFileHandler
 import traceback
 import sys
+import os
+import signal
+import time
 
 from core.notifier import NotificationService
 from core.scanner import ScannerService
@@ -35,7 +38,53 @@ if not logger.handlers:
 if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 
+def enforce_single_instance():
+    pid_file = "bot.pid"
+    current_pid = os.getpid()
+
+    # Eski bot süreçlerini bul ve öldür (Linux için pgrep kullanımı daha kesin çözüm)
+    try:
+        if sys.platform != "win32":
+            import subprocess
+            try:
+                output = subprocess.check_output(["pgrep", "-f", "main.py"]).decode()
+                pids = output.strip().split('\n')
+                for pid_str in pids:
+                    if pid_str:
+                        pid = int(pid_str)
+                        if pid != current_pid:
+                            try:
+                                os.kill(pid, signal.SIGKILL)
+                                print(f"⚠️ Eski bot süreci (PID: {pid}) bulundu ve sonlandırıldı.")
+                            except OSError:
+                                pass
+            except subprocess.CalledProcessError:
+                pass # Eşleşen işlem bulunamadı
+        else:
+            # Windows fallback
+            if os.path.exists(pid_file):
+                with open(pid_file, "r") as f:
+                    old_pid_str = f.read().strip()
+                    if old_pid_str:
+                        old_pid = int(old_pid_str)
+                        if old_pid != current_pid:
+                            import ctypes
+                            handle = ctypes.windll.kernel32.OpenProcess(1, False, old_pid)
+                            if handle:
+                                ctypes.windll.kernel32.TerminateProcess(handle, -1)
+                                ctypes.windll.kernel32.CloseHandle(handle)
+                                print(f"⚠️ Eski bot süreci (PID: {old_pid}) sonlandırıldı.")
+    except Exception as e:
+        print(f"Süreç kontrol hatası: {e}")
+
+    try:
+        with open(pid_file, "w") as f:
+            f.write(str(current_pid))
+    except Exception as e:
+        print(f"PID dosyası yazılamadı: {e}")
+
 async def main():
+    enforce_single_instance()
     print("==================================================")
     print("🤖 Borsa Asistanı (Clean Architecture) Başlatılıyor...")
     print("==================================================")
