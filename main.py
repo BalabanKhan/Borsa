@@ -104,7 +104,7 @@ async def main():
             print('✅ SYSTEM Telegram Bot bağlantısı kuruldu.')
         
         import data_guard
-        import circuit_breaker as cb_observer
+        from circuit_breaker import cb_observer
         import penalty_box
         import strategy_scorecard
         import trade_tracker.postmortem as postmortem

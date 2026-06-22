@@ -48,7 +48,7 @@ from conviction_scorer import (
 
 
 
-from .helpers import _extract_raw_indicators, _get_consecutive_sl, _is_in_liquidity_window
+from .helpers import _extract_raw_indicators, _get_consecutive_sl, _is_in_liquidity_window, _adx_momentum_ok
 # ════════════════════════════════════════
 def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_collector=None):
     """Emtia strateji analizi. 3 strateji + DXY/ATR/Haber kalkanları."""

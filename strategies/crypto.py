@@ -605,23 +605,23 @@ def _check_crypto_4_sniper_ote_long(ctx):
     swing_highs_s = sniper_find_swing_points(df_4h, point_type="high")
     sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows_s, point_type="low")
     if not sweep_ok:
-        print("FAIL: No sweep")
+        # print("FAIL: No sweep")
         return signals
 
     msb_ok, msb_high, msb_idx = sniper_detect_msb(df_4h, swing_highs_s, point_type="high")
     if not msb_ok:
-        print("FAIL: No MSB")
+        # print("FAIL: No MSB")
         return signals
 
     sweep_idx = swing_lows_s[-1][0] if swing_lows_s else None
     ote_top, ote_bottom = sniper_calculate_ote_body(df_4h, sweep_idx, msb_idx, direction="long")
     if ote_top <= 0 or ote_bottom <= 0 or not (ote_bottom <= current_price <= ote_top):
-        print(f"FAIL: Not in OTE {ote_bottom} < {current_price} < {ote_top}")
+        # print(f"FAIL: Not in OTE {ote_bottom} < {current_price} < {ote_top}")
         return signals
 
     has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
     if config.SMC_FVG_REQUIRED and not has_fvg:
-        print("FAIL: No FVG")
+        # print("FAIL: No FVG")
         return signals
 
     # ltf_confirm = True
