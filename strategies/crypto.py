@@ -1021,7 +1021,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
     has_sfp_long = sweep_ok_long
     
     sl_long = max(bbl * config.CRYPTO_SQUEEZE_SL_BBL_MULT, current_price * config.CRYPTO_SQUEEZE_SL_MIN_MULT)
-    _tp_sn_long = current_price + 2.0 * (current_price - sl_long)
+    _tp_sn_long = current_price + config.BEAR_HUNTER_TP_RR * (current_price - sl_long)
     _rr_sn_long = abs(_tp_sn_long - current_price) / max(abs(current_price - sl_long), 1e-8)
     
     is_nan_ind = (pd.isna(last_1h_s.get('volume', float('nan'))) or pd.isna(current_price))
@@ -1092,7 +1092,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
     has_sfp_short = sweep_ok_short
     
     sl_short = max(bbu * config.CRYPTO_SQUEEZE_SHORT_SL_BBU_MULT, current_price * config.CRYPTO_SQUEEZE_SHORT_SL_MAX_MULT)
-    _tp_sn_short = current_price - 2.0 * (sl_short - current_price)
+    _tp_sn_short = current_price - config.BEAR_HUNTER_TP_RR * (sl_short - current_price)
     _rr_sn_short = abs(_tp_sn_short - current_price) / max(abs(sl_short - current_price), 1e-8)
     
     is_nan_ind = (pd.isna(last_1h_s.get('volume', float('nan'))) or pd.isna(current_price))
@@ -1135,7 +1135,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
             "reason": (
                 f"🎯 Keskin Nişancı SHORT!\n"
                 f"Kanunlar: Squeeze: {_scores_sn_short['bbw_squeeze']:.1f}, %B: {_scores_sn_short['percent_b']:.1f}, FVG/SFP: {_scores_sn_short['fvg_sfp']:.1f}\n"
-                f"SL: %5 Dar Stop ({sl_short:.2f})"
+                f"SL: ~%5-7 Dinamik Stop ({sl_short:.2f})"
             ) + _conv_sn_short.to_reason_suffix()
         })
     return signals

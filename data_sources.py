@@ -409,10 +409,11 @@ async def async_get_crypto_data(symbol):
     if not IS_USA_SERVER:
         for attempt in range(retries):
             try:
-                ohlcv_1d = await exchange_async.fetch_ohlcv(symbol, '1d', limit=limit)
+                ohlcv_1d, ohlcv_4h = await asyncio.gather(
+                    exchange_async.fetch_ohlcv(symbol, '1d', limit=limit),
+                    exchange_async.fetch_ohlcv(symbol, '4h', limit=limit)
+                )
                 df_1d = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-
-                ohlcv_4h = await exchange_async.fetch_ohlcv(symbol, '4h', limit=limit)
                 df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
                 for df in [df_1d, df_4h]:
@@ -434,12 +435,16 @@ async def async_get_crypto_data(symbol):
     # Fallback to Kraken Async
     try:
         try:
-            ohlcv_1d = await exchange_fallback_async.fetch_ohlcv(symbol, '1d', limit=limit)
-            ohlcv_4h = await exchange_fallback_async.fetch_ohlcv(symbol, '4h', limit=limit)
+            ohlcv_1d, ohlcv_4h = await asyncio.gather(
+                exchange_fallback_async.fetch_ohlcv(symbol, '1d', limit=limit),
+                exchange_fallback_async.fetch_ohlcv(symbol, '4h', limit=limit)
+            )
         except Exception:
             usd_sym = symbol.replace("/USDT", "/USD")
-            ohlcv_1d = await exchange_fallback_async.fetch_ohlcv(usd_sym, '1d', limit=limit)
-            ohlcv_4h = await exchange_fallback_async.fetch_ohlcv(usd_sym, '4h', limit=limit)
+            ohlcv_1d, ohlcv_4h = await asyncio.gather(
+                exchange_fallback_async.fetch_ohlcv(usd_sym, '1d', limit=limit),
+                exchange_fallback_async.fetch_ohlcv(usd_sym, '4h', limit=limit)
+            )
 
         df_1d = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
