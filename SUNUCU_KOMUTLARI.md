@@ -39,3 +39,9 @@ PYTHONIOENCODING=utf-8 python run_scan_once.py crypto
 ```bash
 PYTHONIOENCODING=utf-8 python run_scan_once.py
 ```
+
+## 5. Takılı Kalan Manuel Taramaları Durdurmak
+Eğer arka planda birden fazla tarama çalıştıysa (örneğin Telegram'a çift mesaj geliyorsa), tüm manuel taramaları zorla durdurmak için:
+```bash
+pkill -f run_scan_once.py
+```

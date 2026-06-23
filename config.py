@@ -311,7 +311,7 @@ DANGER_ZONE_PCT = 2.0
 DANGER_SAFE_PCT = 5.0
 DANGER_COOLDOWN_SEC = 1800
 BLACK_SWAN_PCT = 0.03
-RR_MINIMUM = 2.0
+RR_MINIMUM = 1.5
 
 # ════════════════════════════════════════
 # Emtia Spesifik

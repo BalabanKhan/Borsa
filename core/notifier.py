@@ -253,7 +253,7 @@ class NotificationService:
             f"<b>Varlık:</b> <code>{trade_data.get('ticker', 'Bilinmiyor')}</code>\n"
             f"<b>Giriş Fiyatı:</b> <code>{entry_price:.4f}</code>\n"
             f"<b>Zarar Kes (SL):</b> <code>{sl_price:.4f}</code>\n"
-            f"<b>Kar Al (TP):</b> <code>{tp_price:.4f}</code>\n"
+            f"<b>Kar Al (TP):</b> <code>Dinamik Takip (Teorik: {tp_price:.4f})</code>\n"
             f"{rr_line}{conv_line}{details_str}"
             f"-------------------------------------\n"
             f"<b>Sistem Gerekçesi:</b>\n<i>{trade_data.get('reason', 'Sebep belirtilmemiş.')}</i>\n{ttl_line}"
