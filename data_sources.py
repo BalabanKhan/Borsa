@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore')
 # ════════════════════════════════════════
 exchange = ccxt.binance({
     'enableRateLimit': True,
-    'options': {'defaultType': 'future'} if CCXT_FETCH_FUTURES_DATA else {}
+    'options': {'defaultType': 'future'} if config.CCXT_FETCH_FUTURES_DATA else {}
 })
 exchange_futures = ccxt.binance({
     'enableRateLimit': True,
@@ -40,7 +40,7 @@ import ccxt.async_support as ccxt_async
 import asyncio
 exchange_async = ccxt_async.binance({
     'enableRateLimit': True,
-    'options': {'defaultType': 'future'} if CCXT_FETCH_FUTURES_DATA else {}
+    'options': {'defaultType': 'future'} if config.CCXT_FETCH_FUTURES_DATA else {}
 })
 exchange_fallback_async = ccxt_async.kraken({'enableRateLimit': True})
 
