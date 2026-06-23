@@ -36,6 +36,31 @@ class NotificationService:
             self.system_bot = self.bot
             self.system_chat_ids = self.chat_ids
 
+    @staticmethod
+    def clean_html(msg):
+        for tag in ["<b>", "</b>", "<code>", "</code>", "<i>", "</i>", "<pre>", "</pre>"]:
+            msg = msg.replace(tag, "")
+        return msg
+
+    @staticmethod
+    def chunk_text(text, limit=4000):
+        if len(text) <= limit:
+            return [text]
+        chunks = []
+        while text:
+            if len(text) <= limit:
+                chunks.append(text)
+                break
+            split_idx = text.rfind('\n', 0, limit)
+            if split_idx <= 0:
+                split_idx = limit
+                chunks.append(text[:split_idx])
+                text = text[split_idx:]
+            else:
+                chunks.append(text[:split_idx])
+                text = text[split_idx + 1:]
+        return chunks
+
     async def send_message(self, message, is_watch=False, is_system=False, max_retries=3):
         if is_watch:
             target_bot = self.watch_bot
@@ -48,28 +73,45 @@ class NotificationService:
             target_chat_ids = self.chat_ids
 
         if not target_bot or not target_chat_ids:
-            clean_msg = message.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", "")
+            clean_msg = self.clean_html(message)
             logger.info(f"[Console Fallback] {clean_msg}")
             return
 
+        chunks = self.chunk_text(message)
+
         for chat_id in target_chat_ids:
-            sent = False
-            for attempt in range(max_retries):
-                try:
-                    await asyncio.wait_for(
-                        target_bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML),
-                        timeout=15.0
-                    )
-                    logger.info(f"[Telegram] Mesaj gönderildi: chat_id={chat_id}")
-                    sent = True
-                    break
-                except Exception as e:
-                    logger.error(f"[Telegram] Deneme {attempt+1}/{max_retries} başarısız (chat_id={chat_id}): {e}")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(5 * (attempt + 1))
-            
-            if not sent:
-                self._save_failed_message(chat_id, message)
+            for i, chunk in enumerate(chunks):
+                sent = False
+                for attempt in range(max_retries):
+                    try:
+                        await asyncio.wait_for(
+                            target_bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML),
+                            timeout=15.0
+                        )
+                        logger.info(f"[Telegram] Mesaj gönderildi: chat_id={chat_id} (Chunk {i+1}/{len(chunks)})")
+                        sent = True
+                        break
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if "can't parse" in err_str or "parse" in err_str or "entity" in err_str or "tag" in err_str:
+                            try:
+                                logger.warning(f"[Telegram] HTML parse hatası, düz metin deneniyor: {e}")
+                                await asyncio.wait_for(
+                                    target_bot.send_message(chat_id=chat_id, text=self.clean_html(chunk), parse_mode=None),
+                                    timeout=15.0
+                                )
+                                logger.info(f"[Telegram] Mesaj (düz metin) gönderildi: chat_id={chat_id} (Chunk {i+1}/{len(chunks)})")
+                                sent = True
+                                break
+                            except Exception as e_inner:
+                                logger.error(f"[Telegram] Düz metin denemesi de başarısız: {e_inner}")
+                        
+                        logger.error(f"[Telegram] Deneme {attempt+1}/{max_retries} başarısız (chat_id={chat_id}): {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(5 * (attempt + 1))
+                
+                if not sent:
+                    self._save_failed_message(chat_id, chunk)
 
     def _save_failed_message(self, chat_id, message):
         failed = []
@@ -108,18 +150,46 @@ class NotificationService:
 
         remaining = []
         for item in failed:
-            try:
-                await asyncio.wait_for(
-                    self.bot.send_message(
-                        chat_id=item["chat_id"],
-                        text=f"⏰ <i>Gecikmeli mesaj ({item['timestamp'][:16]}):</i>\n\n{item['message']}",
-                        parse_mode=ParseMode.HTML
-                    ),
-                    timeout=15.0
-                )
-            except Exception as e:
-                logger.warning(f"Retry başarısız chat_id={item.get('chat_id')}: {e}")
-                remaining.append(item)
+            chat_id = item["chat_id"]
+            raw_text = f"⏰ <i>Gecikmeli mesaj ({item['timestamp'][:16]}):</i>\n\n{item['message']}"
+            chunks = self.chunk_text(raw_text)
+            
+            for chunk in chunks:
+                sent = False
+                try:
+                    await asyncio.wait_for(
+                        self.bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode=ParseMode.HTML
+                        ),
+                        timeout=15.0
+                    )
+                    sent = True
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if "can't parse" in err_str or "parse" in err_str or "entity" in err_str or "tag" in err_str:
+                        try:
+                            logger.warning(f"[Telegram Retry] HTML parse hatası, düz metin deneniyor: {e}")
+                            await asyncio.wait_for(
+                                self.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=self.clean_html(chunk),
+                                    parse_mode=None
+                                ),
+                                timeout=15.0
+                            )
+                            sent = True
+                        except Exception as e_inner:
+                            logger.error(f"[Telegram Retry] Düz metin denemesi de başarısız: {e_inner}")
+                    
+                    if not sent:
+                        logger.warning(f"Retry başarısız chat_id={chat_id}: {e}")
+                        remaining.append({
+                            "chat_id": chat_id,
+                            "message": self.clean_html(chunk),
+                            "timestamp": item["timestamp"]
+                        })
 
         with open(FAILED_MSG_FILE, 'w', encoding='utf-8') as f:
             json.dump(remaining, f, indent=2, ensure_ascii=False)
