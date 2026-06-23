@@ -3,7 +3,9 @@ python-dotenv==1.2.2
 schedule==1.2.2
 ccxt
 pandas
-pandas_ta
+ft-pandas-ta
 yfinance
 openpyxl
 vectorbt
+apscheduler
+pydantic
