@@ -849,7 +849,7 @@ def score_data_guard(
     cmf: float,
     is_liquidity_window: bool,
     min_volume_usd: float = 50_000,
-    optimum_volume_usd: float = 500_000
+    optimum_volume_usd: float = 250_000
 ) -> float:
     """
     Data Guard soft cezalarını hesaplar.
