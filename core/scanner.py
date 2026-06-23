@@ -103,8 +103,14 @@ class ScannerService:
             if self._is_on_cooldown(ticker, strategy):
                 logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Cooldown aktif.")
                 continue
-            if self._is_already_active(ticker):
-                logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Zaten aktif pozisyon var.")
+            active_trade = self._get_active_trade(ticker)
+            if active_trade:
+                new_score = decision.get("conviction_score")
+                old_score = active_trade.get("conviction_score")
+                if new_score is not None and old_score is not None and new_score > old_score:
+                    await self._update_active_trade_conviction(active_trade.get("id"), new_score, decision)
+                else:
+                    logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Zaten aktif pozisyon var (Mevcut Skor: {old_score}, Yeni Sinyal Skoru: {new_score}).")
                 continue
             
             if is_circuit_open(ticker, strategy):
@@ -194,3 +200,35 @@ class ScannerService:
             if t.get("id") == trade_id:
                 t["is_day_trade"] = True
         save_trades(trades)
+
+    def _get_active_trade(self, ticker):
+        trades = load_trades()
+        for t in trades:
+            if t.get("ticker") == ticker and t.get("status") == "ACTIVE":
+                return t
+        return None
+
+    async def _update_active_trade_conviction(self, trade_id, new_score, decision):
+        from trade_tracker import save_trades
+        trades = load_trades()
+        updated_trade = None
+        for t in trades:
+            if t.get("id") == trade_id:
+                t["conviction_score"] = new_score
+                t["conviction_grade"] = decision.get("conviction_grade", t.get("conviction_grade"))
+                t["position_size_pct"] = decision.get("position_size_pct", t.get("position_size_pct"))
+                t["conviction_details"] = decision.get("conviction_details", t.get("conviction_details", {}))
+                t["reason"] = f"{t.get('reason')} | [GÜNCELLEME ({decision.get('strategy', 'Algoritma')})]: {decision.get('reason', '')}"
+                updated_trade = t
+                break
+        if updated_trade:
+            save_trades(trades)
+            msg = (
+                f"🔄 <b>SKOR GÜNCELLEMESİ — {updated_trade.get('ticker')}</b>\n"
+                f"Aktif pozisyonun conviction skoru güncellendi!\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"<b>Yeni Skor:</b> <code>{new_score:.0f}/100 ({updated_trade.get('conviction_grade')})</code>\n"
+                f"<b>Yeni Pozisyon Büyüklüğü:</b> %{updated_trade.get('position_size_pct')}\n"
+                f"<b>Güncelleme Gerekçesi:</b>\n<i>{decision.get('reason', 'Neden belirtilmedi')}</i>"
+            )
+            await self.notifier.send_message(msg)
