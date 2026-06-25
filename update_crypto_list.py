@@ -28,7 +28,8 @@ extra_blacklist = [
     'TSMUSDT', 'COINUSDT', 'NATGASUSDT', 'HEIUSDT', 'ORCLUSDT', 'SKHYNIXUSDT',
     'SOXLUSDT', 'CLUSDT', 'MRVLUSDT', 'INTCUSDT', 'DRAMUSDT', 'MSTRUSDT', 'EWYUSDT',
     # Problematic/delisted/ghost candles
-    'SYNUSDT', 'REUSDT', 'BTWUSDT', 'BICOUSDT', 'ESPORTSUSDT', 'AAOIUSDT', 'NOKUSDT', 'ARXUSDT'
+    'SYNUSDT', 'REUSDT', 'BTWUSDT', 'BICOUSDT', 'ESPORTSUSDT', 'AAOIUSDT', 'NOKUSDT', 'ARXUSDT',
+    'MUSDT', 'OUSDT', 'GLWUSDT', 'QNTXUSDT', 'AXTIUSDT', 'BBXUSDT', 'DELLUSDT'
 ]
 meme_symbols.update(extra_blacklist)
 
@@ -46,7 +47,7 @@ for item in data:
         continue
         
     # Exclude any symbol with chinese characters or weird lengths
-    if not symbol.replace('USDT', '').isalnum():
+    if not symbol.isascii() or not symbol.replace('USDT', '').isalnum():
         continue
         
     # > $5M volume
