@@ -29,8 +29,8 @@ class TaskScheduler:
         self.setup_jobs()
 
     def setup_jobs(self):
-        # Piyasa Taraması (Her 15 Dakikanın Katında: :00, :15, :30, :45)
-        self.scheduler.add_job(self.scanner.run_scan, 'cron', minute='0,15,30,45', id='market_scan')
+        # Piyasa Taraması (Her 5 Dakikanın Katında: :00, :05, :10 vb.)
+        self.scheduler.add_job(self.scanner.run_scan, 'cron', minute='*/5', id='market_scan')
         
         # Aktif Pozisyon Fiyat Kontrolü (Her 1 Dakika)
         self.scheduler.add_job(self.check_prices, 'interval', minutes=1, id='check_prices', max_instances=2)
