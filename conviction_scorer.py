@@ -1071,8 +1071,8 @@ def calculate_conviction(
 
     if is_crypto:
         t_strong = max(t_strong, 65)
-        t_medium = 60.1
-        t_watch = 50
+        t_medium = 61.0
+        t_watch = 50.0
 
     if total >= t_strong:
         result.grade = CONVICTION_STRONG

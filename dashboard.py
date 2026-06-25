@@ -594,7 +594,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 }
 
                 // AKTİF İŞLEMLER
-                currentTrades = d.trades || [];
+                currentTrades = (d.trades || []).filter(t => t.conviction_grade !== 'WATCH');
                 renderTrades();
 
                 // STRATEGY ANALYTICS
