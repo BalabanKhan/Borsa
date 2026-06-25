@@ -206,9 +206,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         # 3. Birleşik API: Tüm veriler tek istekte
-        if self.path == "/api/all":
+        if self.path.startswith("/api/all"):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.end_headers()
 
             # Sunucu RAM bilgisi
@@ -230,7 +233,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "last_scan": datetime.datetime.now().strftime("%H:%M:%S"),
                     "status": "AKTIF"
                 },
-                "trades": read_trades(),
+                "trades": [t for t in read_trades() if not t.get("is_watch", False)],
                 "logs": read_last_logs(40),
                 "scan_stats": _parse_scan_stats(),
                 "ab_test": _read_ab_stats(),
@@ -538,7 +541,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         }
 
         function updateAllData(){
-            fetch('/api/all')
+            fetch('/api/all?t=' + Date.now())
             .then(r=>{if(!r.ok)throw new Error(r.status);return r.json()})
             .then(d=>{
                 // SYSTEM

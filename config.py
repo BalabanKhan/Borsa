@@ -276,7 +276,7 @@ SOFT_DOLLAR_VOL_BIST_MAX = 100_000_000       # BIST'te (TL) üst sınır
 
 # Genel Güven (Conviction) Taban Eşikleri (Global Hard Limits)
 GLOBAL_STRONG_CONVICTION_SCORE = 75.0
-GLOBAL_MEDIUM_CONVICTION_SCORE = 60.0
+GLOBAL_MEDIUM_CONVICTION_SCORE = 60.1
 GLOBAL_MIN_CONVICTION_SCORE = 45.0
 
 # Rejim-Adaptif Conviction Eşikleri
@@ -465,7 +465,7 @@ CONVICTION_AB_ENABLED: bool = os.getenv('CONVICTION_AB_ENABLED', 'true').lower()
 # Control grubu (mevcut üretim eşikleri)
 CONVICTION_THRESHOLDS_CONTROL = {
     'STRONG': 75,
-    'MEDIUM': 60,
+    'MEDIUM': 60.1,
     'WATCH': 45,
 }
 
