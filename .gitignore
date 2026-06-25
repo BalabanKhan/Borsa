@@ -2,6 +2,7 @@ venv/
 __pycache__/
 *.log
 *.json
+!assets.json
 .env
 sim_results.csv
 simulation_results.csv

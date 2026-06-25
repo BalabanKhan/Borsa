@@ -8,7 +8,9 @@ except Exception as e:
     print(f"Error fetching data: {e}")
     exit(1)
 
-with open('c:\\Users\\YSR_MONSTER\\.antigravity\\Borsa\\assets.json', 'r', encoding='utf-8') as f:
+import os
+assets_path = os.path.join(os.path.dirname(__file__), 'assets.json')
+with open(assets_path, 'r', encoding='utf-8') as f:
     assets = json.load(f)
 
 meme_blacklist = assets.get('MEME_BLACKLIST', [])
@@ -57,7 +59,7 @@ top_200 = [x[0] for x in valid_symbols[:200]]
 
 assets['TOP_CRYPTO_SCAN'] = top_200
 
-with open('c:\\Users\\YSR_MONSTER\\.antigravity\\Borsa\\assets.json', 'w', encoding='utf-8') as f:
+with open(assets_path, 'w', encoding='utf-8') as f:
     json.dump(assets, f, indent=2)
 
 print(f"Updated TOP_CRYPTO_SCAN with {len(top_200)} symbols.")
