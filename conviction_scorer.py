@@ -1062,6 +1062,18 @@ def calculate_conviction(
         t_medium = REGIME_THRESHOLDS_BEAR["MEDIUM"]
         t_watch = REGIME_THRESHOLDS_BEAR["WATCH"]
 
+    # --- CRYPTO SPECIAL THRESHOLDS ---
+    is_crypto = False
+    if ctx is not None:
+        market = str(ctx.get("market", "")).upper()
+        if market in ["KRIPTO", "KRİPTO", "CRYPTO"]:
+            is_crypto = True
+
+    if is_crypto:
+        t_strong = max(t_strong, 60)
+        t_medium = 60
+        t_watch = 50
+
     if total >= t_strong:
         result.grade = CONVICTION_STRONG
     elif total >= t_medium:

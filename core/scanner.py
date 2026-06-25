@@ -221,15 +221,24 @@ class ScannerService:
         from trade_tracker import save_trades
         trades = load_trades()
         updated_trade = None
+        was_watch = False
+        
         for t in trades:
             if t.get("id") == trade_id:
+                was_watch = t.get("is_watch", False)
+                new_grade = decision.get("conviction_grade", t.get("conviction_grade"))
+                
+                if was_watch and new_grade in ["MEDIUM", "STRONG"]:
+                    t["is_watch"] = False
+                    
                 t["conviction_score"] = new_score
-                t["conviction_grade"] = decision.get("conviction_grade", t.get("conviction_grade"))
+                t["conviction_grade"] = new_grade
                 t["position_size_pct"] = decision.get("position_size_pct", t.get("position_size_pct"))
                 t["conviction_details"] = decision.get("conviction_details", t.get("conviction_details", {}))
                 t["reason"] = f"{t.get('reason')} | [GÜNCELLEME ({decision.get('strategy', 'Algoritma')})]: {decision.get('reason', '')}"
                 updated_trade = t
                 break
+                
         if updated_trade:
             save_trades(trades)
             entry_val = float(updated_trade.get("entry_price", 0.0))
@@ -249,4 +258,8 @@ class ScannerService:
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"<b>Güncelleme Gerekçesi:</b>\n<i>{decision.get('reason', 'Neden belirtilmedi')}</i>"
             )
+            
+            if was_watch and not updated_trade.get("is_watch", False):
+                msg = "🚀 <b>WATCH'TAN ANA BOTA GEÇİŞ!</b> 🚀\n━━━━━━━━━━━━━━━━━━\n" + msg
+                
             await self.notifier.send_message(msg)
