@@ -1306,7 +1306,8 @@ def _check_crypto_long_sfp_choch(ctx):
     
     swing_lows = sniper_find_swing_points(df_4h, point_type="low")
     sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows, point_type="low")
-    choch_ok = sniper_detect_msb(df_4h, direction="bullish")
+    swing_highs = sniper_find_swing_points(df_4h, point_type="high")
+    choch_ok, _, _ = sniper_detect_msb(df_4h, swing_highs, point_type="high")
     
     if sweep_ok and choch_ok:
         has_fvg, _, _ = sniper_detect_fvg(df_4h, df_4h['high'].iloc[-1], df_4h['low'].iloc[-1], direction="bullish")
