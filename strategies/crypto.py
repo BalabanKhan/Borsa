@@ -1307,11 +1307,11 @@ def _check_crypto_long_sfp_choch(ctx):
     swing_lows = sniper_find_swing_points(df_4h, point_type="low")
     sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows, point_type="low")
     swing_highs = sniper_find_swing_points(df_4h, point_type="high")
-    choch_ok, _, _ = sniper_detect_msb(df_4h, swing_highs, point_type="high")
+    choch_ok, msb_price, _ = sniper_detect_msb(df_4h, swing_highs, point_type="high")
     
     if sweep_ok and choch_ok:
         has_fvg, _, _ = sniper_detect_fvg(df_4h, df_4h['high'].iloc[-1], df_4h['low'].iloc[-1], direction="bullish")
-        ote_top, ote_bot, _ = sniper_calculate_ote(df_4h)
+        ote_top, ote_bot = sniper_calculate_ote(sweep_low, msb_price)
         in_ote = False
         if ote_top and ote_bot and ote_bot <= current_price <= ote_top:
             in_ote = True
@@ -1486,7 +1486,11 @@ def _check_crypto_long_bull_flag_ote(ctx):
     if ema20 > ema50 > ema200 > 0:
         vol_sma = last_4h.get('vol_sma_20', 0)
         if last_4h['close'] > last_4h['open'] and last_4h['volume'] > vol_sma:
-            ote_top, ote_bot, _ = sniper_calculate_ote(df_4h)
+            swing_lows = sniper_find_swing_points(df_4h, point_type="low")
+            swing_highs = sniper_find_swing_points(df_4h, point_type="high")
+            if not swing_lows or not swing_highs:
+                return signals
+            ote_top, ote_bot = sniper_calculate_ote(swing_lows[-1][1], swing_highs[-1][1])
             if ote_bot and ote_bot <= current_price <= ote_top:
                 atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
                 if pd.isna(atr_val): atr_val = current_price * 0.02
