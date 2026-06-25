@@ -236,6 +236,25 @@ def fetch_crypto_oi_crash(symbol):
         logging.warning(f"[fetch_crypto_oi_crash] {symbol}: {e}")
     return False
 
+def fetch_crypto_oi_surge(symbol, surge_pct=5.0):
+    """Son 1-4 saat içinde Open Interest (OI) verisinde belirtilen oranda bir artış (surge) var mı?"""
+    if IS_USA_SERVER:
+        return False
+    try:
+        oi_hist = exchange_futures.fetch_open_interest_history(symbol, timeframe='1h', limit=5)
+        if len(oi_hist) > 1:
+            key = 'openInterestValue' if 'openInterestValue' in oi_hist[-1] else 'openInterestAmount'
+            if key in oi_hist[-1] and oi_hist[-1][key] is not None:
+                current_oi = float(oi_hist[-1][key])
+                min_oi = min([float(x[key]) for x in oi_hist[:-1] if x[key] is not None])
+                if min_oi > 0:
+                    surge = ((current_oi - min_oi) / min_oi) * 100
+                    if surge >= surge_pct:
+                        return True
+    except Exception as e:
+        logging.warning(f"[fetch_crypto_oi_surge] {symbol}: {e}")
+    return False
+
 def get_btc_dominance_trend():
     """BTCDOM/USDT grafiğinden BTC Dominans Trendini hesaplar"""
     if IS_USA_SERVER:
@@ -255,6 +274,10 @@ def get_btc_dominance_trend():
     except Exception as e:
         logging.warning(f"[get_btc_dominance_trend] {e}")
     return "UNKNOWN"
+
+def get_usdt_dominance_trend():
+    """USDT.D (Tether Dominance) trendini döndürür. STUB: API'den USDT.D grafiği çekilemediği için varsayılan DOWN döner."""
+    return "DOWN"
 
 def check_token_unlocks(symbol):
     """Token kilit açılım takvimini kontrol eder. STUB: API altyapısı kurulana kadar False döner."""

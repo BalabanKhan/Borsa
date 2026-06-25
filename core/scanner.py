@@ -107,10 +107,19 @@ class ScannerService:
             if active_trade:
                 new_score = decision.get("conviction_score")
                 old_score = active_trade.get("conviction_score")
-                if new_score is not None and old_score is not None and new_score > old_score:
+                new_grade = decision.get("conviction_grade")
+                old_grade = active_trade.get("conviction_grade")
+                
+                # Sadece sınıf (grade) değiştiyse güncelle (sürekli bildirim gelmemesi için Seçenek 1)
+                should_update = False
+                if new_score is not None and old_score is not None:
+                    if new_grade != old_grade:
+                        should_update = True
+                
+                if should_update:
                     await self._update_active_trade_conviction(active_trade.get("id"), new_score, decision)
                 else:
-                    logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Zaten aktif pozisyon var (Mevcut Skor: {old_score}, Yeni Sinyal Skoru: {new_score}).")
+                    logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Zaten aktif pozisyon var (Mevcut Skor: {old_score}, Sınıf: {old_grade} | Yeni Sinyal Skoru: {new_score}, Sınıf: {new_grade}).")
                 continue
             
             if is_circuit_open(ticker, strategy):
@@ -223,12 +232,21 @@ class ScannerService:
                 break
         if updated_trade:
             save_trades(trades)
+            entry_val = float(updated_trade.get("entry_price", 0.0))
+            sl_val = float(updated_trade.get("sl", 0.0))
+            tp_val = float(updated_trade.get("tp", 0.0))
             msg = (
                 f"🔄 <b>SKOR GÜNCELLEMESİ — {updated_trade.get('ticker')}</b>\n"
-                f"Aktif pozisyonun conviction skoru güncellendi!\n"
+                f"<b>Yön:</b> {'🟢 LONG' if updated_trade.get('direction') == 'LONG' else '🔴 SHORT'}\n"
+                f"<b>Strateji:</b> {updated_trade.get('strategy')}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"<b>Yeni Skor:</b> <code>{new_score:.0f}/100 ({updated_trade.get('conviction_grade')})</code>\n"
                 f"<b>Yeni Pozisyon Büyüklüğü:</b> %{updated_trade.get('position_size_pct')}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"<b>Giriş Fiyatı:</b> <code>{entry_val:.4f}</code>\n"
+                f"<b>Zarar Kes (SL):</b> <code>{sl_val:.4f}</code>\n"
+                f"<b>Kar Al (TP):</b> <code>Dinamik Takip (Teorik: {tp_val:.4f})</code>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
                 f"<b>Güncelleme Gerekçesi:</b>\n<i>{decision.get('reason', 'Neden belirtilmedi')}</i>"
             )
             await self.notifier.send_message(msg)

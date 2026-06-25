@@ -79,14 +79,14 @@ async def scan_all_markets():
     bypass_time_routing = getattr(config, 'BYPASS_TIME_ROUTING', False)
     
     if bypass_time_routing:
-        scan_bist = True
+        scan_bist = False  # BYPASS: BIST tarama ve veri çekme kapatıldı
         scan_crypto = True
-        logging.info("[ZAMANLAYICI] Zamanlayıcı bypass edildi (BYPASS_TIME_ROUTING=True). Hem BIST hem Kripto taranıyor.")
+        logging.info("[ZAMANLAYICI] Zamanlayıcı bypass edildi (BYPASS_TIME_ROUTING=True). Kripto taranıyor, BIST devre dışı.")
     else:
         bist_open = is_bist_open()
-        scan_bist = bist_open
+        scan_bist = False  # BYPASS: BIST tarama ve veri çekme kapatıldı
         scan_crypto = True
-        logging.info(f"[ZAMANLAYICI] BIST Açık mı: {bist_open} | Aktif Tarama -> BIST: {scan_bist}, Kripto: {scan_crypto}")
+        logging.info(f"[ZAMANLAYICI] BIST Açık mı: {bist_open} | Aktif Tarama -> BIST Devre Dışı (BYPASS), Kripto: {scan_crypto}")
 
     # 1. BIST TARAMALARI (Batch Download)
     if scan_bist and is_bist_open():

@@ -119,7 +119,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     if hasattr(last_4h.name, 'hour') and last_4h.name.hour == 20:
         return signals
         
-    # 2. Hacim teyidi (Relative Volume > 1.2) - Düşük hacimde SFP veya kırılımlar fake oluyor
+    # 2. Hacim teyidi (Relative Volume > 1.5) - Düşük hacimde SFP veya kırılımlar fake oluyor
     vol = last_4h.get('volume', 0)
     vol_sma = last_4h.get('vol_sma_20', 1)
     if pd.isna(vol_sma) or vol_sma == 0:
@@ -127,7 +127,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     else:
         rel_vol = vol / vol_sma
         
-    if rel_vol < 1.2:
+    if rel_vol < 1.5:
         return signals
     # -------------------------------------------
 
