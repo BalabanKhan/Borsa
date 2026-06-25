@@ -4,12 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/hib0796/quant_bot
-ExecStart=/bin/bash /home/hib0796/quant_bot/run_bot.sh
+WorkingDirectory=/home/ubuntu/quant_bot
+ExecStart=/bin/bash /home/ubuntu/quant_bot/run_bot.sh
 Restart=always
 RestartSec=10
-StandardOutput=append:/home/hib0796/quant_bot/bot.log
-StandardError=append:/home/hib0796/quant_bot/bot.log
+StandardOutput=append:/home/ubuntu/quant_bot/bot.log
+StandardError=append:/home/ubuntu/quant_bot/bot.log
 
 [Install]
 WantedBy=default.target
