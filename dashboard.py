@@ -233,7 +233,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "last_scan": datetime.datetime.now().strftime("%H:%M:%S"),
                     "status": "AKTIF"
                 },
-                "trades": [t for t in read_trades() if not t.get("is_watch", False)],
+                "trades": [t for t in read_trades() if not t.get("is_watch", False) and t.get("conviction_grade") != "WATCH" and t.get("conviction_score", 100) > 60],
                 "logs": read_last_logs(40),
                 "scan_stats": _parse_scan_stats(),
                 "ab_test": _read_ab_stats(),
