@@ -144,10 +144,10 @@ def _parse_scan_stats():
             'dg_rejects': dg_rejects,
             'avg_conviction': avg_score,
             'conviction_distribution': {
-                'strong': sum(1 for s in conviction_scores if s >= config.GLOBAL_STRONG_CONVICTION_SCORE),
-                'medium': sum(1 for s in conviction_scores if config.GLOBAL_MEDIUM_CONVICTION_SCORE <= s < config.GLOBAL_STRONG_CONVICTION_SCORE),
-                'watch': sum(1 for s in conviction_scores if config.GLOBAL_MIN_CONVICTION_SCORE <= s < config.GLOBAL_MEDIUM_CONVICTION_SCORE),
-                'reject': sum(1 for s in conviction_scores if s < config.GLOBAL_MIN_CONVICTION_SCORE),
+                'strong': sum(1 for s in conviction_scores if s >= 80),
+                'medium': sum(1 for s in conviction_scores if 61 <= s < 80),
+                'watch': sum(1 for s in conviction_scores if 50 <= s < 61),
+                'reject': sum(1 for s in conviction_scores if s < 50),
             } if conviction_scores else {}
         }
     except Exception:

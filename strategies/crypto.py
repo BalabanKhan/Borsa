@@ -387,10 +387,12 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
     if not msb_ok:
         return signals
 
-    ema_20 = last_4h.get('EMA_20')
-    ema_50 = last_4h.get('EMA_50')
-    if pd.notna(ema_20) and pd.notna(ema_50) and ema_20 > ema_50:
+    # OTE (Optimal Trade Entry) kuralı
+    ote_top, ote_bottom = sniper_calculate_ote(msb_low, sweep_high)
+    if not (ote_bottom <= current_price <= ote_top):
         return signals
+
+    funding_rate = get_funding_rate(symbol)
 
     vol_sma = last_4h.get('vol_sma_20', 0)
     if vol_sma > 0 and last_4h.get('volume', 0) < (vol_sma * 1.5):
@@ -399,9 +401,9 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
-    sl = sweep_high + (atr_val * 1.5)
+    sl = sweep_high + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
     sl_dist = max(sl - current_price, 1e-8)
-    tp = current_price - (sl_dist * config.CRYPTO_SHORT_MIN_RR)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
     if _rr < config.CRYPTO_SHORT_MIN_RR:
         return signals
@@ -414,17 +416,19 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
         rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
         volume=last_4h.get('volume', 0), vol_sma=vol_sma, dollar_vol=last_4h.get('volume', 0) * current_price,
         rr=_rr, has_engulfing=False, regime='BEAR', macro_aligned=True,
-        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO'
+        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO',
+        funding_rate=funding_rate
     )
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+        funding_str = f" | Fonlama: %{funding_rate:.4f}" if funding_rate is not None else ""
         signals.append({
             'raw_indicators': _extract_raw_indicators(raw_vars),
             'ticker': symbol, 'market': 'KRIPTO', 'strategy': 'SHORT 1: LİKİDİTE AVI (SFP+CHoCH)', 'signal': 'SAT',
             'entry_price': current_price, 'sl': sl, 'tp': tp,
             'conviction_score': _conv.total_score, 'conviction_grade': _conv.grade,
             'conviction_details': _conv.component_scores, 'position_size_pct': _conv.position_size_pct,
-            'reason': f'SFP (Likidite Avı) + CHoCH Onaylı. 1:{config.CRYPTO_SHORT_MIN_RR} R:R.' + _conv.to_reason_suffix()
+            'reason': f'SFP (Likidite Avı) + CHoCH Onaylı. 1:{config.CRYPTO_SHORT_MIN_RR} R:R. OTE Bölgesi ({ote_bottom:.4f}-{ote_top:.4f}){funding_str}.' + _conv.to_reason_suffix()
         })
     return signals
 
@@ -455,9 +459,9 @@ def _check_crypto_short_2_oi_trap(ctx):
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
-    sl = last_4h['high'] + (atr_val * 1.5)
+    sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
     sl_dist = max(sl - current_price, 1e-8)
-    tp = current_price - (sl_dist * config.CRYPTO_SHORT_MIN_RR)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
     if _rr < config.CRYPTO_SHORT_MIN_RR:
         return signals
@@ -515,9 +519,9 @@ def _check_crypto_short_3_divergence(ctx):
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
-    sl = last_4h['high'] + (atr_val * 1.5)
+    sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
     sl_dist = max(sl - current_price, 1e-8)
-    tp = current_price - (sl_dist * config.CRYPTO_SHORT_MIN_RR)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
     if _rr < config.CRYPTO_SHORT_MIN_RR:
         return signals
@@ -574,9 +578,9 @@ def _check_crypto_short_4_sr_flip(ctx):
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
-    sl = support_level + (atr_val * 1.5)
+    sl = support_level + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
     sl_dist = max(sl - current_price, 1e-8)
-    tp = current_price - (sl_dist * config.CRYPTO_SHORT_MIN_RR)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
     if _rr < config.CRYPTO_SHORT_MIN_RR:
         return signals
@@ -627,9 +631,9 @@ def _check_crypto_short_5_bear_flag(ctx):
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
-    sl = ema_50 + (atr_val * 1.5)
+    sl = ema_50 + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
     sl_dist = max(sl - current_price, 1e-8)
-    tp = current_price - (sl_dist * config.CRYPTO_SHORT_MIN_RR)
+    tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
     if _rr < config.CRYPTO_SHORT_MIN_RR:
         return signals
@@ -1289,7 +1293,8 @@ def _check_crypto_sniper_1h(ctx):
         "kcw": kcw,
         "bb_pct": bb_pct,
         "bbl": bbl,
-        "bbu": bbu
+        "bbu": bbu,
+        "market": "KRIPTO"
     }
 
     signals.extend(_check_crypto_sniper_1h_long(ctx_1h))
@@ -1528,8 +1533,9 @@ def _check_crypto_long_smc(ctx):
     usdt_trend = get_usdt_dominance_trend()
     unlock_risk = check_token_unlocks(ctx["symbol"])
     
-    if usdt_trend == "UP":
-        return signals
+    # usdt_trend == "UP" durumunda direkt çıkmak yerine (hard block),
+    # ctx içerisine ekleyip conviction_scorer içerisinde soft ceza (veya risk uyarısı) uygulayacağız.
+    ctx["usdt_trend"] = usdt_trend
         
     if unlock_risk:
         return signals
@@ -1622,7 +1628,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         "current_price": current_price, "df_1d": df_1d, "df_4h": df_4h,
         "btc_ok": btc_ok, "btc_sniper_bias": btc_sniper_bias,
         "dynamic_atr_mult": dynamic_atr_mult,
-        "is_choppy": is_choppy, "adx_1d": adx_1d
+        "is_choppy": is_choppy, "adx_1d": adx_1d,
+        "market": "KRIPTO"
     }
 
     signals.extend(_check_crypto_1_liquidation(ctx))

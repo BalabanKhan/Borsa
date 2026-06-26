@@ -88,7 +88,7 @@ TOP_HEAVY_SHORT = TOP_CRYPTO_SCAN
 # ATR & Stop Parametreleri
 # ════════════════════════════════════════
 ATR_MULTIPLIER_BIST = 1.8
-ATR_MULTIPLIER_CRYPTO = 2.2
+ATR_MULTIPLIER_CRYPTO = 1.0   # 10x kaldıraç için daraltıldı (eski: 2.2)
 MIN_SL_PCT = 0.03          # Minimum SL yüzdesi
 BIST_MIN_SL_PCT = 0.015    # BIST için minimum SL yüzdesi (En az %1.5)
 BREAKOUT_RSI_MAX_LIMIT = 68.0  # Kırılım işlemlerinde saatlik RSI tavanı
@@ -358,7 +358,7 @@ BATCH_MAX_WORKERS = 3          # ThreadPoolExecutor max paralel çağrı
 # ════════════════════════════════════════
 # RED-08: ATR Stop üst sınırları (flash crash koruması)
 ATR_CAP_BIST = 0.08            # BIST maksimum %8 stop
-ATR_CAP_CRYPTO = 0.12          # Kripto maksimum %12 stop
+ATR_CAP_CRYPTO = 0.05          # Kripto maksimum %5 stop (10x kaldıraç için, eski: 0.12)
 ATR_CAP_EMTIA = 0.10           # Emtia maksimum %10 stop
 
 # RED-07: Minimum anlamlı dolar hacmi (hayalet likidite filtresi)
@@ -632,7 +632,7 @@ BEAR_HUNTER_DEFAULT_ATR_MULT = 0.02
 BEAR_HUNTER_SFP_ATR_SL_MULT = 0.3
 BEAR_HUNTER_PREMIUM_ATR_SL_MULT = 0.5
 BEAR_HUNTER_DIV_ATR_SL_MULT = 0.5
-BEAR_HUNTER_TP_RR = 1.5
+BEAR_HUNTER_TP_RR = 2.0   # 10x kaldıraç risk/ödül oranı için (eski: 1.5)
 
 # --- BIST Strategy Specific ---
 BIST_DIP_HUNTER_RSI_1D_LIMIT = 35.0
@@ -667,8 +667,8 @@ CRYPTO_SQUEEZE_WIDTH_LIMIT = 0.15
 CRYPTO_TREND_SL_EMA_MULT = 0.98
 CRYPTO_BREAKOUT_WIDTH_MULT = 1.20
 CRYPTO_BREAKOUT_RETEST_SL_MULT = 0.99
-CRYPTO_BREAKOUT_MIN_SL = 0.04
-CRYPTO_BREAKOUT_MAX_SL = 0.07
+CRYPTO_BREAKOUT_MIN_SL = 0.015  # 10x kaldıraç için daraltıldı (eski: 0.04)
+CRYPTO_BREAKOUT_MAX_SL = 0.04   # 10x kaldıraç için daraltıldı (eski: 0.07)
 CRYPTO_SHORT1_SL_MULT = 1.02
 CRYPTO_SHORT3_SL_MULT = 1.03
 CRYPTO_SHORT3_TP_RR = 2.5

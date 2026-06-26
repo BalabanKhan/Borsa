@@ -1030,15 +1030,26 @@ def calculate_conviction(
     # V3.6: Weak Setup Penalty (BIST 10 vb. için)
     setup_weak_penalty = scores.get("setup_weak_penalty", 0.0)
     
+    # V3.7: Long Risk Penalty & USDT Trend Penalty
+    long_risk_penalty = scores.get("long_risk_penalty", 0.0)
+    
+    usdt_penalty = 0.0
+    if ctx is not None and ctx.get("usdt_trend") == "UP" and scores.get("is_long_strategy", True):
+        usdt_penalty = -15.0
+    
     total += data_guard_penalty
     total += conflict_penalty
     total += autopsy_penalty
     total += nan_penalty
     total += setup_weak_penalty
+    total += long_risk_penalty
+    total += usdt_penalty
     
     result.component_scores["autopsy_penalty"] = round(autopsy_penalty, 1)
     result.component_scores["nan_penalty"] = round(nan_penalty, 1)
     result.component_scores["setup_weak_penalty"] = round(setup_weak_penalty, 1)
+    result.component_scores["long_risk_penalty"] = round(long_risk_penalty, 1)
+    result.component_scores["usdt_penalty"] = round(usdt_penalty, 1)
     
     if apply_bear_penalty:
         from config import CONFLICT_RESOLVER_BEAR_TREND_PENALTY
@@ -1070,9 +1081,9 @@ def calculate_conviction(
             is_crypto = True
 
     if is_crypto:
-        t_strong = max(t_strong, 65)
-        t_medium = 61.0
-        t_watch = 50.0
+        t_strong = max(t_strong, 80.0)  # Strong için eşik yükseltildi
+        t_medium = 61.0                 # 61 ve üstü MEDIUM
+        t_watch = 50.0                  # 50 - 60.9 arası WATCH
 
     if total >= t_strong:
         result.grade = CONVICTION_STRONG
@@ -1436,6 +1447,13 @@ def build_short_scores(
         strategy_type=strategy_type
     )
 
+    long_risk_penalty = 0.0
+    if rsi is not None and rsi < 35:
+        long_risk_penalty -= 10.0
+    if sma200_1d is not None and price is not None:
+        if abs(price - sma200_1d) / price < 0.02 and price > sma200_1d:
+            long_risk_penalty -= 15.0
+
     return {
         "adx":           score_adx(adx, adx_prev, adx_mode=adx_mode, adx_center=adx_center, adx_width=adx_width),
         "ema_alignment": score_ema_short(price, ema_fast, ema_mid, ema_slow),
@@ -1454,6 +1472,8 @@ def build_short_scores(
         "conflict_penalty": conflict_penalty,
         "apply_bear_penalty": apply_bear,
         "autopsy_penalty": autopsy_pen,
+        "long_risk_penalty": long_risk_penalty,
+        "is_long_strategy": False
     }
 
 
