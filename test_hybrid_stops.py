@@ -139,10 +139,12 @@ class TestHybridStops(unittest.TestCase):
         self.assertFalse(is_closed)
         self.assertEqual(t["status"], "ACTIVE")
 
+    @patch('trade_tracker.trailing._get_atr_cached')
     @patch('trade_tracker._get_structural_floor')
-    def test_anti_hunt_offset_long(self, mock_floor):
+    def test_anti_hunt_offset_long(self, mock_floor, mock_atr):
         """Anti-Hunt: AL yönlü işlemde deterministik gürültü ve asimetrik offset SL seviyesine uygulanmalıdır."""
         mock_floor.return_value = None  # Yapısal zemin hesaplamasını devre dışı bırak
+        mock_atr.return_value = None    # Gerçek ATR verisini devre dışı bırak
         
         ticker = "BTC/USDT"
         t = {

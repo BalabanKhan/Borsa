@@ -36,22 +36,22 @@ _is_funding_safe_for_short,
 )
 
 
-def apply_10x_sl_cap(sl: float, current_price: float, ctx: dict = None) -> float:
+def apply_5x_sl_cap(sl: float, current_price: float, ctx: dict = None) -> float:
     """
-    10x kaldıraç için SL mesafesini %1 ile sınırlar ve
-    eğer mesafe %1'i aşıyorsa dinamik/orantılı soft ceza uygular.
+    5x kaldıraç için SL mesafesini %2 ile sınırlar ve
+    eğer mesafe %2'yi aşıyorsa dinamik/orantılı soft ceza uygular.
     """
     original_dist_pct = abs(current_price - sl) / current_price
     
-    if original_dist_pct > 0.01:
+    if original_dist_pct > 0.02:
         if ctx is not None:
-            # Dinamik Ceza: Her %1 (0.01) aşım için 50 puan ceza
-            excess_pct = (original_dist_pct - 0.01) * 100
+            # Dinamik Ceza: Her %1 (0.01) aşım için 25 puan ceza
+            excess_pct = (original_dist_pct - 0.02) * 100
             # Maksimum 60 puan ceza
-            penalty = min(60.0, excess_pct * 50.0)
+            penalty = min(60.0, excess_pct * 25.0)
             ctx["sl_distance_penalty"] = -round(penalty, 1)
             
-        max_dist = current_price * 0.01
+        max_dist = current_price * 0.02
         if sl < current_price:
             return current_price - max_dist
         else:
@@ -113,8 +113,8 @@ def _check_crypto_1_liquidation(ctx):
         raw_atr_sl = dynamic_mult * atr_val
         
         sl = lowest_wick - raw_atr_sl
-        sl = apply_10x_sl_cap(sl, current_price)
-        sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+        sl = apply_5x_sl_cap(sl, current_price)
+        sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
         sl_dist = abs(current_price - sl)
         tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
         _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -240,8 +240,8 @@ def _check_crypto_2_mega_trend(ctx):
     sl_atr = current_price - capped_sl_dist
     sl_ema = last_4h.get('EMA_50', current_price) * config.CRYPTO_TREND_SL_EMA_MULT
     sl = max(sl_atr, sl_ema)
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = abs(current_price - sl)
     _tp_c2 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c2 = abs(_tp_c2 - current_price) / max(abs(current_price - sl), 1e-8)
@@ -369,8 +369,8 @@ def _check_crypto_3_breakout(ctx):
     raw_atr_sl = dynamic_mult * atr_val
     sl_dist = min(max(raw_atr_sl, current_price * config.CRYPTO_BREAKOUT_MIN_SL), current_price * config.CRYPTO_BREAKOUT_MAX_SL)
     sl = current_price - sl_dist
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     _tp_c3 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c3 = abs(_tp_c3 - current_price) / max(abs(current_price - sl), 1e-8)
     dm_ratio = _get_darth_maul_ratio(last_4h)
@@ -448,8 +448,8 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = sweep_high + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -508,8 +508,8 @@ def _check_crypto_short_2_oi_trap(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -570,8 +570,8 @@ def _check_crypto_short_3_divergence(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -631,8 +631,8 @@ def _check_crypto_short_4_sr_flip(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = support_level + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -697,8 +697,8 @@ def _check_crypto_short_5_bear_flag(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = ema_50 + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -795,8 +795,8 @@ def _check_crypto_4_sniper_ote_long(ctx):
     df_1h_crypto = None
 
     sl = sweep_low * config.CRYPTO_LONG4_SL_MULT
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(current_price - sl, 1e-8)
     tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
@@ -899,8 +899,8 @@ def _check_crypto_4_sniper_ote_short(ctx):
     df_1h_crypto = None
 
     sl = sweep_high * config.CRYPTO_SHORT4_SL_MULT
-    sl = apply_10x_sl_cap(sl, current_price)
-    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price)
+    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
@@ -982,15 +982,15 @@ def _check_crypto_5_vol_squeeze(ctx):
             ema20_4h = last_4h.get('EMA_20', current_price)
             if sq_dir == "up":
                 sl = min(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
-                sl = apply_10x_sl_cap(sl, current_price)
-                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price)
+                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 sl_dist = abs(current_price - sl)
                 tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "AL"
             else:
                 sl = max(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
-                sl = apply_10x_sl_cap(sl, current_price)
-                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price)
+                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 sl_dist = abs(sl - current_price)
                 tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "SAT"
@@ -1071,8 +1071,8 @@ def _check_crypto_6_vwap(ctx):
         bounce_ok, wick_low = detect_vwap_bounce(df_4h, vwap_val)
         if bounce_ok and wick_low is not None:
             sl = wick_low * config.CRYPTO_VWAP_SL_MULT
-            sl = apply_10x_sl_cap(sl, current_price)
-            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price)
+            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             sl_dist = abs(current_price - sl)
             _tp_c6 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr_c6 = abs(_tp_c6 - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1118,8 +1118,8 @@ def _check_crypto_7_obv(ctx):
         btcdom_trend = get_btc_dominance_trend()
         if btcdom_trend != "UP":
             sl = (obv_box_high + obv_box_low) / 2
-            sl = apply_10x_sl_cap(sl, current_price)
-            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price)
+            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             cmf_val = calculate_cmf(df_1d)
             cmf_label = f"CMF: {cmf_val:.3f} ✅" if cmf_val is not None else "CMF: N/A"
             sl_dist = abs(current_price - sl)
@@ -1423,8 +1423,8 @@ def _check_crypto_long_sfp_choch(ctx):
             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
             if pd.isna(atr_val): atr_val = current_price * 0.02
             sl = sweep_low - (atr_val * 0.5)
-            sl = apply_10x_sl_cap(sl, current_price)
-            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price)
+            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             
             _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
             _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1467,8 +1467,8 @@ def _check_crypto_long_short_squeeze(ctx):
         atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
         if pd.isna(atr_val): atr_val = current_price * 0.02
         sl = last_4h['low'] - (atr_val * 1.0)
-        sl = apply_10x_sl_cap(sl, current_price)
-        sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+        sl = apply_5x_sl_cap(sl, current_price)
+        sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
         
         _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
         _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1513,8 +1513,8 @@ def _check_crypto_long_major_divergence(ctx):
             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
             if pd.isna(atr_val): atr_val = current_price * 0.02
             sl = last_4h['low'] - (atr_val * 1.0)
-            sl = apply_10x_sl_cap(sl, current_price)
-            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price)
+            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             
             _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
             _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1561,8 +1561,8 @@ def _check_crypto_long_sr_flip_fvg(ctx):
             
             if ema21 > 0 and abs(current_price - ema21) < (atr_val * 1.5):
                 sl = current_price - (atr_val * 2.0)
-                sl = apply_10x_sl_cap(sl, current_price)
-                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price)
+                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
                 _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
                 
@@ -1610,8 +1610,8 @@ def _check_crypto_long_bull_flag_ote(ctx):
                 atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
                 if pd.isna(atr_val): atr_val = current_price * 0.02
                 sl = ote_bot - (atr_val * 1.0)
-                sl = apply_10x_sl_cap(sl, current_price)
-                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price)
+                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 
                 _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
                 _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
