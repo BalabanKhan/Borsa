@@ -898,7 +898,11 @@ def score_data_guard(
     if dollar_volume > 0 and dollar_volume < optimum_volume_usd:
         clamped_vol = max(min_volume_usd, dollar_volume)
         ratio = (optimum_volume_usd - clamped_vol) / (optimum_volume_usd - min_volume_usd) if optimum_volume_usd > min_volume_usd else 1.0
-        penalty -= (25.0 * ratio)
+        # Dinamik hacim cezası
+        base_penalty = 25.0
+        # Eğer hacim çok düşükse (min_volume_usd'ye yakınsa) çarpan artar
+        vol_urgency = 1.0 + (ratio * 0.5) 
+        penalty -= (base_penalty * ratio * vol_urgency)
         
     return penalty
 
@@ -1035,7 +1039,10 @@ def calculate_conviction(
     
     usdt_penalty = 0.0
     if ctx is not None and ctx.get("usdt_trend") == "UP" and scores.get("is_long_strategy", True):
-        usdt_penalty = -15.0
+        # Dinamik USDT Dominance cezası
+        usdt_strength = ctx.get("usdt_dominance_rsi", 60.0)
+        excess_strength = max(0.0, usdt_strength - 50.0)
+        usdt_penalty = -min(25.0, excess_strength * 0.5)
     
     total += data_guard_penalty
     total += conflict_penalty
@@ -1347,9 +1354,11 @@ def build_breakout_scores(
     if rsi is not None and not _is_nan(rsi):
         from config import BREAKOUT_RSI_MAX_LIMIT
         if is_long and rsi > BREAKOUT_RSI_MAX_LIMIT:
-            conflict_penalty -= 15.0
+            excess = rsi - BREAKOUT_RSI_MAX_LIMIT
+            conflict_penalty -= min(25.0, excess * 1.5)
         elif not is_long and rsi < (100.0 - BREAKOUT_RSI_MAX_LIMIT):
-            conflict_penalty -= 15.0
+            excess = (100.0 - BREAKOUT_RSI_MAX_LIMIT) - rsi
+            conflict_penalty -= min(25.0, excess * 1.5)
 
     squeeze_score = inverse_linear_score(bb_width, SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX) if bb_width else SOFT_UNCERTAINTY_PENALTY
 
@@ -1458,16 +1467,16 @@ def build_short_scores(
     
     # 1. Aşırı satım (RSI çok düşük) -> Short için tehlikeli (yukarı tepki riski)
     if rsi is not None:
-        if rsi < 30:
-            long_risk_penalty -= 15.0
-        elif rsi < 35:
-            long_risk_penalty -= 10.0
+        if rsi < 40:
+            excess = 40 - rsi
+            long_risk_penalty -= min(25.0, excess * 1.2)
 
     # 2. SMA 200 Desteği (Fiyat 1D SMA200'e çok yakın ve üstünde ise destek olarak çalışabilir)
     if sma200_1d is not None and price is not None:
         dist_to_sma200 = (price - sma200_1d) / sma200_1d
-        if 0 < dist_to_sma200 < 0.03:  # SMA200'ün %3 kadar üstünde
-            long_risk_penalty -= 15.0
+        if 0 <= dist_to_sma200 < 0.05:  # SMA200'ün %5 kadar üstünde
+            proximity = 0.05 - dist_to_sma200
+            long_risk_penalty -= min(25.0, proximity * 400.0)
 
     # 3. Rejim Uyarısı (Zaten Boğa Piyasasındayken shortlamak risklidir)
     if regime == "BULL":
@@ -1476,7 +1485,9 @@ def build_short_scores(
     # 4. Momentum (Eğer ema_fast > ema_mid > ema_slow ise trend güçlü boğadır, short tehlikeli)
     if ema_fast and ema_mid and ema_slow:
         if ema_fast > ema_mid > ema_slow:
-            long_risk_penalty -= 15.0
+            # Momentum farkına göre dinamik ceza
+            momentum_gap = (ema_fast - ema_slow) / ema_slow
+            long_risk_penalty -= min(25.0, momentum_gap * 200.0 + 5.0)
 
     return {
         "adx":           score_adx(adx, adx_prev, adx_mode=adx_mode, adx_center=adx_center, adx_width=adx_width),
@@ -1542,7 +1553,9 @@ def _calculate_sniper_confluences(
         if has_squeeze_breakout and vol_ratio >= 1.5:
             penalty_bonus += min((vol_ratio - 1.5) * 8.0, 8.0)
         elif vol_ratio < 1.0:
-            penalty_bonus -= 15.0  # Sığ hacimli hareketleri sert cezalandır
+            # Dinamik sığ hacim cezası
+            deficit = 1.0 - vol_ratio
+            penalty_bonus -= min(25.0, deficit * 30.0)  # Sığ hacimli hareketleri orantılı cezalandır
 
     # 3. SFP (Likidite Avı) + EMA Desteği Confluence (Güvenilir Dip Ödülü)
     if sfp_present and ema_mid and not _is_nan(ema_mid) and ema_mid > 0:
