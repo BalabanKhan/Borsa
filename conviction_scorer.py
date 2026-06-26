@@ -1045,11 +1045,18 @@ def calculate_conviction(
     total += long_risk_penalty
     total += usdt_penalty
     
+    # 10x leverage penalty for SL > 1%
+    sl_distance_penalty = 0.0
+    if ctx is not None:
+        sl_distance_penalty = ctx.get("sl_distance_penalty", 0.0)
+    total += sl_distance_penalty
+    
     result.component_scores["autopsy_penalty"] = round(autopsy_penalty, 1)
     result.component_scores["nan_penalty"] = round(nan_penalty, 1)
     result.component_scores["setup_weak_penalty"] = round(setup_weak_penalty, 1)
     result.component_scores["long_risk_penalty"] = round(long_risk_penalty, 1)
     result.component_scores["usdt_penalty"] = round(usdt_penalty, 1)
+    result.component_scores["sl_distance_penalty"] = round(sl_distance_penalty, 1)
     
     if apply_bear_penalty:
         from config import CONFLICT_RESOLVER_BEAR_TREND_PENALTY

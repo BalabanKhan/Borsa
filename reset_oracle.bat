@@ -1,0 +1,1 @@
+ssh -i C:\Users\YSR_MONSTER\Desktop\Halil\Oracle\ssh-key-2026-06-23.key -o StrictHostKeyChecking=no ubuntu@89.168.114.138 "cd quant_bot && sudo systemctl stop quant_bot && sudo sh -c 'echo {} > penalty_box.json' && sudo sh -c 'echo {\"strategies\": {}} > circuit_breaker_state.json' && sudo sh -c 'echo {} > quarantine_state.json' && sudo systemctl start quant_bot"

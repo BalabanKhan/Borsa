@@ -89,6 +89,7 @@ def _check_crypto_1_liquidation(ctx):
         raw_atr_sl = dynamic_mult * atr_val
         
         sl = lowest_wick - raw_atr_sl
+        sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
         sl_dist = abs(current_price - sl)
         tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
         _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -117,6 +118,7 @@ def _check_crypto_1_liquidation(ctx):
             signals.append({
                 "raw_indicators": _extract_raw_indicators(raw_vars),
                 "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
                 "strategy": "KRİPTO 1: LİKİDASYON AVI", "signal": "AL",
                 "entry_price": current_price, "sl": sl, "tp": tp,
                 "conviction_score": _conv_c1.total_score, "conviction_grade": _conv_c1.grade,
@@ -213,6 +215,7 @@ def _check_crypto_2_mega_trend(ctx):
     sl_atr = current_price - capped_sl_dist
     sl_ema = last_4h.get('EMA_50', current_price) * config.CRYPTO_TREND_SL_EMA_MULT
     sl = max(sl_atr, sl_ema)
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = abs(current_price - sl)
     _tp_c2 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c2 = abs(_tp_c2 - current_price) / max(abs(current_price - sl), 1e-8)
@@ -242,6 +245,7 @@ def _check_crypto_2_mega_trend(ctx):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "KRİPTO 2: MEGA TREND TAKİBİ", "signal": "AL",
             "entry_price": current_price, "sl": sl, "tp": _tp_c2,
             "conviction_score": _conv_c2.total_score, "conviction_grade": _conv_c2.grade,
@@ -339,6 +343,7 @@ def _check_crypto_3_breakout(ctx):
     raw_atr_sl = dynamic_mult * atr_val
     sl_dist = min(max(raw_atr_sl, current_price * config.CRYPTO_BREAKOUT_MIN_SL), current_price * config.CRYPTO_BREAKOUT_MAX_SL)
     sl = current_price - sl_dist
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     _tp_c3 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c3 = abs(_tp_c3 - current_price) / max(abs(current_price - sl), 1e-8)
     dm_ratio = _get_darth_maul_ratio(last_4h)
@@ -361,6 +366,7 @@ def _check_crypto_3_breakout(ctx):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "KRİPTO 3: SAHTE KIRILIM FİLTRESİ (RETEST)", "signal": "AL",
             "entry_price": current_price, "sl": sl, "tp": _tp_c3,
             "conviction_score": _conv_c3.total_score, "conviction_grade": _conv_c3.grade,
@@ -372,6 +378,17 @@ def _check_crypto_3_breakout(ctx):
 
 def _check_crypto_short_1_liquidity_hunt(ctx):
     signals = []
+
+    # Anti-Rekt HTF Trend filtresi (Güçlü boğa trendinde short arama)
+    last_1d = ctx.get('last_1d')
+    if last_1d is not None:
+        import pandas as pd
+        ema_20_1d = last_1d.get('EMA_20')
+        ema_50_1d = last_1d.get('EMA_50')
+        rsi_1d = last_1d.get('RSI_14')
+        if pd.notna(ema_20_1d) and pd.notna(ema_50_1d) and pd.notna(rsi_1d):
+            if ema_20_1d > ema_50_1d and rsi_1d > 60:
+                return signals
     symbol = ctx['symbol']
     last_4h = ctx['last_4h']
     current_price = ctx['current_price']
@@ -404,6 +421,7 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = sweep_high + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -462,6 +480,7 @@ def _check_crypto_short_2_oi_trap(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -522,6 +541,7 @@ def _check_crypto_short_3_divergence(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -581,6 +601,7 @@ def _check_crypto_short_4_sr_flip(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = support_level + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -611,6 +632,17 @@ def _check_crypto_short_4_sr_flip(ctx):
 
 def _check_crypto_short_5_bear_flag(ctx):
     signals = []
+
+    # Anti-Rekt HTF Trend filtresi (Güçlü boğa trendinde short arama)
+    last_1d = ctx.get('last_1d')
+    if last_1d is not None:
+        import pandas as pd
+        ema_20_1d = last_1d.get('EMA_20')
+        ema_50_1d = last_1d.get('EMA_50')
+        rsi_1d = last_1d.get('RSI_14')
+        if pd.notna(ema_20_1d) and pd.notna(ema_50_1d) and pd.notna(rsi_1d):
+            if ema_20_1d > ema_50_1d and rsi_1d > 60:
+                return signals
     symbol = ctx['symbol']
     last_4h = ctx['last_4h']
     current_price = ctx['current_price']
@@ -634,6 +666,7 @@ def _check_crypto_short_5_bear_flag(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = ema_50 + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -730,6 +763,7 @@ def _check_crypto_4_sniper_ote_long(ctx):
     df_1h_crypto = None
 
     sl = sweep_low * config.CRYPTO_LONG4_SL_MULT
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(current_price - sl, 1e-8)
     tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
@@ -766,6 +800,7 @@ def _check_crypto_4_sniper_ote_long(ctx):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "KRİPTO 4: KESKİN NİŞANCI (OTE)", "signal": "AL",
             "entry_price": current_price, "sl": sl, "tp": tp,
             "conviction_score": _conv_c4l.total_score, "conviction_grade": _conv_c4l.grade,
@@ -831,6 +866,7 @@ def _check_crypto_4_sniper_ote_short(ctx):
     df_1h_crypto = None
 
     sl = sweep_high * config.CRYPTO_SHORT4_SL_MULT
+    sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
@@ -866,6 +902,7 @@ def _check_crypto_4_sniper_ote_short(ctx):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "SHORT 4: KESKİN NİŞANCI (OTE)", "signal": "SAT",
             "entry_price": current_price, "sl": sl, "tp": tp,
             "conviction_score": _conv_c4s.total_score, "conviction_grade": _conv_c4s.grade,
@@ -911,11 +948,13 @@ def _check_crypto_5_vol_squeeze(ctx):
             ema20_4h = last_4h.get('EMA_20', current_price)
             if sq_dir == "up":
                 sl = min(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
+                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 sl_dist = abs(current_price - sl)
                 tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "AL"
             else:
                 sl = max(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
+                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 sl_dist = abs(sl - current_price)
                 tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "SAT"
@@ -942,6 +981,7 @@ def _check_crypto_5_vol_squeeze(ctx):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
                     "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
                     "strategy": "KRİPTO 5: VOLATİLİTE SIKIŞMASI (SQUEEZE)", "signal": sig_type,
                     "entry_price": current_price, "sl": sl, "tp": tp,
                     "conviction_score": _conv_c5.total_score, "conviction_grade": _conv_c5.grade,
@@ -995,6 +1035,7 @@ def _check_crypto_6_vwap(ctx):
         bounce_ok, wick_low = detect_vwap_bounce(df_4h, vwap_val)
         if bounce_ok and wick_low is not None:
             sl = wick_low * config.CRYPTO_VWAP_SL_MULT
+            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             sl_dist = abs(current_price - sl)
             _tp_c6 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr_c6 = abs(_tp_c6 - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1013,6 +1054,7 @@ def _check_crypto_6_vwap(ctx):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
                     "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
                     "strategy": "KRİPTO 6: VWAP KURUMSAL MIKNATISI", "signal": "AL",
                     "entry_price": current_price, "sl": sl, "tp": _tp_c6,
                     "conviction_score": _conv_c6.total_score, "conviction_grade": _conv_c6.grade,
@@ -1039,6 +1081,7 @@ def _check_crypto_7_obv(ctx):
         btcdom_trend = get_btc_dominance_trend()
         if btcdom_trend != "UP":
             sl = (obv_box_high + obv_box_low) / 2
+            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             cmf_val = calculate_cmf(df_1d)
             cmf_label = f"CMF: {cmf_val:.3f} ✅" if cmf_val is not None else "CMF: N/A"
             sl_dist = abs(current_price - sl)
@@ -1073,6 +1116,7 @@ def _check_crypto_7_obv(ctx):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
                     "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
                     "strategy": "KRİPTO 7: SESSİZ BİRİKİM RADARI (OBV)", "signal": "AL",
                     "entry_price": current_price, "sl": sl, "tp": _tp_c7,
                     "conviction_score": _conv_c7.total_score, "conviction_grade": _conv_c7.grade,
@@ -1142,6 +1186,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "KRİPTO 6: KESKİN NİŞANCI (SNIPER)", "signal": "AL",
             "entry_price": current_price, "sl": sl_long, "tp": _tp_sn_long,
             "conviction_score": _conv_sn_long.total_score, "conviction_grade": _conv_sn_long.grade,
@@ -1157,6 +1202,17 @@ def _check_crypto_sniper_1h_long(ctx_1h):
 
 def _check_crypto_sniper_1h_short(ctx_1h):
     signals = []
+
+    # Anti-Rekt HTF Trend filtresi (Güçlü boğa trendinde short arama)
+    last_1d = ctx_1h.get('last_1d')
+    if last_1d is not None:
+        import pandas as pd
+        ema_20_1d = last_1d.get('EMA_20')
+        ema_50_1d = last_1d.get('EMA_50')
+        rsi_1d = last_1d.get('RSI_14')
+        if pd.notna(ema_20_1d) and pd.notna(ema_50_1d) and pd.notna(rsi_1d):
+            if ema_20_1d > ema_50_1d and rsi_1d > 60:
+                return signals
     symbol = ctx_1h["symbol"]
     current_price = ctx_1h["current_price"]
     btc_ok = ctx_1h["btc_ok"]
@@ -1214,6 +1270,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "KRİPTO SHORT 5: KESKİN NİŞANCI (SNIPER)", "signal": "SAT",
             "entry_price": current_price, "sl": sl_short, "tp": _tp_sn_short,
             "conviction_score": _conv_sn_short.total_score, "conviction_grade": _conv_sn_short.grade,
@@ -1296,7 +1353,8 @@ def _check_crypto_sniper_1h(ctx):
         "bb_pct": bb_pct,
         "bbl": bbl,
         "bbu": bbu,
-        "market": "KRIPTO"
+        "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d")
     }
 
     signals.extend(_check_crypto_sniper_1h_long(ctx_1h))
@@ -1327,6 +1385,7 @@ def _check_crypto_long_sfp_choch(ctx):
             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
             if pd.isna(atr_val): atr_val = current_price * 0.02
             sl = sweep_low - (atr_val * 0.5)
+            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             
             _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
             _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1344,7 +1403,8 @@ def _check_crypto_long_sfp_choch(ctx):
             if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
-                    "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO LONG 1: SFP+CHoCH (SMC)", "signal": "AL",
+                    "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"), "strategy": "KRİPTO LONG 1: SFP+CHoCH (SMC)", "signal": "AL",
                     "entry_price": current_price, "sl": sl, "tp": _tp,
                     "conviction_score": _conv.total_score, "conviction_grade": _conv.grade,
                     "conviction_details": _conv.component_scores, "position_size_pct": _conv.position_size_pct,
@@ -1368,6 +1428,7 @@ def _check_crypto_long_short_squeeze(ctx):
         atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
         if pd.isna(atr_val): atr_val = current_price * 0.02
         sl = last_4h['low'] - (atr_val * 1.0)
+        sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
         
         _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
         _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1384,7 +1445,8 @@ def _check_crypto_long_short_squeeze(ctx):
         if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
             signals.append({
                 "raw_indicators": _extract_raw_indicators(raw_vars),
-                "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO LONG 2: Short Squeeze Tuzağı", "signal": "AL",
+                "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"), "strategy": "KRİPTO LONG 2: Short Squeeze Tuzağı", "signal": "AL",
                 "entry_price": current_price, "sl": sl, "tp": _tp,
                 "conviction_score": _conv.total_score, "conviction_grade": _conv.grade,
                 "conviction_details": _conv.component_scores, "position_size_pct": _conv.position_size_pct,
@@ -1411,6 +1473,7 @@ def _check_crypto_long_major_divergence(ctx):
             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
             if pd.isna(atr_val): atr_val = current_price * 0.02
             sl = last_4h['low'] - (atr_val * 1.0)
+            sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
             
             _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
             _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1428,7 +1491,8 @@ def _check_crypto_long_major_divergence(ctx):
             if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({
                     "raw_indicators": _extract_raw_indicators(raw_vars),
-                    "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO LONG 3: Majör Destekte Uyumsuzluk", "signal": "AL",
+                    "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"), "strategy": "KRİPTO LONG 3: Majör Destekte Uyumsuzluk", "signal": "AL",
                     "entry_price": current_price, "sl": sl, "tp": _tp,
                     "conviction_score": _conv.total_score, "conviction_grade": _conv.grade,
                     "conviction_details": _conv.component_scores, "position_size_pct": _conv.position_size_pct,
@@ -1456,6 +1520,7 @@ def _check_crypto_long_sr_flip_fvg(ctx):
             
             if ema21 > 0 and abs(current_price - ema21) < (atr_val * 1.5):
                 sl = current_price - (atr_val * 2.0)
+                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
                 _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
                 
@@ -1471,7 +1536,8 @@ def _check_crypto_long_sr_flip_fvg(ctx):
                 if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({
                         "raw_indicators": _extract_raw_indicators(raw_vars),
-                        "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO LONG 4: S/R Flip ve Zayıf Retest", "signal": "AL",
+                        "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"), "strategy": "KRİPTO LONG 4: S/R Flip ve Zayıf Retest", "signal": "AL",
                         "entry_price": current_price, "sl": sl, "tp": _tp,
                         "conviction_score": _conv.total_score, "conviction_grade": _conv.grade,
                         "conviction_details": _conv.component_scores, "position_size_pct": _conv.position_size_pct,
@@ -1502,6 +1568,7 @@ def _check_crypto_long_bull_flag_ote(ctx):
                 atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
                 if pd.isna(atr_val): atr_val = current_price * 0.02
                 sl = ote_bot - (atr_val * 1.0)
+                sl = apply_10x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
                 
                 _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
                 _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1520,7 +1587,8 @@ def _check_crypto_long_bull_flag_ote(ctx):
                 if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({
                         "raw_indicators": _extract_raw_indicators(raw_vars),
-                        "ticker": symbol, "market": "KRIPTO", "strategy": "KRİPTO LONG 5: Altın Trend & Boğa Bayrağı", "signal": "AL",
+                        "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"), "strategy": "KRİPTO LONG 5: Altın Trend & Boğa Bayrağı", "signal": "AL",
                         "entry_price": current_price, "sl": sl, "tp": _tp,
                         "conviction_score": _conv.total_score, "conviction_grade": _conv.grade,
                         "conviction_details": _conv.component_scores, "position_size_pct": _conv.position_size_pct,
@@ -1631,7 +1699,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         "btc_ok": btc_ok, "btc_sniper_bias": btc_sniper_bias,
         "dynamic_atr_mult": dynamic_atr_mult,
         "is_choppy": is_choppy, "adx_1d": adx_1d,
-        "market": "KRIPTO"
+        "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d")
     }
 
     signals.extend(_check_crypto_1_liquidation(ctx))
@@ -1656,6 +1725,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         signals.append({
             "raw_indicators": al_signals[0].get("raw_indicators", {}),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "SÜPER SİNYAL: CONFLUENCE (LONG)", "signal": "AL",
             "entry_price": current_price, 
             "sl": al_signals[0].get("sl", current_price * 0.95), 
@@ -1671,6 +1741,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         signals.append({
             "raw_indicators": sat_signals[0].get("raw_indicators", {}),
             "ticker": symbol, "market": "KRIPTO",
+        "last_1d": ctx.get("last_1d"),
             "strategy": "SÜPER SİNYAL: CONFLUENCE (SHORT)", "signal": "SAT",
             "entry_price": current_price, 
             "sl": sat_signals[0].get("sl", current_price * 1.05), 
