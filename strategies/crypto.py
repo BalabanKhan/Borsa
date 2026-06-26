@@ -1224,7 +1224,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
-        "last_1d": ctx.get("last_1d"),
+        "last_1d": ctx_1h.get("last_1d"),
             "strategy": "KRİPTO 6: KESKİN NİŞANCI (SNIPER)", "signal": "AL",
             "entry_price": current_price, "sl": sl_long, "tp": _tp_sn_long,
             "conviction_score": _conv_sn_long.total_score, "conviction_grade": _conv_sn_long.grade,
@@ -1308,7 +1308,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         signals.append({
             "raw_indicators": _extract_raw_indicators(raw_vars),
             "ticker": symbol, "market": "KRIPTO",
-        "last_1d": ctx.get("last_1d"),
+        "last_1d": ctx_1h.get("last_1d"),
             "strategy": "KRİPTO SHORT 5: KESKİN NİŞANCI (SNIPER)", "signal": "SAT",
             "entry_price": current_price, "sl": sl_short, "tp": _tp_sn_short,
             "conviction_score": _conv_sn_short.total_score, "conviction_grade": _conv_sn_short.grade,
