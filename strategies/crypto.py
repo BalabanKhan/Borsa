@@ -393,6 +393,8 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
         return signals
 
     funding_rate = get_funding_rate(symbol)
+    if not _is_funding_safe_for_short(funding_rate):
+        return signals
 
     vol_sma = last_4h.get('vol_sma_20', 0)
     if vol_sma > 0 and last_4h.get('volume', 0) < (vol_sma * 1.5):

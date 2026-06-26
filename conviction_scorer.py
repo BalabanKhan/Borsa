@@ -1083,7 +1083,7 @@ def calculate_conviction(
     if is_crypto:
         t_strong = max(t_strong, 80.0)  # Strong için eşik yükseltildi
         t_medium = 61.0                 # 61 ve üstü MEDIUM
-        t_watch = 50.0                  # 50 - 60.9 arası WATCH
+        t_watch = 60.0                  # 60 - 60.9 arası WATCH
 
     if total >= t_strong:
         result.grade = CONVICTION_STRONG
@@ -1448,10 +1448,27 @@ def build_short_scores(
     )
 
     long_risk_penalty = 0.0
-    if rsi is not None and rsi < 35:
-        long_risk_penalty -= 10.0
+    
+    # 1. Aşırı satım (RSI çok düşük) -> Short için tehlikeli (yukarı tepki riski)
+    if rsi is not None:
+        if rsi < 30:
+            long_risk_penalty -= 15.0
+        elif rsi < 35:
+            long_risk_penalty -= 10.0
+
+    # 2. SMA 200 Desteği (Fiyat 1D SMA200'e çok yakın ve üstünde ise destek olarak çalışabilir)
     if sma200_1d is not None and price is not None:
-        if abs(price - sma200_1d) / price < 0.02 and price > sma200_1d:
+        dist_to_sma200 = (price - sma200_1d) / sma200_1d
+        if 0 < dist_to_sma200 < 0.03:  # SMA200'ün %3 kadar üstünde
+            long_risk_penalty -= 15.0
+
+    # 3. Rejim Uyarısı (Zaten Boğa Piyasasındayken shortlamak risklidir)
+    if regime == "BULL":
+        long_risk_penalty -= 10.0
+        
+    # 4. Momentum (Eğer ema_fast > ema_mid > ema_slow ise trend güçlü boğadır, short tehlikeli)
+    if ema_fast and ema_mid and ema_slow:
+        if ema_fast > ema_mid > ema_slow:
             long_risk_penalty -= 15.0
 
     return {
