@@ -96,6 +96,9 @@ class ScannerService:
         await self._process_signals(signals)
 
     async def _process_signals(self, signals):
+        signals = sorted(signals, key=lambda x: x.get("conviction_score", 0) if x.get("conviction_score") is not None else 0, reverse=True)
+        main_signal_count = 0
+        
         for decision in signals:
             ticker = decision.get("ticker", "Bilinmiyor")
             strategy = decision.get("strategy", "")
@@ -149,6 +152,12 @@ class ScannerService:
 
             conv_grade = decision.get("conviction_grade", "N/A")
             is_watch = (conv_grade == 'WATCH')
+
+            if not is_watch:
+                if main_signal_count >= 3:
+                    logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Ana bot sinyal limiti (3) aşıldı.")
+                    continue
+                main_signal_count += 1
 
             trade = self.trade_engine.add_trade(
                 ticker=ticker,
@@ -230,6 +239,12 @@ class ScannerService:
                 
                 if was_watch and new_grade in ["MEDIUM", "STRONG"]:
                     t["is_watch"] = False
+                    if "entry_price" in decision:
+                        t["entry_price"] = decision.get("entry_price")
+                    if "sl" in decision:
+                        t["sl"] = decision.get("sl")
+                    if "tp" in decision:
+                        t["tp"] = decision.get("tp")
                     
                 t["conviction_score"] = new_score
                 t["conviction_grade"] = new_grade
