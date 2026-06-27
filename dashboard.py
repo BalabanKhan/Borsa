@@ -85,17 +85,40 @@ def _read_circuit_breaker():
 
 def _read_penalty_box():
     """Penalty box durumunu oku."""
-    path = os.path.join(BASE_DIR, 'penalty_box.json')
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return [{'ticker': k, 'sl_count': v.get('sl_count', 0),
-                     'until': v.get('penalty_until', 'N/A')}
-                    for k, v in data.items() if v.get('sl_count', 0) > 0][:10]
-    except Exception:
-        return []
+    active_path = os.path.join(BASE_DIR, 'penalty_box_state.json')
+    legacy_path = os.path.join(BASE_DIR, 'penalty_box.json')
+    res = []
+    if os.path.exists(active_path):
+        try:
+            with open(active_path, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+                assets = state.get("assets", {})
+                for ticker, val in assets.items():
+                    consec = val.get("consecutive_sl", 0)
+                    cooldown = val.get("cooldown_until", None)
+                    if consec > 0 or cooldown:
+                        res.append({
+                            'ticker': ticker,
+                            'sl_count': consec,
+                            'until': cooldown if cooldown else 'N/A'
+                        })
+        except Exception:
+            pass
+    if not res and os.path.exists(legacy_path):
+        try:
+            with open(legacy_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                for k, v in data.items():
+                    sl_count = v.get('sl_count', 0)
+                    if sl_count > 0:
+                        res.append({
+                            'ticker': k,
+                            'sl_count': sl_count,
+                            'until': v.get('penalty_until', 'N/A')
+                        })
+        except Exception:
+            pass
+    return res[:10]
 
 def _read_scorecard():
     """Strateji scorecard'ını oku."""
@@ -365,6 +388,100 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode('utf-8'))
             return
             
+        if self.path == "/api/reset_penalty":
+            if not self.check_auth():
+                self.send_response(401)
+                self.end_headers()
+                return
+            try:
+                active_path = os.path.join(BASE_DIR, 'penalty_box_state.json')
+                legacy_path = os.path.join(BASE_DIR, 'penalty_box.json')
+                
+                if os.path.exists(active_path):
+                    try:
+                        with open(active_path, 'r', encoding='utf-8') as f:
+                            state = json.load(f)
+                    except Exception:
+                        state = {}
+                else:
+                    state = {}
+                
+                state["assets"] = {}
+                state["daily_trades"] = {"date": datetime.datetime.now().strftime('%Y-%m-%d'), "count": 0, "commission_pct": 0.0}
+                
+                # Atomik yazalım
+                import tempfile
+                tmp_path = None
+                try:
+                    tmp = tempfile.NamedTemporaryFile(mode='w', dir=BASE_DIR, suffix='.tmp', delete=False, encoding='utf-8')
+                    tmp_path = tmp.name
+                    json.dump(state, tmp, indent=2, ensure_ascii=False)
+                    tmp.close()
+                    os.replace(tmp_path, active_path)
+                except Exception:
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+                    with open(active_path, 'w', encoding='utf-8') as f:
+                        json.dump(state, f, indent=2, ensure_ascii=False)
+                
+                # Legacy dosyayı da temizleyelim
+                with open(legacy_path, 'w', encoding='utf-8') as f:
+                    json.dump({}, f)
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode('utf-8'))
+            return
+
+        if self.path == "/api/reset_circuit_breaker":
+            if not self.check_auth():
+                self.send_response(401)
+                self.end_headers()
+                return
+            try:
+                cb_path = os.path.join(BASE_DIR, 'circuit_breaker_state.json')
+                default_cb_state = {
+                    "daily_date": datetime.datetime.now().strftime('%Y-%m-%d'),
+                    "total_daily_sl": 0,
+                    "strategies": {}
+                }
+                
+                # Atomik yazalım
+                import tempfile
+                tmp_path = None
+                try:
+                    tmp = tempfile.NamedTemporaryFile(mode='w', dir=BASE_DIR, suffix='.tmp', delete=False, encoding='utf-8')
+                    tmp_path = tmp.name
+                    json.dump(default_cb_state, tmp, indent=2, ensure_ascii=False)
+                    tmp.close()
+                    os.replace(tmp_path, cb_path)
+                except Exception:
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+                    with open(cb_path, 'w', encoding='utf-8') as f:
+                        json.dump(default_cb_state, f, indent=2, ensure_ascii=False)
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode('utf-8'))
+            return
+            
         self.send_response(404)
         self.end_headers()
 
@@ -466,13 +583,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     <!-- SYSTEM & SCAN -->
     <div class="section fade-in" style="animation-delay: 80ms">
-        <div class="section-hdr"><h3>System Intelligence</h3></div>
+        <div class="section-hdr">
+            <h3>System Intelligence</h3>
+            <div style="display:flex; gap:8px;">
+                <button class="close-btn" onclick="resetPenalty()" style="background:#222; border:1px solid #333; color:#EAEAEA; font-size:10px;">CEZA KUTUSUNU SIFIRLA</button>
+                <button class="close-btn" onclick="resetCircuitBreaker()" style="background:#222; border:1px solid #333; color:#EAEAEA; font-size:10px;">SESSİZ MODLARI SIFIRLA</button>
+            </div>
+        </div>
         <div class="kv">
             <div class="metric-block"><span class="k">Last Scan</span><span class="v" id="s-scan">—</span></div>
             <div class="metric-block"><span class="k">Duration</span><span class="v" id="sc-dur">—</span></div>
             <div class="metric-block"><span class="k">Signals</span><span class="v" id="sc-sig">—</span></div>
             <div class="metric-block"><span class="k">Win Rate</span><span class="v" id="s-winrate">—</span></div>
             <div class="metric-block"><span class="k">Circuit Breaker</span><span class="v" id="s-cb" style="font-family:'Geist Mono',monospace;font-size:12px">—</span></div>
+        </div>
+        <div id="penalty-box-container" style="margin-top:24px; display:none;">
+            <span class="k" style="margin-bottom:8px;">Ceza Kutusundaki Varlıklar</span>
+            <div id="penalty-assets-list" style="font-family:'Geist Mono',monospace; font-size:12px; color:#EAEAEA;"></div>
         </div>
         <div id="conv-dist" style="margin-top:24px;width:300px"></div>
     </div>
@@ -538,6 +665,36 @@ class DashboardHandler(BaseHTTPRequestHandler):
         function closeAllTrades() {
             if(!confirm('TÜM aktif pozisyonları kapatmak istediğinize emin misiniz?')) return;
             fetch('/api/close_all', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            })
+            .then(r=>r.json())
+            .then(d=>{
+                if(d.success) { updateAllData(); }
+                else { alert('Hata: ' + d.message); }
+            })
+            .catch(err=>alert('Bağlantı hatası: '+err));
+        }
+
+        function resetPenalty() {
+            if(!confirm('Ceza kutusundaki tüm varlıkları sıfırlamak istediğinize emin misiniz?')) return;
+            fetch('/api/reset_penalty', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            })
+            .then(r=>r.json())
+            .then(d=>{
+                if(d.success) { updateAllData(); }
+                else { alert('Hata: ' + d.message); }
+            })
+            .catch(err=>alert('Bağlantı hatası: '+err));
+        }
+
+        function resetCircuitBreaker() {
+            if(!confirm('Tüm sessiz modları sıfırlamak istediğinize emin misiniz?')) return;
+            fetch('/api/reset_circuit_breaker', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({})
@@ -655,6 +812,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 // AKTİF İŞLEMLER
                 currentTrades = (d.trades || []).filter(t => t.conviction_grade !== 'WATCH');
                 renderTrades();
+
+                // CEZA KUTUSU GÜNCELLEME
+                const pb = d.penalty_box || [];
+                const pbContainer = document.getElementById('penalty-box-container');
+                if (pb.length > 0) {
+                    pbContainer.style.display = 'block';
+                    document.getElementById('penalty-assets-list').innerHTML = pb.map(x => {
+                        const dateStr = x.until && x.until !== 'N/A' ? new Date(x.until).toLocaleString('tr-TR') : 'N/A';
+                        return `<div style="margin-bottom: 4px;">🎯 <span style="color:#9F2F2D; font-weight: 500;">${esc(x.ticker)}</span> — Ardışık SL: <b>${x.sl_count}</b> · Cooldown Bitiş: <b>${dateStr}</b></div>`;
+                    }).join('');
+                } else {
+                    pbContainer.style.display = 'none';
+                }
 
                 // STRATEGY ANALYTICS
                 let analyticsHtml = '<div style="display:flex; gap:48px; flex-wrap:wrap;">';
