@@ -1,9 +1,11 @@
+import yf_cache
 """
 data_sources.py — Veri Katmanı
 Tüm API bağlantıları, veri çekme fonksiyonları ve cache yönetimi.
 """
 import ccxt
 import pandas as pd
+import pandas_ta as ta
 import yfinance as yf
 import time as _time
 import logging
@@ -22,6 +24,16 @@ from config import IS_USA_SERVER, CACHE_TTL_SECONDS, OHLCV_LIMIT, OI_CRASH_PCT, 
 from data_guard import guard_dataframe
 
 warnings.filterwarnings('ignore')
+
+YF_CRYPTO_TICKER_MAP = {
+    "SUI/USDT": "SUI20947-USD",
+    "APT/USDT": "APT21794-USD"
+}
+
+def get_yf_crypto_ticker(symbol: str) -> str:
+    if symbol in YF_CRYPTO_TICKER_MAP:
+        return YF_CRYPTO_TICKER_MAP[symbol]
+    return symbol.replace("/USDT", "-USD")
 
 # ════════════════════════════════════════
 # Exchange Instances
@@ -490,7 +502,7 @@ async def async_get_crypto_data(symbol):
     except Exception as ekr:
         # Fallback to synchronous yfinance via thread
         try:
-            yf_ticker = symbol.replace("/USDT", "-USD")
+            yf_ticker = get_yf_crypto_ticker(symbol)
             
             def fetch_yf():
                 df1 = yf.download(yf_ticker, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
@@ -566,7 +578,7 @@ def get_crypto_data(symbol):
             return df_1d, df_4h
     except Exception as ekr:
         try:
-            yf_ticker = symbol.replace("/USDT", "-USD")
+            yf_ticker = get_yf_crypto_ticker(symbol)
             # 99 yapılmıştır
             # Kripto yfinance yedek veri çekiminde periyotlar config.DATA_PERIOD_1D ve DATA_PERIOD_1H'a bağlanmıştır.
             df_1d = yf.download(yf_ticker, period=config.DATA_PERIOD_1D, interval="1d", progress=False)
@@ -949,7 +961,7 @@ def _fetch_crypto_prices(tickers: list[str], prices: dict[str, float]) -> None:
     still_missing = [t for t in missing_crypto if t not in prices]
     for t in still_missing:
         try:
-            yf_ticker = t.replace("/USDT", "-USD")
+            yf_ticker = get_yf_crypto_ticker(t)
             t_obj = yf.Ticker(yf_ticker)
             try:
                 last_price = t_obj.fast_info.last_price
@@ -1016,7 +1028,7 @@ def get_crypto_1h_data(symbol):
         return df_1h
     except Exception as ekr:
         try:
-            yf_ticker = symbol.replace("/USDT", "-USD")
+            yf_ticker = get_yf_crypto_ticker(symbol)
             # 99 yapılmıştır
             # Kripto 1H yedek veri çekim periyodu config.DATA_PERIOD_1H ile dinamik hale getirilmiştir.
             df_1h = yf.download(yf_ticker, period=config.DATA_PERIOD_1H, interval="1h", progress=False)

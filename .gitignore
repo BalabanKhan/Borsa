@@ -8,3 +8,7 @@ sim_results.csv
 simulation_results.csv
 sim_results_log.txt
 scratch/
+*.csv
+yfinance_cache/
+assets.json.bak
+bot_log_tail.txt

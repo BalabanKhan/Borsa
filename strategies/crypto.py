@@ -6,6 +6,7 @@ import math
 import pandas as pd
 import pandas_ta as ta
 import config
+from indicators.smc import detect_supply_zones, is_price_in_supply_zone
 
 from config import (
     ATR_MULTIPLIER_CRYPTO, ATR_CAP_CRYPTO,
@@ -45,11 +46,8 @@ def apply_5x_sl_cap(sl: float, current_price: float, ctx: dict = None) -> float:
     
     if original_dist_pct > 0.02:
         if ctx is not None:
-            # Dinamik Ceza: Her %1 (0.01) aşım için 25 puan ceza
-            excess_pct = (original_dist_pct - 0.02) * 100
-            # Maksimum 60 puan ceza
-            penalty = min(60.0, excess_pct * 25.0)
-            ctx["sl_distance_penalty"] = -round(penalty, 1)
+            # Kripto oynaklığı yüksek olduğu için mesafe sınırı cezalandırılmaz, sadece SL cap'lenir.
+            ctx["sl_distance_penalty"] = 0.0
             
         max_dist = current_price * 0.02
         if sl < current_price:
@@ -113,8 +111,7 @@ def _check_crypto_1_liquidation(ctx):
         raw_atr_sl = dynamic_mult * atr_val
         
         sl = lowest_wick - raw_atr_sl
-        sl = apply_5x_sl_cap(sl, current_price)
-        sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+        sl = apply_5x_sl_cap(sl, current_price, ctx)
         sl_dist = abs(current_price - sl)
         tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
         _rr_c1 = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -240,8 +237,7 @@ def _check_crypto_2_mega_trend(ctx):
     sl_atr = current_price - capped_sl_dist
     sl_ema = last_4h.get('EMA_50', current_price) * config.CRYPTO_TREND_SL_EMA_MULT
     sl = max(sl_atr, sl_ema)
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = abs(current_price - sl)
     _tp_c2 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c2 = abs(_tp_c2 - current_price) / max(abs(current_price - sl), 1e-8)
@@ -369,8 +365,7 @@ def _check_crypto_3_breakout(ctx):
     raw_atr_sl = dynamic_mult * atr_val
     sl_dist = min(max(raw_atr_sl, current_price * config.CRYPTO_BREAKOUT_MIN_SL), current_price * config.CRYPTO_BREAKOUT_MAX_SL)
     sl = current_price - sl_dist
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     _tp_c3 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr_c3 = abs(_tp_c3 - current_price) / max(abs(current_price - sl), 1e-8)
     dm_ratio = _get_darth_maul_ratio(last_4h)
@@ -421,6 +416,9 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
     current_price = ctx['current_price']
     df_4h = ctx['df_4h']
     
+    supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
+    if not is_price_in_supply_zone(current_price, supply_zones):
+        return signals
     swing_highs = sniper_find_swing_points(df_4h, point_type='high')
     sweep_ok, sweep_high = sniper_detect_sweep(df_4h, swing_highs, point_type='high')
     if not sweep_ok:
@@ -448,8 +446,7 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = sweep_high + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -487,6 +484,9 @@ def _check_crypto_short_2_oi_trap(ctx):
     current_price = ctx['current_price']
     df_4h = ctx['df_4h']
 
+    supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
+    if not is_price_in_supply_zone(current_price, supply_zones):
+        return signals
     funding_rate = get_funding_rate(symbol)
     if funding_rate is None or funding_rate < config.CRYPTO_SHORT2_FUNDING_MIN:
         return signals
@@ -508,8 +508,7 @@ def _check_crypto_short_2_oi_trap(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -545,6 +544,9 @@ def _check_crypto_short_3_divergence(ctx):
     current_price = ctx['current_price']
     df_4h = ctx['df_4h']
 
+    supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
+    if not is_price_in_supply_zone(current_price, supply_zones):
+        return signals
     div_found, _, _, _, _ = detect_bearish_divergence(df_4h)
     if not div_found:
         return signals
@@ -570,8 +572,7 @@ def _check_crypto_short_3_divergence(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = last_4h['high'] + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -607,6 +608,9 @@ def _check_crypto_short_4_sr_flip(ctx):
     current_price = ctx['current_price']
     df_4h = ctx['df_4h']
 
+    supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
+    if not is_price_in_supply_zone(current_price, supply_zones):
+        return signals
     if len(df_4h) < 30: return signals
 
     recent_lows = df_4h['low'].rolling(window=20).min().shift(5)
@@ -631,8 +635,7 @@ def _check_crypto_short_4_sr_flip(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = support_level + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -679,6 +682,9 @@ def _check_crypto_short_5_bear_flag(ctx):
     current_price = ctx['current_price']
     df_4h = ctx['df_4h']
 
+    supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
+    if not is_price_in_supply_zone(current_price, supply_zones):
+        return signals
     ema_20 = last_4h.get('EMA_20')
     ema_50 = last_4h.get('EMA_50')
     ema_200 = last_4h.get('EMA_200') or last_4h.get('SMA_200')
@@ -697,8 +703,7 @@ def _check_crypto_short_5_bear_flag(ctx):
     if pd.isna(atr_val): atr_val = current_price * 0.02
 
     sl = ema_50 + (atr_val * config.ATR_MULTIPLIER_CRYPTO)
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     _rr = abs(current_price - tp) / sl_dist
@@ -795,8 +800,7 @@ def _check_crypto_4_sniper_ote_long(ctx):
     df_1h_crypto = None
 
     sl = sweep_low * config.CRYPTO_LONG4_SL_MULT
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = max(current_price - sl, 1e-8)
     tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
@@ -856,6 +860,9 @@ def _check_crypto_4_sniper_ote_short(ctx):
     last_4h = ctx["last_4h"]
     current_price = ctx["current_price"]
     df_4h = ctx["df_4h"]
+    supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
+    if not is_price_in_supply_zone(current_price, supply_zones):
+        return signals
     btc_sniper_bias = ctx["btc_sniper_bias"]
 
     if btc_sniper_bias not in (-1, 0):
@@ -899,8 +906,7 @@ def _check_crypto_4_sniper_ote_short(ctx):
     df_1h_crypto = None
 
     sl = sweep_high * config.CRYPTO_SHORT4_SL_MULT
-    sl = apply_5x_sl_cap(sl, current_price)
-    sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+    sl = apply_5x_sl_cap(sl, current_price, ctx)
     sl_dist = max(sl - current_price, 1e-8)
     tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
     fvg_label = " + FVG Onaylı ✅" if has_fvg else ""
@@ -974,7 +980,7 @@ def _check_crypto_5_vol_squeeze(ctx):
         # HARD FILTER REMOVED: ADX constraint delegated to conviction_scorer
         # if pd.isna(last_4h.get('ADX_14')) or last_4h['ADX_14'] < config.CRYPTO_SQUEEZE_ADX_MIN:
         #     return signals
-        trend_up = (not pd.isna(last_1d.get('EMA_20')) and not pd.isna(last_1d.get('EMA_50')) and
+        trend_up = (not pd.isna(last_1d.get(f'EMA_{config.IND_EMA_MID}')) and not pd.isna(last_1d.get(f'EMA_{config.IND_EMA_SLOW}')) and
                     last_1d[f'EMA_{config.IND_EMA_MID}'] > last_1d[f'EMA_{config.IND_EMA_SLOW}'])
         valid_breakout = (sq_dir == "up" and trend_up) or (sq_dir == "down" and not trend_up)
         if valid_breakout:
@@ -982,15 +988,13 @@ def _check_crypto_5_vol_squeeze(ctx):
             ema20_4h = last_4h.get('EMA_20', current_price)
             if sq_dir == "up":
                 sl = min(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
-                sl = apply_5x_sl_cap(sl, current_price)
-                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price, ctx)
                 sl_dist = abs(current_price - sl)
                 tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "AL"
             else:
                 sl = max(sq_mid, ema20_4h) if not pd.isna(ema20_4h) else sq_mid
-                sl = apply_5x_sl_cap(sl, current_price)
-                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price, ctx)
                 sl_dist = abs(sl - current_price)
                 tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
                 sig_type = "SAT"
@@ -1054,10 +1058,12 @@ def _check_crypto_6_vwap(ctx):
     # if not pd.isna(last_4h.get('RSI_14')) and last_4h['RSI_14'] >= getattr(config, 'VWAP_LONG_MAX_RSI', 60.0):
     #     return signals
         
-    if f'ATRr_14' not in df_4h.columns:
+    atr_col = 'ATRr_14' if 'ATRr_14' in df_4h.columns else 'ATR_14'
+    if atr_col not in df_4h.columns:
         df_4h.ta.atr(length=14, append=True)
-    if 'ATR_SMA_14' not in df_4h.columns:
-        df_4h['ATR_SMA_14'] = df_4h['ATRr_14'].rolling(window=14).mean()
+        atr_col = 'ATRr_14' if 'ATRr_14' in df_4h.columns else 'ATR_14'
+    if 'ATR_SMA_14' not in df_4h.columns and atr_col in df_4h.columns:
+        df_4h['ATR_SMA_14'] = df_4h[atr_col].rolling(window=14).mean()
 
     current_atr = df_4h['ATRr_14'].iloc[-1]
     atr_sma = df_4h['ATR_SMA_14'].iloc[-1]
@@ -1071,8 +1077,7 @@ def _check_crypto_6_vwap(ctx):
         bounce_ok, wick_low = detect_vwap_bounce(df_4h, vwap_val)
         if bounce_ok and wick_low is not None:
             sl = wick_low * config.CRYPTO_VWAP_SL_MULT
-            sl = apply_5x_sl_cap(sl, current_price)
-            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price, ctx)
             sl_dist = abs(current_price - sl)
             _tp_c6 = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
             _rr_c6 = abs(_tp_c6 - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1118,8 +1123,7 @@ def _check_crypto_7_obv(ctx):
         btcdom_trend = get_btc_dominance_trend()
         if btcdom_trend != "UP":
             sl = (obv_box_high + obv_box_low) / 2
-            sl = apply_5x_sl_cap(sl, current_price)
-            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price, ctx)
             cmf_val = calculate_cmf(df_1d)
             cmf_label = f"CMF: {cmf_val:.3f} ✅" if cmf_val is not None else "CMF: N/A"
             sl_dist = abs(current_price - sl)
@@ -1136,7 +1140,7 @@ def _check_crypto_7_obv(ctx):
 
             _scores_c7 = build_breakout_scores(
                 bb_width=None, price=current_price,
-                ema_fast=last_1d.get('EMA_8'), ema_mid=last_1d.get('EMA_21'), ema_slow=None,
+                ema_fast=last_1d.get(f'EMA_{config.IND_EMA_MID}'), ema_mid=last_1d.get(f'EMA_{config.IND_EMA_SLOW}'), ema_slow=None,
                 volume=last_1d.get('volume', 0), vol_sma=daily_vol_sma, dollar_vol=last_1d.get('volume', 0) * current_price,
                 rr=_rr_c7, regime="BULL",
                 macro_aligned=(btcdom_trend != 'UP'), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO",
@@ -1189,12 +1193,17 @@ def _check_crypto_sniper_1h_long(ctx_1h):
     has_sfp_long = sweep_ok_long
     
     sl_long = max(bbl * config.CRYPTO_SQUEEZE_SL_BBL_MULT, current_price * config.CRYPTO_SQUEEZE_SL_MIN_MULT)
+    sl_long = apply_5x_sl_cap(sl_long, current_price, ctx_1h)
     _tp_sn_long = current_price + config.BEAR_HUNTER_TP_RR * (current_price - sl_long)
     _rr_sn_long = abs(_tp_sn_long - current_price) / max(abs(current_price - sl_long), 1e-8)
     
     is_nan_ind = (pd.isna(last_1h_s.get('volume', float('nan'))) or pd.isna(current_price))
+    
+    supply_zones = detect_supply_zones(ctx_1h.get("df_4h"))
+    in_supply_zone = is_price_in_supply_zone(current_price, supply_zones)
     blocked, block_reason = check_hard_blocks(
         volume=last_1h_s.get('volume', 0),
+        in_supply_zone=in_supply_zone,
         price=current_price,
         vol_sma=guarded_vol_sma,
         is_quarantined=False,
@@ -1204,7 +1213,9 @@ def _check_crypto_sniper_1h_long(ctx_1h):
         rr_ratio=_rr_sn_long,
         consecutive_sl=_get_consecutive_sl(symbol),
         is_core_indicators_nan=is_nan_ind,
-        min_volume_usd=50_000
+        min_volume_usd=50_000,
+        willy_ema=last_1h_s.get('WILLR_21_EMA_13'),
+        is_long=True
     )
     if blocked:
         return signals
@@ -1271,13 +1282,18 @@ def _check_crypto_sniper_1h_short(ctx_1h):
     sweep_ok_short, _ = sniper_detect_sweep(df_1h_sniper, swing_highs_s, point_type="high")
     has_sfp_short = sweep_ok_short
     
-    sl_short = max(bbu * config.CRYPTO_SQUEEZE_SHORT_SL_BBU_MULT, current_price * config.CRYPTO_SQUEEZE_SHORT_SL_MAX_MULT)
+    sl_short = min(bbu * config.CRYPTO_SQUEEZE_SHORT_SL_BBU_MULT, current_price * config.CRYPTO_SQUEEZE_SHORT_SL_MAX_MULT)
+    sl_short = apply_5x_sl_cap(sl_short, current_price, ctx_1h)
     _tp_sn_short = current_price - config.BEAR_HUNTER_TP_RR * (sl_short - current_price)
     _rr_sn_short = abs(_tp_sn_short - current_price) / max(abs(sl_short - current_price), 1e-8)
     
     is_nan_ind = (pd.isna(last_1h_s.get('volume', float('nan'))) or pd.isna(current_price))
+    
+    supply_zones = detect_supply_zones(ctx_1h.get("df_4h"))
+    in_supply_zone = is_price_in_supply_zone(current_price, supply_zones)
     blocked, block_reason = check_hard_blocks(
         volume=last_1h_s.get('volume', 0),
+        in_supply_zone=in_supply_zone,
         price=current_price,
         vol_sma=guarded_vol_sma,
         is_quarantined=False,
@@ -1287,7 +1303,9 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         rr_ratio=_rr_sn_short,
         consecutive_sl=_get_consecutive_sl(symbol),
         is_core_indicators_nan=is_nan_ind,
-        min_volume_usd=50_000
+        min_volume_usd=50_000,
+        willy_ema=last_1h_s.get('WILLR_21_EMA_13'),
+        is_long=False
     )
     if blocked:
         return signals
@@ -1379,6 +1397,7 @@ def _check_crypto_sniper_1h(ctx):
     guarded_vol_sma = _apply_volume_sma_guard(df_1h_sniper, last_1h_s.get('vol_sma_20', 0))
 
     ctx_1h = {
+        "df_4h": ctx.get("df_4h"),
         "symbol": symbol,
         "current_price": current_price,
         "btc_ok": btc_ok,
@@ -1423,8 +1442,7 @@ def _check_crypto_long_sfp_choch(ctx):
             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
             if pd.isna(atr_val): atr_val = current_price * 0.02
             sl = sweep_low - (atr_val * 0.5)
-            sl = apply_5x_sl_cap(sl, current_price)
-            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price, ctx)
             
             _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
             _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1467,8 +1485,7 @@ def _check_crypto_long_short_squeeze(ctx):
         atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
         if pd.isna(atr_val): atr_val = current_price * 0.02
         sl = last_4h['low'] - (atr_val * 1.0)
-        sl = apply_5x_sl_cap(sl, current_price)
-        sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+        sl = apply_5x_sl_cap(sl, current_price, ctx)
         
         _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
         _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1513,8 +1530,7 @@ def _check_crypto_long_major_divergence(ctx):
             atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
             if pd.isna(atr_val): atr_val = current_price * 0.02
             sl = last_4h['low'] - (atr_val * 1.0)
-            sl = apply_5x_sl_cap(sl, current_price)
-            sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+            sl = apply_5x_sl_cap(sl, current_price, ctx)
             
             _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
             _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1561,8 +1577,7 @@ def _check_crypto_long_sr_flip_fvg(ctx):
             
             if ema21 > 0 and abs(current_price - ema21) < (atr_val * 1.5):
                 sl = current_price - (atr_val * 2.0)
-                sl = apply_5x_sl_cap(sl, current_price)
-                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price, ctx)
                 _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
                 _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
                 
@@ -1610,8 +1625,7 @@ def _check_crypto_long_bull_flag_ote(ctx):
                 atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
                 if pd.isna(atr_val): atr_val = current_price * 0.02
                 sl = ote_bot - (atr_val * 1.0)
-                sl = apply_5x_sl_cap(sl, current_price)
-                sl = apply_5x_sl_cap(sl, current_price, locals().get("ctx", locals().get("ctx_1h")))
+                sl = apply_5x_sl_cap(sl, current_price, ctx)
                 
                 _tp = current_price + (current_price - sl) * config.BEAR_HUNTER_TP_RR
                 _rr = abs(_tp - current_price) / max(abs(current_price - sl), 1e-8)
@@ -1758,40 +1772,82 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     # Yeni eklenen 5'li SMC Long Strateji Paketi
     signals.extend(_check_crypto_long_smc(ctx))
 
-    # Süper Sinyal (Confluence) Modülü
-    al_signals = [s for s in signals if s.get("signal") == "AL"]
-    sat_signals = [s for s in signals if s.get("signal") == "SAT"]
+    # Süper Sinyal (Confluence) Modülü ve Matematiksel Filtreler (Getiri ve Verimlilik Modeli)
+    # 1. Göreceli Hacim (Relative Volume) Hesaplama
+    vol_sma = last_4h.get('vol_sma_20', 0)
+    vol = last_4h.get('volume', 0)
+    rel_vol_4h = vol / vol_sma if (pd.notna(vol_sma) and vol_sma > 0) else 1.0
+    
+    # 2. EMA Farkı % (EMA Extension) Hesaplama
+    ema_20_val = last_4h.get('EMA_20', 0)
+    ema_50_val = last_4h.get('EMA_50', 0)
+    ema_diff_pct = 0.0
+    if pd.notna(ema_20_val) and pd.notna(ema_50_val) and pd.notna(current_price) and current_price > 0:
+        ema_diff_pct = (abs(ema_20_val - ema_50_val) / current_price) * 100
+        
+    # 3. CMF Değeri
+    cmf_4h = last_4h.get('CMF_20', 0)
+    if pd.isna(cmf_4h):
+        cmf_4h = 0.0
+
+    filtered_signals = []
+    for sig in signals:
+        score = sig.get('conviction_score', 0)
+        direction = "LONG" if sig.get('signal') == "AL" else "SHORT"
+        
+        # Filtre 1: Score >= 72
+        if score < 72:
+            continue
+            
+        # Filtre 2: Rel_Vol >= 0.8
+        if rel_vol_4h < 0.8:
+            continue
+            
+        # Filtre 3: EMA_Diff <= 2.5%
+        if ema_diff_pct > 2.5:
+            continue
+            
+        # Filtre 4: CMF Yön Uyumlaması
+        if direction == 'LONG' and cmf_4h < 0.0:
+            continue
+        if direction == 'SHORT' and cmf_4h > 0.05:
+            continue
+            
+        filtered_signals.append(sig)
+
+    al_signals = [s for s in filtered_signals if s.get("signal") == "AL"]
+    sat_signals = [s for s in filtered_signals if s.get("signal") == "SAT"]
 
     if len(al_signals) >= 3:
         confluence_details = {f"Signal_{i+1}": s["strategy"] for i, s in enumerate(al_signals)}
-        signals.append({
+        filtered_signals.append({
             "raw_indicators": al_signals[0].get("raw_indicators", {}),
             "ticker": symbol, "market": "KRIPTO",
-        "last_1d": ctx.get("last_1d"),
+            "last_1d": ctx.get("last_1d"),
             "strategy": "SÜPER SİNYAL: CONFLUENCE (LONG)", "signal": "AL",
             "entry_price": current_price, 
             "sl": al_signals[0].get("sl", current_price * 0.95), 
             "tp": al_signals[0].get("tp", current_price * 1.05),
             "conviction_score": 95, "conviction_grade": CONVICTION_STRONG,
             "conviction_details": {"Confluence_Count": len(al_signals), **confluence_details}, 
-            "position_size_pct": 5.0, # Yüksek güven
+            "position_size_pct": 5.0,
             "reason": f"Süper Sinyal: Aynı anda {len(al_signals)} farklı strateji AL verdi!"
         })
 
     if len(sat_signals) >= 3:
         confluence_details = {f"Signal_{i+1}": s["strategy"] for i, s in enumerate(sat_signals)}
-        signals.append({
+        filtered_signals.append({
             "raw_indicators": sat_signals[0].get("raw_indicators", {}),
             "ticker": symbol, "market": "KRIPTO",
-        "last_1d": ctx.get("last_1d"),
+            "last_1d": ctx.get("last_1d"),
             "strategy": "SÜPER SİNYAL: CONFLUENCE (SHORT)", "signal": "SAT",
             "entry_price": current_price, 
             "sl": sat_signals[0].get("sl", current_price * 1.05), 
             "tp": sat_signals[0].get("tp", current_price * 0.95),
             "conviction_score": 95, "conviction_grade": CONVICTION_STRONG,
             "conviction_details": {"Confluence_Count": len(sat_signals), **confluence_details}, 
-            "position_size_pct": 5.0, # Yüksek güven
+            "position_size_pct": 5.0,
             "reason": f"Süper Sinyal: Aynı anda {len(sat_signals)} farklı strateji SAT verdi!"
         })
 
-    return signals
+    return filtered_signals

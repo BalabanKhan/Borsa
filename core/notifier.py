@@ -195,21 +195,42 @@ class NotificationService:
             json.dump(remaining, f, indent=2, ensure_ascii=False)
 
     @staticmethod
-    def format_signal_message(trade_data):
+    def format_price(price: float) -> str:
+        if price is None:
+            return "0"
+        try:
+            price_val = float(price)
+        except (ValueError, TypeError):
+            return str(price)
+        if price_val == 0:
+            return "0"
+        abs_price = abs(price_val)
+        if abs_price >= 100:
+            return f"{price_val:.2f}"
+        elif abs_price >= 1:
+            return f"{price_val:.4f}"
+        elif abs_price >= 0.0001:
+            return f"{price_val:.6f}"
+        else:
+            return f"{price_val:.8f}"
+
+    @classmethod
+    def format_signal_message(cls, trade_data):
         market = trade_data.get("market", "KRİPTO")
         strategy = trade_data.get("strategy", "BİLİNMİYOR")
+        signal_dir = trade_data.get('signal', 'AL')
+        dir_text = "LONG" if signal_dir == "AL" else "SHORT"
         
         headers = {
-            "BIST": "📈 [BIST 100 SİNYALİ]",
-            "EMTİA": "⛏️ [EMTİA SİNYALİ]",
+            "BIST": f"📈 [BIST 100 {dir_text} SİNYALİ]",
+            "EMTİA": f"⛏️ [EMTİA {dir_text} SİNYALİ]",
             "AYI_AVCISI": "🐻 [AYI AVCISI SHORT]"
         }
-        header = headers.get(market, "🚀 [KRİPTO SİNYALİ]")
+        header = headers.get(market, f"🚀 [KRİPTO {dir_text} SİNYALİ]")
         
         entry_price = trade_data.get('entry_price', 0)
         sl_price = trade_data.get('sl', 0)
         tp_price = trade_data.get('tp', 0)
-        signal_dir = trade_data.get('signal', 'AL')
 
         rr_ratio = trade_data.get('rr_ratio')
         rr_line = f"<b>R:R Oranı:</b> <code>{rr_ratio:.1f}:1</code>\n" if rr_ratio else ""
@@ -237,23 +258,26 @@ class NotificationService:
             ttl_ceiling = entry_price * (1 + ttl_pct)
             ttl_floor = entry_price * (1 - ttl_pct)
             ttl_line = (f"\n⏰ <b>SİNYAL ÖMRÜ (TTL):</b>\n"
-                       f"❗ Fiyat <code>{ttl_ceiling:.4f}</code> üstüne çıkmışsa → SİNYAL ÖLDÜ, İŞLEME GİRME!\n"
-                       f"❗ Fiyat <code>{ttl_floor:.4f}</code> altına düşmüşse → SL YAKINLAŞMIŞ, DİKKATLİ OL!")
+                       f"❗ Fiyat <code>{cls.format_price(ttl_ceiling)}</code> üstüne çıkmışsa → SİNYAL ÖLDÜ, İŞLEME GİRME!\n"
+                       f"❗ Fiyat <code>{cls.format_price(ttl_floor)}</code> altına düşmüşse → SL YAKINLAŞMIŞ, DİKKATLİ OL!")
         else:
             ttl_floor = entry_price * (1 - ttl_pct)
             ttl_ceiling = entry_price * (1 + ttl_pct)
             ttl_line = (f"\n⏰ <b>SİNYAL ÖMRÜ (TTL):</b>\n"
-                       f"❗ Fiyat <code>{ttl_floor:.4f}</code> altına düşmüşse → SİNYAL ÖLDÜ, İŞLEME GİRME!\n"
-                       f"❗ Fiyat <code>{ttl_ceiling:.4f}</code> üstüne çıkmışsa → SL YAKINLAŞMIŞ, DİKKATLİ OL!")
+                       f"❗ Fiyat <code>{cls.format_price(ttl_floor)}</code> altına düşmüşse → SİNYAL ÖLDÜ, İŞLEME GİRME!\n"
+                       f"❗ Fiyat <code>{cls.format_price(ttl_ceiling)}</code> üstüne çıkmışsa → SL YAKINLAŞMIŞ, DİKKATLİ OL!")
+
+        signal_emoji = "🟢 AL (LONG)" if signal_dir == "AL" else "🔴 SAT (SHORT)"
 
         return (
             f"<b>{header}</b>\n"
             f"<b>{strategy}</b>\n"
             f"-------------------------------------\n"
             f"<b>Varlık:</b> <code>{trade_data.get('ticker', 'Bilinmiyor')}</code>\n"
-            f"<b>Giriş Fiyatı:</b> <code>{entry_price:.4f}</code>\n"
-            f"<b>Zarar Kes (SL):</b> <code>{sl_price:.4f}</code>\n"
-            f"<b>Kar Al (TP):</b> <code>Dinamik Takip (Teorik: {tp_price:.4f})</code>\n"
+            f"<b>İşlem Yönü:</b> <code>{signal_emoji}</code>\n"
+            f"<b>Giriş Fiyatı:</b> <code>{cls.format_price(entry_price)}</code>\n"
+            f"<b>Zarar Kes (SL):</b> <code>{cls.format_price(sl_price)}</code>\n"
+            f"<b>Kar Al (TP):</b> <code>Dinamik Takip (Teorik: {cls.format_price(tp_price)})</code>\n"
             f"{rr_line}{conv_line}{details_str}"
             f"-------------------------------------\n"
             f"<b>Sistem Gerekçesi:</b>\n<i>{trade_data.get('reason', 'Sebep belirtilmemiş.')}</i>\n{ttl_line}"

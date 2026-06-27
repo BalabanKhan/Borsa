@@ -261,7 +261,7 @@ class ScannerService:
             tp_val = float(updated_trade.get("tp", 0.0))
             msg = (
                 f"🔄 <b>SKOR GÜNCELLEMESİ — {updated_trade.get('ticker')}</b>\n"
-                f"<b>Yön:</b> {'🟢 LONG' if updated_trade.get('direction') == 'LONG' else '🔴 SHORT'}\n"
+                f"<b>Yön:</b> {'🟢 LONG' if updated_trade.get('signal') == 'AL' else '🔴 SHORT'}\n"
                 f"<b>Strateji:</b> {updated_trade.get('strategy')}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"<b>Yeni Skor:</b> <code>{new_score:.0f}/100 ({updated_trade.get('conviction_grade')})</code>\n"

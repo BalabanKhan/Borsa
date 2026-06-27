@@ -11,6 +11,25 @@ from .calculations import _get_last_completed_candle_close
 import config
 from core.defensive_engine import DefensiveExceptionManager
 
+def format_price(price: float) -> str:
+    if price is None:
+        return "0"
+    try:
+        price_val = float(price)
+    except (ValueError, TypeError):
+        return str(price)
+    if price_val == 0:
+        return "0"
+    abs_price = abs(price_val)
+    if abs_price >= 100:
+        return f"{price_val:.2f}"
+    elif abs_price >= 1:
+        return f"{price_val:.4f}"
+    elif abs_price >= 0.0001:
+        return f"{price_val:.6f}"
+    else:
+        return f"{price_val:.8f}"
+
 class TradeEngine:
     def __init__(self, data_guard=None, cb_observer=None, penalty_box=None, strategy_scorecard=None, postmortem=None, repository=None, rules: Optional[List[TradeRule]] = None):
         self.data_guard = data_guard
@@ -127,9 +146,9 @@ class TradeEngine:
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"Strateji: <i>{strategy_name}</i>\n"
                 f"Varlık: <code>{ticker}</code>\n"
-                f"Giriş: ${entry_price:.4f}\n"
-                f"Anlık Fiyat: ${current_price:.4f}\n"
-                f"Stop Seviyesi: ${float(t['sl']):.4f}\n"
+                f"Giriş: ${format_price(entry_price)}\n"
+                f"Anlık Fiyat: ${format_price(current_price)}\n"
+                f"Stop Seviyesi: ${format_price(float(t['sl']))}\n"
                 f"⚠️ Stop'un <b>%{gap_pct:.1f}</b> ÖTESİNDE!\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"📋 <b>ACİL AKSİYON:</b>\n"
@@ -143,8 +162,8 @@ class TradeEngine:
             f"{icon} <b>{title}{short_tag}</b>\n"
             f"Strateji: <i>{strategy_name}</i>\n"
             f"Varlık: <code>{ticker}</code>\n"
-            f"Giriş: ${entry_price:.4f}\n"
-            f"Çıkış: ${current_price:.4f}\n"
+            f"Giriş: ${format_price(entry_price)}\n"
+            f"Çıkış: ${format_price(current_price)}\n"
             f"Net Kâr: %{profit_pct:.2f}\n"
             f"Maks. Kâr: %{max_profit_pct:.2f}\n"
             f"Süre: {duration_str}\n"

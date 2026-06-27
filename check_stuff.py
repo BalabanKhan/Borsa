@@ -1,3 +1,4 @@
+import yf_cache
 import yfinance as yf
 import json
 import os

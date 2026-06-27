@@ -59,7 +59,7 @@ class TestChaosDynamicFilters(unittest.TestCase):
         data = {
             'open':  [100.0] * 30,
             'high':  [105.0] * 30,
-            'low':   [97.0] * 30,
+            'low':   [99.5] * 30,
             'close': [104.0] * 30,
             'volume': [0] * 30 # Hacim 0
         }

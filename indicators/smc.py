@@ -419,3 +419,204 @@ def detect_bullish_divergence(df_4h, neighbors=3):
                 return True, price_1, price_2, rsi_1, rsi_2
 
     return False, None, None, None, None
+
+
+def detect_bos_choch_zones(df, pivot_lookbacks=[1, 2, 3, 5, 11, 15, 20], max_boxes=50, require_inducement=False):
+    """
+    SMC tabanlı Supply (Arz) ve Demand (Talep) bölgelerini tespit eder.
+    Pine Script (BOS/CHOCH Demand & Supply) eşdeğeri.
+    """
+    if len(df) < max(pivot_lookbacks) * 2 + 1:
+        return [], []
+        
+    highs = df['high'].values
+    lows = df['low'].values
+    opens = df['open'].values
+    closes = df['close'].values
+    n = len(df)
+    
+    num_lookbacks = len(pivot_lookbacks)
+    
+    lastHighs = [None] * num_lookbacks
+    prevHighs = [None] * num_lookbacks
+    lastHigh_highs = [None] * num_lookbacks
+    lastHigh_opens = [None] * num_lookbacks
+    lastHigh_closes = [None] * num_lookbacks
+    lastHighBars = [None] * num_lookbacks
+    
+    lastLows = [None] * num_lookbacks
+    prevLows = [None] * num_lookbacks
+    lastLows_low = [None] * num_lookbacks
+    lastLows_opens = [None] * num_lookbacks
+    lastLows_closes = [None] * num_lookbacks
+    lastLowBars = [None] * num_lookbacks
+    
+    bullBoxes = []
+    bearBoxes = []
+    
+    for i in range(n):
+        for li, lookback in enumerate(pivot_lookbacks):
+            if i < 2 * lookback:
+                continue
+                
+            pivot_idx = i - lookback
+            
+            # Check if pivot_idx is a pivot high
+            is_pivot_high = True
+            for k in range(1, lookback + 1):
+                if highs[pivot_idx] <= highs[pivot_idx - k] or highs[pivot_idx] <= highs[pivot_idx + k]:
+                    is_pivot_high = False
+                    break
+            
+            if is_pivot_high:
+                prevHighs[li] = lastHighs[li]
+                lastHighs[li] = highs[pivot_idx]
+                lastHighBars[li] = pivot_idx
+                lastHigh_highs[li] = highs[pivot_idx]
+                lastHigh_opens[li] = opens[pivot_idx]
+                lastHigh_closes[li] = closes[pivot_idx]
+                
+            # Check if pivot_idx is a pivot low
+            is_pivot_low = True
+            for k in range(1, lookback + 1):
+                if lows[pivot_idx] >= lows[pivot_idx - k] or lows[pivot_idx] >= lows[pivot_idx + k]:
+                    is_pivot_low = False
+                    break
+            
+            if is_pivot_low:
+                prevLows[li] = lastLows[li]
+                lastLows[li] = lows[pivot_idx]
+                lastLowBars[li] = pivot_idx
+                lastLows_low[li] = lows[pivot_idx]
+                lastLows_opens[li] = opens[pivot_idx]
+                lastLows_closes[li] = closes[pivot_idx]
+                
+            lastHigh = lastHighs[li]
+            prevHigh = prevHighs[li]
+            lastLow = lastLows[li]
+            prevLow = prevLows[li]
+            
+            # Break Conditions
+            isBullishBreak = False
+            if lastHigh is not None and lastLow is not None and i > 0:
+                isBullishBreak = closes[i] > lastHigh and highs[i-1] < lastHigh
+                
+            isBearishBreak = False
+            if lastLow is not None and lastHigh is not None and i > 0:
+                isBearishBreak = closes[i] < lastLow and lows[i-1] > lastLow
+                
+            # Inducement Logic
+            inducementTaken_Bullish = False
+            if prevLow is not None and lastLow is not None:
+                inducementTaken_Bullish = lastLow < prevLow
+                
+            inducementTaken_Bearish = False
+            if prevHigh is not None and lastHigh is not None:
+                inducementTaken_Bearish = lastHigh > prevHigh
+                
+            # Drawing Logic Bullish
+            if isBullishBreak:
+                isCHOCH = prevHigh is not None and lastHigh < prevHigh
+                isBOS = prevHigh is None or lastHigh > prevHigh
+                
+                if (isCHOCH or isBOS) and (not require_inducement or inducementTaken_Bullish):
+                    boxTop = max(lastLows_opens[li], lastLows_closes[li])
+                    boxBottom = lastLows_low[li]
+                    bullBoxes.append({
+                        'left': lastLowBars[li],
+                        'top': float(boxTop),
+                        'bottom': float(boxBottom),
+                        'mitigated': False,
+                        'lookback': lookback,
+                        'type': 'CHOCH Demand' if isCHOCH else 'BOS Demand'
+                    })
+                    
+            # Drawing Logic Bearish
+            if isBearishBreak:
+                isCHOCH = prevLow is not None and lastLow > prevLow
+                isBOS = prevLow is None or lastLow < prevLow
+                
+                if (isCHOCH or isBOS) and (not require_inducement or inducementTaken_Bearish):
+                    boxTop = lastHigh_highs[li]
+                    boxBottom = min(lastHigh_opens[li], lastHigh_closes[li])
+                    bearBoxes.append({
+                        'left': lastHighBars[li],
+                        'top': float(boxTop),
+                        'bottom': float(boxBottom),
+                        'mitigated': False,
+                        'lookback': lookback,
+                        'type': 'CHOCH Supply' if isCHOCH else 'BOS Supply'
+                    })
+                    
+        # Manage Boxes (Mitigation & Break)
+        # Bearish Boxes (Supply)
+        active_bear = []
+        for box in bearBoxes:
+            if highs[i] > box['top']:
+                continue
+            if not box['mitigated'] and highs[i] >= box['bottom']:
+                box['mitigated'] = True
+            active_bear.append(box)
+        bearBoxes = active_bear[-max_boxes:]
+        
+        # Bullish Boxes (Demand)
+        active_bull = []
+        for box in bullBoxes:
+            if lows[i] < box['bottom']:
+                continue
+            if not box['mitigated'] and lows[i] <= box['top']:
+                box['mitigated'] = True
+            active_bull.append(box)
+        bullBoxes = active_bull[-max_boxes:]
+
+    return bullBoxes, bearBoxes
+
+
+def detect_supply_zones(df, pivot_lookbacks=[1, 2, 3, 5, 11, 15, 20]):
+    """
+    Returns active, unmitigated Supply Zones based on BOS/CHOCH logic.
+    Geriye dönük uyumluluk için `crypto.py` tarafından çağrılır.
+    """
+    bull, bear = detect_bos_choch_zones(df, pivot_lookbacks)
+    # Sadece mitigated (ihlal) olmamış taze kutuları al
+    return [b for b in bear if not b['mitigated']]
+
+def detect_demand_zones(df, pivot_lookbacks=[1, 2, 3, 5, 11, 15, 20]):
+    """
+    Returns active, unmitigated Demand Zones based on BOS/CHOCH logic.
+    """
+    bull, bear = detect_bos_choch_zones(df, pivot_lookbacks)
+    return [b for b in bull if not b['mitigated']]
+
+
+def is_price_in_supply_zone(price, supply_zones, tolerance_pct=0.02):
+    """
+    Anlık fiyatın aktif arz bölgelerine (Supply Zones) belirtilen % tolerans 
+    kadar yakın olup olmadığını kontrol eder. (Varsayılan %2 altı/üstü)
+    """
+    if not supply_zones:
+        return False
+        
+    for zone in supply_zones:
+        lower_bound = zone['bottom'] * (1 - tolerance_pct)
+        upper_bound = zone['top'] * (1 + tolerance_pct)
+        if lower_bound <= price <= upper_bound:
+            return True
+            
+    return False
+
+def is_price_in_demand_zone(price, demand_zones, tolerance_pct=0.02):
+    """
+    Anlık fiyatın aktif talep bölgelerine (Demand Zones) belirtilen % tolerans 
+    kadar yakın olup olmadığını kontrol eder. (Varsayılan %2 altı/üstü)
+    """
+    if not demand_zones:
+        return False
+        
+    for zone in demand_zones:
+        lower_bound = zone['bottom'] * (1 - tolerance_pct)
+        upper_bound = zone['top'] * (1 + tolerance_pct)
+        if lower_bound <= price <= upper_bound:
+            return True
+            
+    return False

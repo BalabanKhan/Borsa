@@ -87,6 +87,19 @@ def inject_smart_indicators(df):
     # Keltner Channels
     df_copy.ta.kc(length=config.IND_BBANDS_LENGTH, scalar=config.KC_SCALAR, append=True) # TA-Lib has no native KC, use pandas-ta
     
+    # Williams %R with 13 EMA (TRI)
+    if TA_LIB_AVAILABLE:
+        df_copy['WILLR_21'] = talib.WILLR(df_copy['high'].values, df_copy['low'].values, df_copy['close'].values, timeperiod=21)
+        df_copy['WILLR_21_EMA_13'] = talib.EMA(df_copy['WILLR_21'].values, timeperiod=13)
+    else:
+        df_copy.ta.willr(length=21, append=True)
+        # pandas-ta outputs 'WILLR_21'
+        df_copy.ta.ema(close='WILLR_21', length=13, append=True)
+        # It creates EMA_13 so we should rename it to be consistent, but wait, pandas-ta ema uses close by default.
+        # df.ta.ema(close=df_copy['WILLR_21'], length=13) might be better. Let's do it manually.
+        df_copy['WILLR_21_EMA_13'] = df_copy['WILLR_21'].ewm(span=13, adjust=False).mean()
+    
+    
     return df_copy
 
 def calculate_anchored_vwap_series(df, anchor_type="weekly"):
