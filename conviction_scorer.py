@@ -669,6 +669,18 @@ def score_fvg_sfp(fvg_present: bool, sfp_present: bool) -> float:
         return 100.0
     return 15.0  # 30'dan 15'e düşürülerek sinyal kalitesi artırıldı.
 
+def score_smc_zones(in_supply_zone: bool, in_demand_zone: bool, is_long: bool) -> float:
+    """
+    SMC Arz/Talep (Supply/Demand) bölgelerini puanlar. (Eski HB-9'un Soft versiyonu)
+    Kullanıcı talebi üzerine SADECE LONG işlemlerde aktif (HB SADECE LONG İŞLEMDE BAKILSIN).
+    - LONG işlemler için Demand bölgesindeyse ödüllendirir, Supply bölgesindeyse cezalandırır.
+    """
+    if is_long:
+        if in_demand_zone:
+            return 80.0  # Bonus (Destekten long)
+        if in_supply_zone:
+            return 20.0  # Ceza (Dirençten long)
+    return 50.0  # Nötr
 
 # ════════════════════════════════════════
 # Hard Block Kontrolleri
@@ -688,6 +700,9 @@ def check_hard_blocks(
     consecutive_sl: int = 0,
     is_core_indicators_nan: bool = False,
     min_volume_usd: float = 50_000,
+    in_supply_zone: bool = None,
+    willy_ema: float = None,
+    is_long: bool = False,
 ) -> tuple:
     """
     Asla esnetilemeyen güvenlik kontrolleri. (Sadece NaN, Karantina, Devre Kesici)
@@ -715,6 +730,14 @@ def check_hard_blocks(
         
     if rr_ratio is not None and rr_ratio < 0.4:
         return True, "HB-7: R:R oranı çok düşük (< 0.4)"
+
+    if in_supply_zone is not None:
+        if is_long and in_supply_zone:
+            return True, "HB-9: Fiyat geçerli bir Supply (Arz) bölgesinde, LONG girilemez"
+            
+    if willy_ema is not None:
+        if not is_long and willy_ema < -80:
+            return True, "HB-10: Varlık aşırı satımda (Willy EMA < -80), SHORT girilemez"
 
     return False, ""
 
@@ -1614,6 +1637,8 @@ def build_sniper_scores(
     sma200_1d=None,
     rsi_1h=None,
     volume_ratio=None,
+    in_supply_zone=False,
+    in_demand_zone=False,
 ):
     """Keskin Nişancı stratejisi (BIST Sniper, KRIPTO Sniper) için skor paketi."""
     from config import GAP_THRESHOLD_PCT, SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_BIST_MIN
@@ -1638,6 +1663,11 @@ def build_sniper_scores(
         strategy_type=strategy_type,
         is_long=is_long
     )
+
+    if is_long:
+        smc_bonus = score_smc_zones(in_supply_zone, in_demand_zone, is_long)
+        # 50.0 is neutral. If 80, it's +30. If 20, it's -30.
+        conflict_penalty += (smc_bonus - 50.0)
 
     if not asset_trend_aligned:
         conflict_penalty -= 10.0
