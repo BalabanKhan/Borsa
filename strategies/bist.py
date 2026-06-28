@@ -404,8 +404,6 @@ def _check_bist_5_vol_squeeze_long(ctx, prev_bbu_1d, guarded_vol_sma):
         last_1d.get('EMA_21') is not None and not pd.isna(last_1d.get('EMA_21')) and
         current_price > last_1d.get('EMA_21')
     )
-    if not trend_aligned:
-        return None
         
     sq_mid = (last_1h['high'] + last_1h['low']) / 2
     ema21_1h = last_1h.get('EMA_21', current_price * config.BIST_VWAP_EMA_SL_FALLBACK_LONG)
@@ -425,6 +423,10 @@ def _check_bist_5_vol_squeeze_long(ctx, prev_bbu_1d, guarded_vol_sma):
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
         rsi=last_1h.get('RSI_14')
     )
+    
+    if not trend_aligned:
+        _scores5u["conflict_penalty"] = _scores5u.get("conflict_penalty", 0) + getattr(config, 'PENALTY_TREND_MISMATCH', 15.0)
+        
     _conv5u = calculate_conviction(_scores5u, ctx=ctx)
     if _conv5u.grade not in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         return None
@@ -464,8 +466,6 @@ def _check_bist_5_vol_squeeze_short(ctx, prev_bbl_1d, guarded_vol_sma):
         last_1d.get('EMA_21') is not None and not pd.isna(last_1d.get('EMA_21')) and
         current_price < last_1d.get('EMA_21')
     )
-    if not trend_aligned:
-        return None
         
     sq_mid = (last_1h['high'] + last_1h['low']) / 2
     ema21_1h = last_1h.get('EMA_21', current_price * config.BIST_VWAP_EMA_SL_FALLBACK_SHORT)
@@ -485,6 +485,10 @@ def _check_bist_5_vol_squeeze_short(ctx, prev_bbl_1d, guarded_vol_sma):
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST",
         is_long=False, rsi=last_1h.get('RSI_14')
     )
+    
+    if not trend_aligned:
+        _scores5d["conflict_penalty"] = _scores5d.get("conflict_penalty", 0) + getattr(config, 'PENALTY_TREND_MISMATCH', 15.0)
+        
     _conv5d = calculate_conviction(_scores5d, ctx=ctx)
     if _conv5d.grade not in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         return None
@@ -608,9 +612,6 @@ def _check_bist_7_vwap(ctx):
     ema_21_daily = last_1d.get('EMA_21')
     mtf_trend_down = (not pd.isna(ema_21_daily) and last_1d['close'] < ema_21_daily)
 
-    if is_bear_regime or mtf_trend_down:
-        return signals
-
     # VWAP Golden Filters (RSI & Volatilite/ATR) (Relaxed)
     # if not pd.isna(last_1h.get('RSI_14')) and last_1h['RSI_14'] >= getattr(config, 'VWAP_LONG_MAX_RSI', 60.0):
     #     return signals
@@ -623,9 +624,10 @@ def _check_bist_7_vwap(ctx):
     current_atr = df_1h['ATRr_14'].iloc[-1]
     atr_sma = df_1h['ATR_SMA_14'].iloc[-1]
     
+    high_volatility = False
     if pd.notna(current_atr) and pd.notna(atr_sma) and atr_sma > 0:
         if (current_atr / atr_sma) > getattr(config, 'VWAP_MAX_ATR_RATIO', 2.0):
-            return signals # Aşırı Volatilite İptali
+            high_volatility = True
 
     vwap_val = calculate_anchored_vwap(df_1h, anchor_type="weekly")
     if vwap_val is None:
@@ -654,6 +656,14 @@ def _check_bist_7_vwap(ctx):
         rr=_rr7, has_engulfing=False, regime=bist_regime,
         macro_aligned=not xu100_down, consecutive_sl=_get_consecutive_sl(symbol), market="BIST"
     )
+    
+    if is_bear_regime:
+        _scores7["conflict_penalty"] = _scores7.get("conflict_penalty", 0) + getattr(config, 'PENALTY_BEAR_REGIME', 20.0)
+    if mtf_trend_down:
+        _scores7["conflict_penalty"] = _scores7.get("conflict_penalty", 0) + getattr(config, 'PENALTY_MTF_TREND_DOWN', 15.0)
+    if high_volatility:
+        _scores7["conflict_penalty"] = _scores7.get("conflict_penalty", 0) + getattr(config, 'PENALTY_HIGH_VOLATILITY', 15.0)
+        
     _conv7 = calculate_conviction(_scores7, ctx=ctx)
     if _conv7.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
