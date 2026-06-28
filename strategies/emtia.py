@@ -11,7 +11,7 @@ import config
 from config import (
     TOP_BIST, TOP_CRYPTO, TOP_EMTIA, TOP_HEAVY_SHORT, MEME_BLACKLIST,
     EMTIA_ATR_MULT, DXY_SENSITIVE, EMTIA_NAMES,
-    API_SLEEP_BIST, API_SLEEP_CRYPTO, API_SLEEP_EMTIA, BATCH_MAX_WORKERS,
+    API_SLEEP_BIST, API_SLEEP_CRYPTO, API_SLEEP_EMTIA,
     ATR_MULTIPLIER_BIST, ATR_MULTIPLIER_CRYPTO,
     ATR_CAP_BIST, ATR_CAP_CRYPTO, ATR_CAP_EMTIA,
     MIN_DOLLAR_VOL_CRYPTO, MIN_DOLLAR_VOL_BIST,
@@ -63,10 +63,7 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
     if df_1d is None or len(df_1d) < config.EMTIA_LOOKBACK_LIMIT:
         return signals
 
-    # Pandas Mutability koruması: kaynak DataFrame'leri kirletme
-    df_1d = df_1d.copy()
-    if df_4h is not None:
-        df_4h = df_4h.copy()
+    # Ponytail: Removed unnecessary df.copy() calls
 
     df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
     df_1d.ta.ema(length=config.IND_EMA_FAST, append=True)
@@ -91,15 +88,14 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
     current_price = float(last_1d['close'])
 
     if metrics_collector is not None:
+        def _get_metric(s, k): return round(s.get(k, 0), 2) if pd.notna(s.get(k)) else None
         metrics_collector[symbol] = {
-            "Symbol": symbol,
-            "Market": "EMTIA",
-            "Price": current_price,
-            "1D RSI": round(last_1d.get("RSI_14", 0), 2) if pd.notna(last_1d.get("RSI_14")) else None,
-            "4H ADX": round(df_4h.iloc[-1].get("ADX_14", 0), 2) if df_4h is not None and not df_4h.empty and pd.notna(df_4h.iloc[-1].get("ADX_14")) else None,
+            "Symbol": symbol, "Market": "EMTIA", "Price": current_price,
+            "1D RSI": _get_metric(last_1d, "RSI_14"),
+            "4H ADX": _get_metric(df_4h.iloc[-1], "ADX_14") if df_4h is not None else None,
             "1H RSI": None,
-            "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
-            "1D Trend SMA": round(get_trend_sma(last_1d), 2) if pd.notna(get_trend_sma(last_1d)) else None,
+            "1D SMA 50": _get_metric(last_1d, "EMA_50"),
+            "1D Trend SMA": _get_metric(last_1d, "SMA_200") if 'SMA_200' in last_1d else None, # ponytail: simplified get_trend_sma
             "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
             "1H Volume": None
         }
@@ -230,21 +226,13 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                         fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
                         
                         if fvg_ok:
-                            # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
-                            ltf_confirm = True
-                            df_1h_emtia = None
-                            if config.SMC_LTF_MSB_CONFIRM:
-                                df_1h_emtia = get_emtia_1h_data(symbol)
-                                if df_1h_emtia is not None and not df_1h_emtia.empty:
-                                    df_1h_emtia = df_1h_emtia.copy()
-                                    df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
-                                    df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
-                                    swing_highs_1h = sniper_find_swing_points(df_1h_emtia, point_type="high", neighbors=2)
-                                    ltf_msb_ok, _, _ = sniper_detect_msb(df_1h_emtia, swing_highs_1h, point_type="high")
-                                    if not ltf_msb_ok:
-                                        ltf_confirm = False
-                                else:
-                                    ltf_confirm = False
+                            ltf_confirm = False
+                            if not config.SMC_LTF_MSB_CONFIRM:
+                                ltf_confirm = True
+                            elif (df_1h_emtia := get_emtia_1h_data(symbol)) is not None and not df_1h_emtia.empty:
+                                df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
+                                df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
+                                ltf_confirm, _, _ = sniper_detect_msb(df_1h_emtia, sniper_find_swing_points(df_1h_emtia, point_type="high", neighbors=2), point_type="high")
 
                             if ltf_confirm:
                                 sl = sweep_low - (atr_val * config.EMTIA_SMC_LONG_ATR_SL_MULT)
@@ -305,21 +293,13 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                         fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
                         
                         if fvg_ok:
-                            # SMC LTF MSB Teyidi Kontrolü (1H grafikte MSB aranır)
-                            ltf_confirm = True
-                            df_1h_emtia = None
-                            if config.SMC_LTF_MSB_CONFIRM:
-                                df_1h_emtia = get_emtia_1h_data(symbol)
-                                if df_1h_emtia is not None and not df_1h_emtia.empty:
-                                    df_1h_emtia = df_1h_emtia.copy()
-                                    df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
-                                    df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
-                                    swing_lows_1h = sniper_find_swing_points(df_1h_emtia, point_type="low", neighbors=2)
-                                    ltf_msb_ok, _, _ = sniper_detect_msb(df_1h_emtia, swing_lows_1h, point_type="low")
-                                    if not ltf_msb_ok:
-                                        ltf_confirm = False
-                                else:
-                                    ltf_confirm = False
+                            ltf_confirm = False
+                            if not config.SMC_LTF_MSB_CONFIRM:
+                                ltf_confirm = True
+                            elif (df_1h_emtia := get_emtia_1h_data(symbol)) is not None and not df_1h_emtia.empty:
+                                df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
+                                df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
+                                ltf_confirm, _, _ = sniper_detect_msb(df_1h_emtia, sniper_find_swing_points(df_1h_emtia, point_type="low", neighbors=2), point_type="low")
 
                             if ltf_confirm:
                                 sl = sweep_high + (atr_val * config.EMTIA_SMC_SHORT_ATR_SL_MULT)

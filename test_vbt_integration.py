@@ -1,4 +1,4 @@
-import yf_cache
+
 import pandas as pd
 import yfinance as yf
 from vbt_backtest import VectorBTBacktester

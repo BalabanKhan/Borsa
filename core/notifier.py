@@ -65,12 +65,15 @@ class NotificationService:
         if is_watch:
             target_bot = self.watch_bot
             target_chat_ids = self.watch_chat_ids
+            bot_type = "watch"
         elif is_system:
             target_bot = self.system_bot
             target_chat_ids = self.system_chat_ids
+            bot_type = "system"
         else:
             target_bot = self.bot
             target_chat_ids = self.chat_ids
+            bot_type = "main"
 
         if not target_bot or not target_chat_ids:
             clean_msg = self.clean_html(message)
@@ -111,9 +114,9 @@ class NotificationService:
                             await asyncio.sleep(5 * (attempt + 1))
                 
                 if not sent:
-                    self._save_failed_message(chat_id, chunk)
+                    await asyncio.to_thread(self._save_failed_message, chat_id, chunk, bot_type)
 
-    def _save_failed_message(self, chat_id, message):
+    def _save_failed_message(self, chat_id, message, bot_type="main"):
         failed = []
         if os.path.exists(FAILED_MSG_FILE):
             try:
@@ -125,6 +128,7 @@ class NotificationService:
         failed.append({
             "chat_id": chat_id,
             "message": message,
+            "bot_type": bot_type,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
         
@@ -139,18 +143,33 @@ class NotificationService:
             return
             
         try:
-            with open(FAILED_MSG_FILE, 'r', encoding='utf-8') as f:
-                failed = json.load(f)
+            def read_failed():
+                with open(FAILED_MSG_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            failed = await asyncio.to_thread(read_failed)
         except Exception as e:
             logger.error(f"Failed messages dosya hatası: {e}")
             return
 
-        if not failed or not self.bot:
+        if not failed:
             return
 
         remaining = []
         for item in failed:
             chat_id = item["chat_id"]
+            bot_type = item.get("bot_type", "main")
+            
+            if bot_type == "watch":
+                target_bot = self.watch_bot
+            elif bot_type == "system":
+                target_bot = self.system_bot
+            else:
+                target_bot = self.bot
+                
+            if not target_bot:
+                remaining.append(item)
+                continue
+
             raw_text = f"⏰ <i>Gecikmeli mesaj ({item['timestamp'][:16]}):</i>\n\n{item['message']}"
             chunks = self.chunk_text(raw_text)
             
@@ -158,7 +177,7 @@ class NotificationService:
                 sent = False
                 try:
                     await asyncio.wait_for(
-                        self.bot.send_message(
+                        target_bot.send_message(
                             chat_id=chat_id,
                             text=chunk,
                             parse_mode=ParseMode.HTML
@@ -172,7 +191,7 @@ class NotificationService:
                         try:
                             logger.warning(f"[Telegram Retry] HTML parse hatası, düz metin deneniyor: {e}")
                             await asyncio.wait_for(
-                                self.bot.send_message(
+                                target_bot.send_message(
                                     chat_id=chat_id,
                                     text=self.clean_html(chunk),
                                     parse_mode=None
@@ -188,11 +207,14 @@ class NotificationService:
                         remaining.append({
                             "chat_id": chat_id,
                             "message": self.clean_html(chunk),
+                            "bot_type": bot_type,
                             "timestamp": item["timestamp"]
                         })
 
-        with open(FAILED_MSG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(remaining, f, indent=2, ensure_ascii=False)
+        def write_remaining():
+            with open(FAILED_MSG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(remaining, f, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(write_remaining)
 
     @staticmethod
     def format_price(price: float) -> str:
@@ -228,12 +250,20 @@ class NotificationService:
         }
         header = headers.get(market, f"🚀 [KRİPTO {dir_text} SİNYALİ]")
         
-        entry_price = trade_data.get('entry_price', 0)
+        try:
+            entry_price = float(trade_data.get('entry_price', 0))
+        except (ValueError, TypeError):
+            entry_price = 0.0
+            
         sl_price = trade_data.get('sl', 0)
         tp_price = trade_data.get('tp', 0)
 
         rr_ratio = trade_data.get('rr_ratio')
-        rr_line = f"<b>R:R Oranı:</b> <code>{rr_ratio:.1f}:1</code>\n" if rr_ratio else ""
+        try:
+            rr_val = float(rr_ratio) if rr_ratio is not None else 0.0
+            rr_line = f"<b>R:R Oranı:</b> <code>{rr_val:.1f}:1</code>\n" if rr_val > 0 else ""
+        except (ValueError, TypeError):
+            rr_line = ""
 
         conv_score = trade_data.get('conviction_score')
         conv_line = ""

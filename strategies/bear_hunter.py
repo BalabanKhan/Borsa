@@ -9,7 +9,7 @@ import config
 from config import (
     TOP_BIST, TOP_CRYPTO, TOP_EMTIA, TOP_HEAVY_SHORT, MEME_BLACKLIST,
     EMTIA_ATR_MULT, DXY_SENSITIVE, EMTIA_NAMES,
-    API_SLEEP_BIST, API_SLEEP_CRYPTO, API_SLEEP_EMTIA, BATCH_MAX_WORKERS,
+    API_SLEEP_BIST, API_SLEEP_CRYPTO, API_SLEEP_EMTIA,
     ATR_MULTIPLIER_BIST, ATR_MULTIPLIER_CRYPTO,
     ATR_CAP_BIST, ATR_CAP_CRYPTO, ATR_CAP_EMTIA,
     MIN_DOLLAR_VOL_CRYPTO, MIN_DOLLAR_VOL_BIST,
@@ -58,9 +58,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     if df_4h is None or len(df_4h) < 20:
         return signals
 
-    # Pandas Mutability koruması: kaynak DataFrame'leri kirletme
-    df_1d = df_1d.copy() if df_1d is not None else None
-    df_4h = df_4h.copy()
+    # Ponytail: Removed unnecessary df.copy() calls
     if df_1d is not None:
         df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
         df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
@@ -82,18 +80,29 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
     ema_slow_col = f"EMA_{config.IND_EMA_SLOW}"
 
     if metrics_collector is not None and symbol not in metrics_collector:
+        def _get_metric(s, k): return round(s.get(k, 0), 2) if s is not None and not s.empty and pd.notna(s.get(k)) else None
         metrics_collector[symbol] = {
-            "Symbol": symbol,
-            "Market": "KRIPTO (Ayı)",
-            "Price": current_price,
-            "1D RSI": round(df_1d.iloc[-1].get(f"RSI_{config.IND_RSI_LENGTH}", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get(f"RSI_{config.IND_RSI_LENGTH}")) else None,
-            "4H ADX": round(last_4h.get(f"ADX_{config.IND_ADX_LENGTH}", 0), 2) if pd.notna(last_4h.get(f"ADX_{config.IND_ADX_LENGTH}")) else None,
+            "Symbol": symbol, "Market": "KRIPTO (Ayı)", "Price": current_price,
+            "1D RSI": _get_metric(df_1d.iloc[-1] if df_1d is not None else None, f"RSI_{config.IND_RSI_LENGTH}"),
+            "4H ADX": _get_metric(last_4h, f"ADX_{config.IND_ADX_LENGTH}"),
             "1H RSI": None,
-            "1D SMA 50": round(df_1d.iloc[-1].get(ema_slow_col, 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get(ema_slow_col)) else None,
-            "1D SMA 200": round(df_1d.iloc[-1].get(f"SMA_{config.IND_SMA_TREND}", 0), 2) if df_1d is not None and not df_1d.empty and pd.notna(df_1d.iloc[-1].get(f"SMA_{config.IND_SMA_TREND}")) else None,
+            "1D SMA 50": _get_metric(df_1d.iloc[-1] if df_1d is not None else None, ema_slow_col),
+            "1D SMA 200": _get_metric(df_1d.iloc[-1] if df_1d is not None else None, f"SMA_{config.IND_SMA_TREND}"),
             "Trend": "Bullish" if df_1d is not None and not df_1d.empty and df_1d.iloc[-1].get(ema_mid_col, 0) > df_1d.iloc[-1].get(ema_slow_col, float('inf')) else "Bearish",
             "1H Volume": last_4h.get("volume")
         }
+    
+    # ponytail: shared args for build_short_scores
+    _adx_prev_bh = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
+    _base_scores = {
+        "adx": last_4h.get(f'ADX_{config.IND_ADX_LENGTH}'), "adx_prev": _adx_prev_bh,
+        "price": current_price, "ema_fast": last_4h.get(ema_mid_col), "ema_mid": last_4h.get(ema_slow_col), "ema_slow": None,
+        "rsi": last_4h.get(f'RSI_{config.IND_RSI_LENGTH}'), "rsi_prev": df_4h.iloc[-2].get(f'RSI_{config.IND_RSI_LENGTH}') if len(df_4h) >= 2 else None,
+        "volume": last_4h.get('volume', 0), "vol_sma": last_4h.get('vol_sma_20'),
+        "dollar_vol": last_4h.get('volume', 0) * current_price,
+        "has_engulfing": False, "regime": "BEAR",
+        "macro_aligned": (not btc_bullish), "consecutive_sl": _get_consecutive_sl(symbol), "market": "KRIPTO"
+    }
 
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
@@ -145,16 +154,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
         if risk > 0 and reward > 0 and (reward / risk) >= config.RR_MINIMUM:
             rr_ratio = reward / risk
             sl_pct = (risk / current_price) * 100
-            _adx_prev_bh1 = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
-            _scores_bh1 = build_short_scores(
-                adx=last_4h.get(f'ADX_{config.IND_ADX_LENGTH}'), adx_prev=_adx_prev_bh1,
-                price=current_price, ema_fast=last_4h.get(ema_mid_col), ema_mid=last_4h.get(ema_slow_col), ema_slow=None,
-                rsi=last_4h.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=df_4h.iloc[-2].get(f'RSI_{config.IND_RSI_LENGTH}') if len(df_4h) >= 2 else None,
-                volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
-                dollar_vol=last_4h.get('volume', 0) * current_price,
-                rr=rr_ratio, has_engulfing=False, regime="BEAR",
-                macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
-            )
+            _scores_bh1 = build_short_scores(rr=rr_ratio, **_base_scores)
             _conv_bh1 = calculate_conviction(_scores_bh1, ctx=ctx)
             if _conv_bh1.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
@@ -184,16 +184,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
         if risk > 0 and reward > 0 and (reward / risk) >= config.RR_MINIMUM:
             rr_ratio = reward / risk
             sl_pct = (risk / current_price) * 100
-            _adx_prev_bh2 = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
-            _scores_bh2 = build_short_scores(
-                adx=last_4h.get(f'ADX_{config.IND_ADX_LENGTH}'), adx_prev=_adx_prev_bh2,
-                price=current_price, ema_fast=last_4h.get(ema_mid_col), ema_mid=last_4h.get(ema_slow_col), ema_slow=None,
-                rsi=last_4h.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=df_4h.iloc[-2].get(f'RSI_{config.IND_RSI_LENGTH}') if len(df_4h) >= 2 else None,
-                volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
-                dollar_vol=last_4h.get('volume', 0) * current_price,
-                rr=rr_ratio, has_engulfing=False, regime="BEAR",
-                macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
-            )
+            _scores_bh2 = build_short_scores(rr=rr_ratio, **_base_scores)
             _conv_bh2 = calculate_conviction(_scores_bh2, ctx=ctx)
             if _conv_bh2.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                 signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
@@ -233,16 +224,7 @@ def analyze_bear_hunter(symbol, df_1d, df_4h, btc_bullish=False, metrics_collect
             if risk > 0 and reward > 0 and (reward / risk) >= config.RR_MINIMUM:
                 rr_ratio = reward / risk
                 sl_pct = (risk / current_price) * 100
-                _adx_prev_bh3 = df_4h.iloc[-2].get(f'ADX_{config.IND_ADX_LENGTH}') if len(df_4h) >= 2 else None
-                _scores_bh3 = build_short_scores(
-                    adx=last_4h.get(f'ADX_{config.IND_ADX_LENGTH}'), adx_prev=_adx_prev_bh3,
-                    price=current_price, ema_fast=last_4h.get(ema_mid_col), ema_mid=last_4h.get(ema_slow_col), ema_slow=None,
-                    rsi=last_4h.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=df_4h.iloc[-2].get(f'RSI_{config.IND_RSI_LENGTH}') if len(df_4h) >= 2 else None,
-                    volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
-                    dollar_vol=last_4h.get('volume', 0) * current_price,
-                    rr=rr_ratio, has_engulfing=False, regime="BEAR",
-                    macro_aligned=(not btc_bullish), consecutive_sl=_get_consecutive_sl(symbol), market="KRIPTO"
-                )
+                _scores_bh3 = build_short_scores(rr=rr_ratio, **_base_scores)
                 _conv_bh3 = calculate_conviction(_scores_bh3, ctx=ctx)
                 if _conv_bh3.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
                     signals.append({ "raw_indicators": _extract_raw_indicators(locals()),

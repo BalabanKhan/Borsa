@@ -16,6 +16,12 @@ done
 /home/ubuntu/quant_bot/venv/bin/python -u dashboard.py >> /home/ubuntu/quant_bot/dashboard.log 2>&1 &
 DASHBOARD_PID=$!
 echo "[$(date)] Web Dashboard port 8080 uzerinde baslatildi (PID: $DASHBOARD_PID)." >> /home/ubuntu/quant_bot/bot.log
+# 2.5 Basit bir Sentaks / Import kontrolu yap (Pre-flight test)
+/home/ubuntu/quant_bot/venv/bin/python -m py_compile main.py
+if [ $? -ne 0 ]; then
+    echo "[$(date)] DIKKAT: main.py sentaks hatasi iceriyor! Bot baslatilamadi." >> /home/ubuntu/quant_bot/bot.log
+    exit 1
+fi
 
 # 3. Ana Trading Botunu döngü halinde başlat
 while true; do

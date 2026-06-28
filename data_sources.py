@@ -1,4 +1,4 @@
-import yf_cache
+
 """
 data_sources.py — Veri Katmanı
 Tüm API bağlantıları, veri çekme fonksiyonları ve cache yönetimi.

@@ -32,7 +32,7 @@ from config import (
     SOFT_RSI_TREND_CENTER, SOFT_RSI_TREND_MULT,
     SOFT_RSI_OVERSOLD_BIST_CENTER, SOFT_RSI_OVERSOLD_CRYPTO_CENTER,
     SOFT_SQUEEZE_MIN, SOFT_SQUEEZE_MAX,
-    SOFT_EMA_DIP_MULT, SOFT_EMA_DIP_MAX_PCT,
+    SOFT_EMA_DIP_MULT,
     REGIME_THRESHOLDS_BULL, REGIME_THRESHOLDS_NEUTRAL, REGIME_THRESHOLDS_BEAR,
     # V3.4 Soft Score Magic Number Aktarımı
     SOFT_ADX_MATURITY_START, SOFT_ADX_MATURITY_MULT, SOFT_ADX_MATURITY_MIN,
@@ -53,8 +53,7 @@ from config import (
     SOFT_DOLLAR_VOL_CRYPTO_MIN, SOFT_DOLLAR_VOL_CRYPTO_MAX,
     SOFT_DOLLAR_VOL_EMTIA_MIN, SOFT_DOLLAR_VOL_EMTIA_MAX,
     SOFT_DOLLAR_VOL_BIST_MIN, SOFT_DOLLAR_VOL_BIST_MAX,
-    RR_MINIMUM, SOFT_UNCERTAINTY_PENALTY,
-    SNIPER_NO_SETUP_PENALTY, BIST_SNIPER_CONFLUENCE_BONUS
+    RR_MINIMUM, SOFT_UNCERTAINTY_PENALTY
 )
 
 
@@ -686,7 +685,6 @@ def check_hard_blocks(
     vol_sma: float = None,
     is_quarantined: bool = False,
     is_circuit_open: bool = False,
-    is_darth_maul_flag: bool = False,
     sl_direction_ok: bool = True,
     rr_ratio: float = None,
     consecutive_sl: int = 0,
@@ -778,7 +776,7 @@ _ab_lock = threading.Lock()
 AB_STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ab_test_stats.json')
 
 
-def _ab_evaluate(ticker, score, control_grade, control_thresholds, experiment_thresholds):
+def _ab_evaluate(ticker, score, control_grade, experiment_thresholds):
     """A/B Test: Experiment eşikleriyle shadow grade hesapla ve logla."""
     # Experiment grade hesapla
     if score >= experiment_thresholds['STRONG']:
@@ -1207,11 +1205,11 @@ def calculate_conviction(
     # Conviction A/B Test — Shadow Evaluation
     # ════════════════════════════════════════
     try:
-        from config import CONVICTION_AB_ENABLED, CONVICTION_THRESHOLDS_CONTROL, CONVICTION_THRESHOLDS_EXPERIMENT
+        from config import CONVICTION_AB_ENABLED, CONVICTION_THRESHOLDS_EXPERIMENT
         if CONVICTION_AB_ENABLED:
             _ticker = scores.get('_ticker', 'N/A')
             _ab_evaluate(_ticker, result.total_score, result.grade,
-                         CONVICTION_THRESHOLDS_CONTROL, CONVICTION_THRESHOLDS_EXPERIMENT)
+                         CONVICTION_THRESHOLDS_EXPERIMENT)
     except Exception as e:
         logging.debug(f'[A/B Test] Hata: {e}')
 

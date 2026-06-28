@@ -19,13 +19,26 @@ TRACKER_FILE = os.path.join(BASE_DIR, "active_trades.json")
 LOG_FILE = os.path.join(BASE_DIR, "bot.log")
 ENV_FILE = os.path.join(BASE_DIR, ".env")
 
-# .env'den şifre oku (varsayılan: admin)
-DASHBOARD_PASSWORD = "admin"
+# .env'den şifre oku (varsayılan rastgele güvenli şifre)
+DASHBOARD_PASSWORD = None
 if os.path.exists(ENV_FILE):
     with open(ENV_FILE, "r", encoding="utf-8") as f:
         for line in f:
             if line.startswith("DASHBOARD_PASSWORD="):
-                DASHBOARD_PASSWORD = line.split("=")[1].strip().replace('"', '').replace("'", "")
+                val = line.split("=")[1].strip().replace('"', '').replace("'", "")
+                if val and val != "admin":
+                    DASHBOARD_PASSWORD = val
+
+if not DASHBOARD_PASSWORD:
+    import secrets
+    DASHBOARD_PASSWORD = secrets.token_hex(8)
+    msg = f"\n{'='*60}\n🚨 GUVENLIK UYARISI: .env dosyasinda DASHBOARD_PASSWORD bulunamadi veya guvensiz.\n🔐 Otomatik guvenli sifre olusturuldu: {DASHBOARD_PASSWORD}\nLutfen bu sifreyi kaydedin veya .env dosyasina kendi sifrenizi ekleyin.\n{'='*60}\n"
+    print(msg)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as lf:
+            lf.write(f"[DASHBOARD] Otomatik Guvenli Sifre Uretildi: {DASHBOARD_PASSWORD}\n")
+    except:
+        pass
 
 # Uptime hesabı için başlangıç zamanı
 START_TIME = time.time()

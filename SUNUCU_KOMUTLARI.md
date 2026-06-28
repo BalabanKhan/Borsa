@@ -45,3 +45,15 @@ Eğer arka planda birden fazla tarama çalıştıysa (örneğin Telegram'a çift
 ```bash
 pkill -f run_scan_once.py
 ```
+
+## 6. Sürüm Geri Alma (Rollback)
+Eğer `git pull` sonrası kod hata veriyor veya bot sürekli çöküyorsa, çalışan son sürüme geri dönmek için:
+```bash
+# Değişiklikleri iptal edip önceki commit'e dönmek için:
+git reset --hard HEAD~1
+# Veya sistemin çalıştığı bilinen belirli bir commit'e dönmek için:
+# git reset --hard <commit-hash>
+
+# Geri aldıktan sonra servisi yeniden başlatın:
+systemctl --user restart quant_bot
+```

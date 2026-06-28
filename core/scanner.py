@@ -79,7 +79,7 @@ class ScannerService:
         signals, scan_metrics = await scan_all_markets()
         logger.info(f"Tarama süresi: {time.time() - scan_start:.1f}s")
 
-        self._save_scan_metrics(scan_metrics)
+        await asyncio.to_thread(self._save_scan_metrics, scan_metrics)
         import gc
         gc.collect()
 
@@ -138,7 +138,9 @@ class ScannerService:
                 logger.info(f"[Scanner] Atlandı: {ticker} ({strategy}) - Varlık karantinada.")
                 continue
 
-            entry_price, sl_price, tp_price = decision.get("entry_price", 0), decision.get("sl", 0), decision.get("tp", 0)
+            entry_price = float(decision.get("entry_price") or 0.0)
+            sl_price = float(decision.get("sl") or 0.0)
+            tp_price = float(decision.get("tp") or 0.0)
             
             if entry_price > 0 and sl_price > 0 and tp_price > 0:
                 should_block, block_reason = should_block_entry({
@@ -183,7 +185,7 @@ class ScannerService:
                 continue
 
             if not is_watch:
-                record_trade_commission(ticker)
+                await asyncio.to_thread(record_trade_commission, ticker)
 
             if decision.get("is_day_trade"):
                 self._mark_as_day_trade(trade["id"])
@@ -195,7 +197,7 @@ class ScannerService:
                 await self.notifier.send_message(watch_header + msg, is_watch=True)
             else:
                 await self.notifier.send_message(msg)
-                self._set_cooldown(ticker, strategy)
+                await self._set_cooldown(ticker, strategy)
 
     def _is_on_cooldown(self, ticker, strategy):
         key = (ticker, strategy)
@@ -203,9 +205,9 @@ class ScannerService:
             return True
         return False
 
-    def _set_cooldown(self, ticker, strategy):
+    async def _set_cooldown(self, ticker, strategy):
         self.signal_cooldown[(ticker, strategy)] = time.time()
-        self._save_cooldown()
+        await asyncio.to_thread(self._save_cooldown)
 
     def _is_already_active(self, ticker):
         trades = load_trades()
@@ -255,10 +257,10 @@ class ScannerService:
                 break
                 
         if updated_trade:
-            save_trades(trades)
-            entry_val = float(updated_trade.get("entry_price", 0.0))
-            sl_val = float(updated_trade.get("sl", 0.0))
-            tp_val = float(updated_trade.get("tp", 0.0))
+            await asyncio.to_thread(save_trades, trades)
+            entry_val = float(updated_trade.get("entry_price") or 0.0)
+            sl_val = float(updated_trade.get("sl") or 0.0)
+            tp_val = float(updated_trade.get("tp") or 0.0)
             msg = (
                 f"🔄 <b>SKOR GÜNCELLEMESİ — {updated_trade.get('ticker')}</b>\n"
                 f"<b>Yön:</b> {'🟢 LONG' if updated_trade.get('signal') == 'AL' else '🔴 SHORT'}\n"
@@ -276,5 +278,8 @@ class ScannerService:
             
             if was_watch and not updated_trade.get("is_watch", False):
                 msg = "🚀 <b>WATCH'TAN ANA BOTA GEÇİŞ!</b> 🚀\n━━━━━━━━━━━━━━━━━━\n" + msg
-                
-            await self.notifier.send_message(msg)
+                await self.notifier.send_message(msg)
+            elif updated_trade.get("is_watch", False):
+                await self.notifier.send_message(msg, is_watch=True)
+            else:
+                await self.notifier.send_message(msg)

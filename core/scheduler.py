@@ -58,14 +58,14 @@ class TaskScheduler:
         logger.info("APScheduler görev yöneticisi başlatıldı.")
 
     async def check_prices(self):
-        trades = load_trades()
+        trades = await asyncio.to_thread(load_trades)
         active_trades = [t for t in trades if t["status"] == "ACTIVE"]
         active_tickers = list(set([t["ticker"] for t in active_trades]))
         
         if not active_tickers:
             return
 
-        current_prices = get_current_prices(active_tickers)
+        current_prices = await asyncio.to_thread(get_current_prices, active_tickers)
         if current_prices:
             self._price_fail_count = 0
             await self._process_active_prices(active_trades, current_prices)
@@ -95,12 +95,13 @@ class TaskScheduler:
             await self.notifier.send_message(msg, is_system=True)
 
     async def close_day_trades(self):
-        trades = load_trades()
+        trades = await asyncio.to_thread(load_trades)
         day_trades = [t for t in trades if t.get("is_day_trade") and t["status"] == "ACTIVE"]
         if not day_trades:
             return
 
-        current_prices = get_current_prices([t["ticker"] for t in day_trades])
+        tickers = [t["ticker"] for t in day_trades]
+        current_prices = await asyncio.to_thread(get_current_prices, tickers)
         for t in day_trades:
             ticker = t["ticker"]
             cp = current_prices.get(ticker)
@@ -116,18 +117,21 @@ class TaskScheduler:
                 is_system=True
             )
 
-        closed_day = [t for t in trades if t["status"] != "ACTIVE"]
-        if closed_day:
-            _archive_closed_trades(closed_day)
-        
-        remaining = [t for t in trades if t["status"] == "ACTIVE"]
-        save_trades(remaining)
+        def save_and_archive():
+            closed_day = [t for t in trades if t["status"] != "ACTIVE"]
+            if closed_day:
+                _archive_closed_trades(closed_day)
+            remaining = [t for t in trades if t["status"] == "ACTIVE"]
+            save_trades(remaining)
+        await asyncio.to_thread(save_and_archive)
 
     async def send_daily_snapshot(self):
         try:
-            with open('last_scan_metrics.json', 'r', encoding='utf-8') as f:
-                metrics = json.load(f)
-                asyncio.create_task(send_snapshot_excel(metrics))
+            def read_metrics():
+                with open('last_scan_metrics.json', 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            metrics = await asyncio.to_thread(read_metrics)
+            asyncio.create_task(send_snapshot_excel(metrics))
         except Exception as e:
             logger.warning(f"Gün sonu Excel gönderilemedi: {e}")
 
@@ -141,25 +145,43 @@ class TaskScheduler:
             logger.error(f"Günlük AI Raporu gönderilemedi: {e}")
 
     async def send_heartbeat(self):
-        trades = load_trades()
-        active_count = sum(1 for t in trades if t["status"] == "ACTIVE")
-        hb_msg = (
-            f"💚 <b>Bot Aktif (Clean Arch)</b>\n"
-            f"Aktif Pozisyon: {active_count}\n"
-            f"{cb_status()}\n"
-            f"━━━ Kaos Modülleri ━━━\n"
-            f"{get_penalty_status()}\n"
-            f"{get_scorecard_status()}\n"
-            f"{get_filter_health_summary()}"
-        )
+        def build_heartbeat():
+            trades = load_trades()
+            active_count = sum(1 for t in trades if t["status"] == "ACTIVE")
+            return (
+                f"💚 <b>Bot Aktif (Clean Arch)</b>\n"
+                f"Aktif Pozisyon: {active_count}\n"
+                f"{cb_status()}\n"
+                f"━━━ Kaos Modülleri ━━━\n"
+                f"{get_penalty_status()}\n"
+                f"{get_scorecard_status()}\n"
+                f"{get_filter_health_summary()}"
+            )
+        hb_msg = await asyncio.to_thread(build_heartbeat)
         await self.notifier.send_message(hb_msg, is_system=True)
 
     async def run_weekly_tasks(self):
         try:
-            changes = run_darwinism(
-                min_trades=config.SCORECARD_MIN_TRADES,
-                window_days=config.SCORECARD_AUTO_DISABLE_DAYS
-            )
+            def do_weekly_sync():
+                changes_res = run_darwinism(
+                    min_trades=config.SCORECARD_MIN_TRADES,
+                    window_days=config.SCORECARD_AUTO_DISABLE_DAYS
+                )
+                report_res = generate_weekly_report()
+                cleanup_expired_quarantines()
+                
+                pruned_res = 0
+                try:
+                    from penalty_box import prune_old_assets
+                    pruned_res = prune_old_assets(90)
+                except Exception as e:
+                    logger.warning(f"Penalty pruning hatası: {e}")
+                    
+                paralysis_res = check_analysis_paralysis()
+                return changes_res, report_res, pruned_res, paralysis_res
+
+            changes, report, pruned, paralysis = await asyncio.to_thread(do_weekly_sync)
+
             if changes:
                 darwin_msg = "🦕 <b>DARWİNİZM RAPORU</b>\n━━━━━━━━━━━━━━━━━━\n"
                 for c in changes:
@@ -167,18 +189,9 @@ class TaskScheduler:
                     darwin_msg += f"{icon} {c['strategy']}: {c['reason']}\n"
                 await self.notifier.send_message(darwin_msg, is_system=True)
             
-            await self.notifier.send_message(generate_weekly_report(), is_system=True)
-            cleanup_expired_quarantines()
-            
-            try:
-                from penalty_box import prune_old_assets
-                pruned = prune_old_assets(90)
-                if pruned > 0:
-                    await self.notifier.send_message(f"🧹 Penalty Box temizliği: {pruned} eski varlık silindi.", is_system=True)
-            except Exception as e:
-                logger.warning(f"Penalty pruning hatası: {e}")
-                
-            paralysis = check_analysis_paralysis()
+            await self.notifier.send_message(report, is_system=True)
+            if pruned > 0:
+                await self.notifier.send_message(f"🧹 Penalty Box temizliği: {pruned} eski varlık silindi.", is_system=True)
             if paralysis:
                 await self.notifier.send_message(paralysis, is_system=True)
         except Exception as e:

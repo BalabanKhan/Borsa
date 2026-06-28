@@ -1,4 +1,4 @@
-import yf_cache
+
 import sys
 import pandas as pd
 import pandas_ta as ta
