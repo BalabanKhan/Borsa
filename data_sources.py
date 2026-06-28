@@ -480,12 +480,13 @@ async def async_get_crypto_data(symbol):
     usd_sym = symbol.replace("/USDT", "/USD")
 
     # 1. Binance Futures
-    if not IS_USA_SERVER and _binance_symbols is not None and symbol in _binance_symbols:
+    binance_symbol = symbol if (_binance_symbols and symbol in _binance_symbols) else (f"{symbol}:USDT" if (_binance_symbols and f"{symbol}:USDT" in _binance_symbols) else None)
+    if not IS_USA_SERVER and binance_symbol is not None:
         for attempt in range(retries):
             try:
                 ohlcv_1d, ohlcv_4h = await asyncio.gather(
-                    exchange_async.fetch_ohlcv(symbol, '1d', limit=limit),
-                    exchange_async.fetch_ohlcv(symbol, '4h', limit=limit)
+                    exchange_async.fetch_ohlcv(binance_symbol, '1d', limit=limit),
+                    exchange_async.fetch_ohlcv(binance_symbol, '4h', limit=limit)
                 )
                 df_1d = pd.DataFrame(ohlcv_1d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -565,9 +566,10 @@ async def async_get_crypto_1h_data(symbol):
     usd_sym = symbol.replace("/USDT", "/USD")
 
     # 1. Try Binance Futures
-    if not IS_USA_SERVER and _binance_symbols is not None and symbol in _binance_symbols:
+    binance_symbol = symbol if (_binance_symbols and symbol in _binance_symbols) else (f"{symbol}:USDT" if (_binance_symbols and f"{symbol}:USDT" in _binance_symbols) else None)
+    if not IS_USA_SERVER and binance_symbol is not None:
         try:
-            ohlcv_1h = await exchange_async.fetch_ohlcv(symbol, '1h', limit=limit)
+            ohlcv_1h = await exchange_async.fetch_ohlcv(binance_symbol, '1h', limit=limit)
             df_1h = pd.DataFrame(ohlcv_1h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df_1h['timestamp'] = pd.to_datetime(df_1h['timestamp'], unit='ms')
             df_1h.set_index('timestamp', inplace=True)

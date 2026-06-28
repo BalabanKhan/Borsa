@@ -78,7 +78,6 @@
     "ORDI/USDT",
     "RIVER/USDT",
     "LDO/USDT",
-    "IP/USDT",
     "BEL/USDT",
     "PENDLE/USDT",
     "OPG/USDT",
@@ -121,7 +120,8 @@
     "AGLD/USDT",
     "MOVR/USDT",
     "ASR/USDT",
-    "QTUM/USDT"
+    "QTUM/USDT",
+    "HYPE/USDT"
   ],
   "TOP_BIST": [
     "THYAO.IS",
