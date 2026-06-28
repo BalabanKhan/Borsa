@@ -6,23 +6,18 @@ ThreadPoolExecutor ile toplu tarama.
 import logging
 import pandas as pd
 import config
-from datetime import datetime, time as dt_time
-from zoneinfo import ZoneInfo
-
+from datetime import datetime
 from config import (
     TOP_BIST, TOP_CRYPTO, TOP_EMTIA, TOP_HEAVY_SHORT, MEME_BLACKLIST,
     EMTIA_ATR_MULT, DXY_SENSITIVE, EMTIA_NAMES,
-    API_SLEEP_BIST, API_SLEEP_CRYPTO, API_SLEEP_EMTIA,
+    API_SLEEP_CRYPTO, API_SLEEP_EMTIA,
     ATR_MULTIPLIER_BIST, ATR_MULTIPLIER_CRYPTO,
     ATR_CAP_BIST, ATR_CAP_CRYPTO, ATR_CAP_EMTIA,
     MIN_DOLLAR_VOL_CRYPTO, MIN_DOLLAR_VOL_BIST,
-    GAP_THRESHOLD_PCT, DARTH_MAUL_BODY_RATIO,
+    DARTH_MAUL_BODY_RATIO,
     VOL_SMA_LONG_RATIO, ADX_TOO_LATE,
-    # AM Serisi Anti-Manipülasyon Kalkanları
-    ENGULFING_MIN_BODY_RATIO,
     MIN_HOURLY_DOLLAR_VOL_CRYPTO, MIN_HOURLY_TL_VOL_BIST,
     FUNDING_SHORT_BLOCK_THRESHOLD,
-    OTE_MIN_WAVE_PCT,
     LIQUIDITY_WINDOW_START_HOUR, LIQUIDITY_WINDOW_START_MIN,
     LIQUIDITY_WINDOW_END_HOUR, LIQUIDITY_WINDOW_END_MIN,
     RR_MINIMUM,
@@ -34,8 +29,7 @@ from indicators import (
     detect_bullish_divergence, detect_squeeze, calculate_relative_strength,
     calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation,
     calculate_orb_cage, calculate_time_specific_rvol,
-    # AM Serisi
-    check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
+    check_bullish_engulfing_momentum, calculate_cmf,
     sniper_calculate_ote_body,
 )
 

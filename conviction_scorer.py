@@ -296,14 +296,14 @@ def calculate_autopsy_soft_penalty(
                 # Long işlem: Fiyat SMA 200'ün altındaysa ceza uygula
                 if price < sma200_1d:
                     dist_pct = ((sma200_1d - price) / sma200_1d) * 100
-                    # %0-%10 arası lineer ceza (maks -15 puan)
-                    penalty -= min(15.0, dist_pct * 1.5)
+                    # %0-%10 arası lineer ceza (maks -10 puan)
+                    penalty -= min(10.0, dist_pct * 1.0)
             else:
                 # Short işlem: Fiyat SMA 200'ün üzerindeyken ceza uygula
                 if price > sma200_1d:
                     dist_pct = ((price - sma200_1d) / sma200_1d) * 100
-                    # %0-%10 arası lineer ceza (maks -15 puan)
-                    penalty -= min(15.0, dist_pct * 1.5)
+                    # %0-%10 arası lineer ceza (maks -10 puan)
+                    penalty -= min(10.0, dist_pct * 1.0)
                     
         # 2. 1H RSI Soft Cezası - KALDIRILDI (Trend kırılımlarında RSI'ın doğal olarak yüksek olması çelişki yaratıyordu)
 
@@ -315,7 +315,7 @@ def calculate_autopsy_soft_penalty(
         threshold = 3.5 if is_trend else 3.0
         if volume_ratio < threshold:
             ratio_clamped = max(0.0, volume_ratio)
-            penalty -= ((threshold - ratio_clamped) / threshold) * 10.0
+            penalty -= ((threshold - ratio_clamped) / threshold) * 5.0
             
     return round(penalty, 2)
 
@@ -893,15 +893,15 @@ def score_data_guard(
     
     # 1. Proportional Gap Penalty
     if gap_val > 0.0:
-        penalty -= min(40.0, (gap_val / GAP_THRESHOLD_PCT) * abs(DATA_GUARD_PENALTY_GAP))
+        penalty -= min(20.0, (gap_val / GAP_THRESHOLD_PCT) * abs(DATA_GUARD_PENALTY_GAP))
         
     # 2. Proportional Darth Maul Penalty
     if not _is_nan(dm_ratio_val) and dm_ratio_val < DARTH_MAUL_BODY_RATIO:
-        penalty -= min(40.0, (1.0 - (dm_ratio_val / DARTH_MAUL_BODY_RATIO)) * 25.0)
+        penalty -= min(20.0, (1.0 - (dm_ratio_val / DARTH_MAUL_BODY_RATIO)) * 12.5)
         
     # 3. Proportional CMF Penalty
     if not _is_nan(cmf) and cmf < 0.0:
-        penalty -= min(40.0, abs(cmf) * 100.0)
+        penalty -= min(20.0, abs(cmf) * 50.0)
         
     # 4. Liquidity Window Penalty
     if not is_liquidity_window:
@@ -912,7 +912,7 @@ def score_data_guard(
         clamped_vol = max(min_volume_usd, dollar_volume)
         ratio = (optimum_volume_usd - clamped_vol) / (optimum_volume_usd - min_volume_usd) if optimum_volume_usd > min_volume_usd else 1.0
         # Dinamik hacim cezası
-        base_penalty = 25.0
+        base_penalty = 15.0
         # Eğer hacim çok düşükse (min_volume_usd'ye yakınsa) çarpan artar
         vol_urgency = 1.0 + (ratio * 0.5) 
         penalty -= (base_penalty * ratio * vol_urgency)
@@ -1068,7 +1068,7 @@ def calculate_conviction(
         # Dinamik USDT Dominance cezası
         usdt_strength = ctx.get("usdt_dominance_rsi", 60.0)
         excess_strength = max(0.0, usdt_strength - 50.0)
-        usdt_penalty = -min(25.0, excess_strength * 0.5)
+        usdt_penalty = -min(15.0, excess_strength * 0.25)
         
     # NEW FUZZY REGIME & SESSION FILTERS (No Boolean Prison)
     fuzzy_filter_penalty = 0.0
@@ -1103,14 +1103,14 @@ def calculate_conviction(
         if not is_sniper_1h:
             if is_trend:
                 if adx_val < 25.0:
-                    fuzzy_filter_penalty -= max(0.0, min(20.0, (25.0 - adx_val) * 2.0))
+                    fuzzy_filter_penalty -= max(0.0, min(10.0, (25.0 - adx_val) * 1.0))
                 if chop_val > 50.0:
-                    fuzzy_filter_penalty -= max(0.0, min(20.0, (chop_val - 50.0) * 1.33))
+                    fuzzy_filter_penalty -= max(0.0, min(10.0, (chop_val - 50.0) * 0.75))
             else:
                 if adx_val > 20.0:
-                    fuzzy_filter_penalty -= max(0.0, min(25.0, (adx_val - 20.0) * 1.67))
+                    fuzzy_filter_penalty -= max(0.0, min(10.0, (adx_val - 20.0) * 1.0))
                 if chop_val < 50.0:
-                    fuzzy_filter_penalty -= max(0.0, min(20.0, (50.0 - chop_val) * 1.33))
+                    fuzzy_filter_penalty -= max(0.0, min(10.0, (50.0 - chop_val) * 0.75))
                 
         # 2. Time-Session soft penalty
         import pandas as pd
@@ -1138,7 +1138,7 @@ def calculate_conviction(
         
         atr_pct = (atr_val / close_val) * 100.0
         if atr_pct > 3.5:
-            fuzzy_filter_penalty -= max(0.0, min(15.0, (atr_pct - 3.5) * 6.0))
+            fuzzy_filter_penalty -= max(0.0, min(10.0, (atr_pct - 3.5) * 3.0))
     
     total += data_guard_penalty
     total += conflict_penalty
@@ -1555,14 +1555,14 @@ def build_short_scores(
     if rsi is not None:
         if rsi < 40:
             excess = 40 - rsi
-            long_risk_penalty -= min(25.0, excess * 1.2)
+            long_risk_penalty -= min(15.0, excess * 1.0)
 
     # 2. SMA 200 Desteği (Fiyat 1D SMA200'e çok yakın ve üstünde ise destek olarak çalışabilir)
     if sma200_1d is not None and sma200_1d > 0 and price is not None:
         dist_to_sma200 = (price - sma200_1d) / sma200_1d
         if 0 <= dist_to_sma200 < 0.05:  # SMA200'ün %5 kadar üstünde
             proximity = 0.05 - dist_to_sma200
-            long_risk_penalty -= min(25.0, proximity * 400.0)
+            long_risk_penalty -= min(15.0, proximity * 200.0)
 
     # 3. Rejim Uyarısı (Zaten Boğa Piyasasındayken shortlamak risklidir)
     if regime == "BULL":
@@ -1573,14 +1573,14 @@ def build_short_scores(
         if ema_fast > ema_mid > ema_slow:
             # Momentum farkına göre dinamik ceza
             momentum_gap = (ema_fast - ema_slow) / ema_slow
-            long_risk_penalty -= min(25.0, momentum_gap * 200.0 + 5.0)
+            long_risk_penalty -= min(15.0, momentum_gap * 100.0 + 5.0)
 
     # 5. Aşırı Satım Uzaklık Cezası (Fiyat 4H EMA50'nin çok altındaysa short tehlikeli)
     if ema_mid is not None and price is not None and price > 0 and not is_long:
         dist_below_ema50 = (ema_mid - price) / price
         if dist_below_ema50 > 0.04:  # EMA50'den %4'ten fazla uzakta
             oversold_stretch = dist_below_ema50 - 0.04
-            long_risk_penalty -= min(35.0, oversold_stretch * 200.0 + 10.0)
+            long_risk_penalty -= min(20.0, oversold_stretch * 100.0 + 5.0)
 
 
     return {

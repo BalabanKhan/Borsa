@@ -14,23 +14,20 @@ from zoneinfo import ZoneInfo
 from config import (
     TOP_BIST, TOP_CRYPTO, TOP_EMTIA, TOP_HEAVY_SHORT, MEME_BLACKLIST,
     EMTIA_ATR_MULT, DXY_SENSITIVE, EMTIA_NAMES,
-    API_SLEEP_BIST, API_SLEEP_CRYPTO, API_SLEEP_EMTIA,
+    API_SLEEP_CRYPTO, API_SLEEP_EMTIA,
     ATR_MULTIPLIER_BIST, ATR_MULTIPLIER_CRYPTO,
     ATR_CAP_BIST, ATR_CAP_CRYPTO, ATR_CAP_EMTIA,
     MIN_DOLLAR_VOL_CRYPTO, MIN_DOLLAR_VOL_BIST,
-    GAP_THRESHOLD_PCT, DARTH_MAUL_BODY_RATIO,
+    DARTH_MAUL_BODY_RATIO,
     VOL_SMA_LONG_RATIO, ADX_TOO_LATE,
-    # AM Serisi Anti-Manipülasyon Kalkanları
-    ENGULFING_MIN_BODY_RATIO,
     MIN_HOURLY_DOLLAR_VOL_CRYPTO, MIN_HOURLY_TL_VOL_BIST,
     FUNDING_SHORT_BLOCK_THRESHOLD,
-    OTE_MIN_WAVE_PCT,
     LIQUIDITY_WINDOW_START_HOUR, LIQUIDITY_WINDOW_START_MIN,
     LIQUIDITY_WINDOW_END_HOUR, LIQUIDITY_WINDOW_END_MIN,
     RR_MINIMUM,
 )
 from data_sources import (
-    get_emtia_data, get_bist_data_batch, get_bist_15m_batch, get_crypto_data_cached, get_crypto_data_async_cached,
+    get_emtia_data, get_bist_data_batch, get_bist_15m_batch, get_crypto_data_async_cached,
     clear_cycle_cache, purge_expired_cache,
     is_bist_open, check_xu100_wind, get_btc_status, _get_btc_htf_bias, _check_dxy_shield,
     _is_macro_news_hour, _is_btc_bullish_for_shorts, _get_xu100_daily_data, async_get_crypto_1h_data,
@@ -42,8 +39,7 @@ from indicators import (
     detect_bullish_divergence, detect_squeeze, calculate_relative_strength,
     calculate_anchored_vwap, detect_vwap_bounce, detect_obv_accumulation,
     calculate_orb_cage, calculate_time_specific_rvol,
-    # AM Serisi
-    check_bullish_engulfing_momentum, calculate_cmf, is_cmf_wash_trade,
+    check_bullish_engulfing_momentum, calculate_cmf,
     sniper_calculate_ote_body,
 )
 from data_guard import guard_mtf_bundle, guard_signal_output

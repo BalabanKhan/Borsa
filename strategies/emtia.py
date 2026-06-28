@@ -50,101 +50,15 @@ from conviction_scorer import (
 
 from .helpers import _extract_raw_indicators, _get_consecutive_sl, _is_in_liquidity_window, _adx_momentum_ok
 # ════════════════════════════════════════
-def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_collector=None):
-    """Emtia strateji analizi. 3 strateji + DXY/ATR/Haber kalkanları."""
+def _check_emtia_1_trend_surf(symbol, df_4h, current_price, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, in_squeeze):
     signals = []
-
-    if _is_macro_news_hour():
-        return signals
-
-    if is_weekend_fakeout_time():
-        return signals
-
-    if df_1d is None or len(df_1d) < config.EMTIA_LOOKBACK_LIMIT:
-        return signals
-
-    # Ponytail: Removed unnecessary df.copy() calls
-
-    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_FAST, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_21, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
-    df_1d.ta.adx(length=config.IND_ADX_LENGTH, append=True)
-    df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
-    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
-    if len(df_1d) >= 200:
-        df_1d.ta.sma(length=200, append=True)
-
     if df_4h is not None and len(df_4h) >= 20:
-        df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
-        df_4h.ta.ema(length=config.IND_EMA_21, append=True)
-        df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
-        df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
-        df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
-        # Emtia vol_sma hesapla (1E fix)
-        df_4h['vol_sma_20'] = df_4h['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean()
-
-    last_1d = df_1d.iloc[-1]
-    current_price = float(last_1d['close'])
-
-    if metrics_collector is not None:
-        def _get_metric(s, k): return round(s.get(k, 0), 2) if pd.notna(s.get(k)) else None
-        metrics_collector[symbol] = {
-            "Symbol": symbol, "Market": "EMTIA", "Price": current_price,
-            "1D RSI": _get_metric(last_1d, "RSI_14"),
-            "4H ADX": _get_metric(df_4h.iloc[-1], "ADX_14") if df_4h is not None else None,
-            "1H RSI": None,
-            "1D SMA 50": _get_metric(last_1d, "EMA_50"),
-            "1D Trend SMA": _get_metric(last_1d, "SMA_200") if 'SMA_200' in last_1d else None, # ponytail: simplified get_trend_sma
-            "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
-            "1H Volume": None
-        }
-
-
-    atr_mult = EMTIA_ATR_MULT.get(symbol, 2.5)
-    atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
-    if atr_val is None or pd.isna(atr_val):
-        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
-    # RED-08: Emtia ATR Cap — flash crash koruması
-    raw_sl_dist = atr_mult * atr_val
-    dynamic_sl_dist = max(
-        min(raw_sl_dist, current_price * ATR_CAP_EMTIA),
-        current_price * config.MIN_SL_PCT
-    )
-    sl_pct = (dynamic_sl_dist / current_price) * 100
-
-    is_dxy_sensitive = symbol in DXY_SENSITIVE
-    dxy_block_long = is_dxy_sensitive and dxy_bullish
-    emtia_name = EMTIA_NAMES.get(symbol, symbol)
-
-    # AM-06: Likidite Saatleri Zaman Kilidi — DXY-hassas emtialar sadece 15:30-20:00
-    if is_dxy_sensitive and not _is_in_liquidity_window():
-        logging.debug(f"[AM-06] {symbol}: DXY-hassas emtia, likidite penceresi dışında → sinyal yok.")
-        return signals
-
-    # EMTİA 1: TREND SÖRFÜ
-    if df_4h is not None and len(df_4h) >= 20:
-        # TREND_BB_SQUEEZE_BLOCKED: Dar bant squeeze içindeyken trend takibini bloke eder (Chop market engeli)
-        in_squeeze = False
-        if config.TREND_BB_SQUEEZE_BLOCKED:
-            bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
-            bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
-            bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
-            if bb_upper_col and bb_lower_col and bb_mid_col:
-                bbu = last_1d[bb_upper_col[0]]
-                bbl = last_1d[bb_lower_col[0]]
-                bbm = last_1d[bb_mid_col[0]]
-                bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
-                if bb_width < config.EMTIA_SQUEEZE_WIDTH_LIMIT:
-                    in_squeeze = True
-
         last_4h = df_4h.iloc[-1]
         adx_4h = last_4h.get('ADX_14')
         ema8_4h = last_4h.get('EMA_8')
         ema21_4h = last_4h.get('EMA_21')
 
-        if (not pd.isna(adx_4h) and not pd.isna(ema8_4h) and not pd.isna(ema21_4h)):
-            # RED-02: ADX momentum kontrolü
+        if not pd.isna(adx_4h) and not pd.isna(ema8_4h) and not pd.isna(ema21_4h):
             if not in_squeeze and _adx_momentum_ok(df_4h, last_4h) and ema8_4h > ema21_4h:
                 if (last_4h['low'] <= ema21_4h and last_4h['close'] > ema21_4h
                         and last_4h['close'] > last_4h['open']):
@@ -203,149 +117,162 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                             "position_size_pct": _conv_e1s.position_size_pct,
                             "reason": (
                                 f"🏄 {emtia_name} Düşüş Trendi!\n"
-                                f"4S ADX &gt; {adx_4h:.0f} Güçlü Düşüş. EMA8 &lt; EMA21.\n"
+                                f"4S ADX > {adx_4h:.0f} Güçlü Düşüş. EMA8 < EMA21.\n"
                                 f"4S EMA21'e pullback + kırmızı mum onayı.\n"
                                 f"SL: {atr_mult}× ATR ({sl_pct:.1f}%)"
                             ) + _conv_e1s.to_reason_suffix()
                         })
+    return signals
 
-    # EMTİA 2: KESKİN NİŞANCI (SMC / OTE)
+
+def _check_emtia_2_sniper_long(symbol, df_1d, df_4h, current_price, atr_val, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_4h, htf_bias):
+    signals = []
+    if htf_bias == 1 and not dxy_block_long:
+        swing_lows = sniper_find_swing_points(df_4h, point_type="low")
+        swing_highs = sniper_find_swing_points(df_4h, point_type="high")
+        sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows, point_type="low")
+        if sweep_ok:
+            msb_ok, msb_high, msb_idx = sniper_detect_msb(df_4h, swing_highs, point_type="high")
+            if msb_ok:
+                ote_top, ote_bottom = sniper_calculate_ote(sweep_low, msb_high)
+                if ote_bottom <= current_price <= ote_top:
+                    has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
+                    fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                    
+                    if fvg_ok:
+                        ltf_confirm = False
+                        if not config.SMC_LTF_MSB_CONFIRM:
+                            ltf_confirm = True
+                        elif (df_1h_emtia := get_emtia_1h_data(symbol)) is not None and not df_1h_emtia.empty:
+                            df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
+                            df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
+                            ltf_confirm, _, _ = sniper_detect_msb(df_1h_emtia, sniper_find_swing_points(df_1h_emtia, point_type="high", neighbors=2), point_type="high")
+
+                        if ltf_confirm:
+                            sl = sweep_low - (atr_val * config.EMTIA_SMC_LONG_ATR_SL_MULT)
+                            sl_dist = max(current_price - sl, 1e-8)
+                            tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
+                            fvg_label = " + FVG ✅" if has_fvg else ""
+                            dxy_note = "\n🛡️ DXY: Dolar zayıf ✅" if is_dxy_sensitive else ""
+                            _rr_e2l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
+                            
+                            ema_fast_val = None
+                            ema_mid_val = None
+                            if config.SMC_LTF_MSB_CONFIRM and df_1h_emtia is not None and not df_1h_emtia.empty:
+                                ema_fast_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
+                                ema_mid_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
+                            else:
+                                ema_fast_val = last_4h.get('EMA_8')
+                                ema_mid_val = last_4h.get('EMA_21')
+
+                            _scores_e2l = build_breakout_scores(
+                                bb_width=None, price=current_price, ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
+                                volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
+                                dollar_vol=last_4h.get('volume', 0) * current_price,
+                                rr=_rr_e2l, regime="BULL",
+                                macro_aligned=(not dxy_block_long), consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
+                            )
+                            if has_fvg:
+                                _scores_e2l["engulfing"] = min(100.0, _scores_e2l["engulfing"] + config.SMC_FVG_BONUS)
+
+                            _conv_e2l = calculate_conviction(_scores_e2l)
+                            if _conv_e2l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                    "ticker": symbol, "market": "EMTİA",
+                                    "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "AL",
+                                    "entry_price": current_price, "sl": sl, "tp": tp,
+                                    "conviction_score": _conv_e2l.total_score, "conviction_grade": _conv_e2l.grade, "conviction_details": _conv_e2l.component_scores,
+                                    "position_size_pct": _conv_e2l.position_size_pct,
+                                    "reason": (
+                                        f"🎯 {emtia_name} SMC Kurulum{fvg_label}\n"
+                                        f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
+                                        f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
+                                        f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
+                                        f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%){dxy_note}"
+                                    ) + _conv_e2l.to_reason_suffix()
+                                })
+    return signals
+
+
+def _check_emtia_2_sniper_short(symbol, df_1d, df_4h, current_price, atr_val, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_4h, htf_bias):
+    signals = []
+    if htf_bias == -1:
+        swing_lows = sniper_find_swing_points(df_4h, point_type="low")
+        swing_highs = sniper_find_swing_points(df_4h, point_type="high")
+        sweep_ok, sweep_high = sniper_detect_sweep(df_4h, swing_highs, point_type="high")
+        if sweep_ok:
+            msb_ok, msb_low, msb_idx = sniper_detect_msb(df_4h, swing_lows, point_type="low")
+            if msb_ok:
+                ote_top, ote_bottom = sniper_calculate_ote(msb_low, sweep_high)
+                if ote_bottom <= current_price <= ote_top:
+                    has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bearish")
+                    fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
+                    
+                    if fvg_ok:
+                        ltf_confirm = False
+                        if not config.SMC_LTF_MSB_CONFIRM:
+                            ltf_confirm = True
+                        elif (df_1h_emtia := get_emtia_1h_data(symbol)) is not None and not df_1h_emtia.empty:
+                            df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
+                            df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
+                            ltf_confirm, _, _ = sniper_detect_msb(df_1h_emtia, sniper_find_swing_points(df_1h_emtia, point_type="low", neighbors=2), point_type="low")
+
+                        if ltf_confirm:
+                            sl = sweep_high + (atr_val * config.EMTIA_SMC_SHORT_ATR_SL_MULT)
+                            sl_dist = max(sl - current_price, 1e-8)
+                            tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
+                            fvg_label = " + FVG ✅" if has_fvg else ""
+                            _rr_e2s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
+                            
+                            ema_fast_val = None
+                            ema_mid_val = None
+                            if config.SMC_LTF_MSB_CONFIRM and df_1h_emtia is not None and not df_1h_emtia.empty:
+                                ema_fast_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
+                                ema_mid_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
+                            else:
+                                ema_fast_val = last_4h.get('EMA_8')
+                                ema_mid_val = last_4h.get('EMA_21')
+
+                            _scores_e2s = build_breakout_scores(
+                                bb_width=None, price=current_price, ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
+                                volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
+                                dollar_vol=last_4h.get('volume', 0) * current_price,
+                                rr=_rr_e2s, regime="BEAR",
+                                macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
+                            )
+                            if has_fvg:
+                                _scores_e2s["engulfing"] = min(100.0, _scores_e2s["engulfing"] + config.SMC_FVG_BONUS)
+
+                            _conv_e2s = calculate_conviction(_scores_e2s)
+                            if _conv_e2s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
+                                signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
+                                    "ticker": symbol, "market": "EMTİA",
+                                    "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "SAT",
+                                    "entry_price": current_price, "sl": sl, "tp": tp,
+                                    "conviction_score": _conv_e2s.total_score, "conviction_grade": _conv_e2s.grade, "conviction_details": _conv_e2s.component_scores,
+                                    "position_size_pct": _conv_e2s.position_size_pct,
+                                    "reason": (
+                                        f"🎯 {emtia_name} SHORT SMC Kurulum{fvg_label}\n"
+                                        f"🧹 Likidite: Eski tepe ({sweep_high:.2f}) temizlendi.\n"
+                                        f"📐 MSB: Aşağı yapı kırılımı ({msb_low:.2f}).\n"
+                                        f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
+                                        f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%)"
+                                    ) + _conv_e2s.to_reason_suffix()
+                                })
+    return signals
+
+
+def _check_emtia_2_sniper(symbol, df_1d, df_4h, current_price, atr_val, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_4h):
+    signals = []
     if df_4h is not None and len(df_4h) >= config.EMTIA_LOOKBACK_LIMIT:
         htf_bias = sniper_get_htf_bias(df_1d)
+        signals.extend(_check_emtia_2_sniper_long(symbol, df_1d, df_4h, current_price, atr_val, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_4h, htf_bias))
+        signals.extend(_check_emtia_2_sniper_short(symbol, df_1d, df_4h, current_price, atr_val, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_4h, htf_bias))
+    return signals
 
-        if htf_bias == 1 and not dxy_block_long:
-            swing_lows = sniper_find_swing_points(df_4h, point_type="low")
-            swing_highs = sniper_find_swing_points(df_4h, point_type="high")
-            sweep_ok, sweep_low = sniper_detect_sweep(df_4h, swing_lows, point_type="low")
-            if sweep_ok:
-                msb_ok, msb_high, msb_idx = sniper_detect_msb(df_4h, swing_highs, point_type="high")
-                if msb_ok:
-                    ote_top, ote_bottom = sniper_calculate_ote(sweep_low, msb_high)
-                    if ote_bottom <= current_price <= ote_top:
-                        has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bullish")
-                        fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
-                        
-                        if fvg_ok:
-                            ltf_confirm = False
-                            if not config.SMC_LTF_MSB_CONFIRM:
-                                ltf_confirm = True
-                            elif (df_1h_emtia := get_emtia_1h_data(symbol)) is not None and not df_1h_emtia.empty:
-                                df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
-                                df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
-                                ltf_confirm, _, _ = sniper_detect_msb(df_1h_emtia, sniper_find_swing_points(df_1h_emtia, point_type="high", neighbors=2), point_type="high")
 
-                            if ltf_confirm:
-                                sl = sweep_low - (atr_val * config.EMTIA_SMC_LONG_ATR_SL_MULT)
-                                sl_dist = max(current_price - sl, 1e-8)
-                                tp = current_price + (sl_dist * config.BEAR_HUNTER_TP_RR)
-                                fvg_label = " + FVG ✅" if has_fvg else ""
-                                dxy_note = "\n🛡️ DXY: Dolar zayıf ✅" if is_dxy_sensitive else ""
-                                _rr_e2l = abs(tp - current_price) / max(abs(current_price - sl), 1e-8)
-                                
-                                # 1H verisi varsa onun EMA'larını kullan
-                                ema_fast_val = None
-                                ema_mid_val = None
-                                if config.SMC_LTF_MSB_CONFIRM and df_1h_emtia is not None and not df_1h_emtia.empty:
-                                    ema_fast_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
-                                    ema_mid_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
-                                else:
-                                    ema_fast_val = last_4h.get('EMA_8')
-                                    ema_mid_val = last_4h.get('EMA_21')
-
-                                _scores_e2l = build_breakout_scores(
-                                    bb_width=None, price=current_price, ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
-                                    volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
-                                    dollar_vol=last_4h.get('volume', 0) * current_price,
-                                    rr=_rr_e2l, regime="BULL",
-                                    macro_aligned=(not dxy_block_long), consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
-                                )
-                                if has_fvg:
-                                    _scores_e2l["engulfing"] = min(100.0, _scores_e2l["engulfing"] + config.SMC_FVG_BONUS)
-
-                                _conv_e2l = calculate_conviction(_scores_e2l)
-                                if _conv_e2l.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                        "ticker": symbol, "market": "EMTİA",
-                                        "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "AL",
-                                        "entry_price": current_price, "sl": sl, "tp": tp,
-                                        "conviction_score": _conv_e2l.total_score, "conviction_grade": _conv_e2l.grade, "conviction_details": _conv_e2l.component_scores,
-                                        "position_size_pct": _conv_e2l.position_size_pct,
-                                        "reason": (
-                                            f"🎯 {emtia_name} SMC Kurulum{fvg_label}\n"
-                                            f"🧹 Likidite: Eski dip ({sweep_low:.2f}) temizlendi.\n"
-                                            f"📐 MSB: Yapı kırılımı ({msb_high:.2f}) onaylı.\n"
-                                            f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
-                                            f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%){dxy_note}"
-                                        ) + _conv_e2l.to_reason_suffix()
-                                    })
-
-        elif htf_bias == -1:
-            swing_lows = sniper_find_swing_points(df_4h, point_type="low")
-            swing_highs = sniper_find_swing_points(df_4h, point_type="high")
-            sweep_ok, sweep_high = sniper_detect_sweep(df_4h, swing_highs, point_type="high")
-            if sweep_ok:
-                msb_ok, msb_low, msb_idx = sniper_detect_msb(df_4h, swing_lows, point_type="low")
-                if msb_ok:
-                    # RED-11: OTE Short parametre sırası düzeltmesi (yüksek, düşük)
-                    ote_top, ote_bottom = sniper_calculate_ote(msb_low, sweep_high)
-                    if ote_bottom <= current_price <= ote_top:
-                        has_fvg, _, _ = sniper_detect_fvg(df_4h, ote_top, ote_bottom, direction="bearish")
-                        fvg_ok = not config.SMC_FVG_REQUIRED or has_fvg
-                        
-                        if fvg_ok:
-                            ltf_confirm = False
-                            if not config.SMC_LTF_MSB_CONFIRM:
-                                ltf_confirm = True
-                            elif (df_1h_emtia := get_emtia_1h_data(symbol)) is not None and not df_1h_emtia.empty:
-                                df_1h_emtia.ta.ema(length=config.IND_EMA_FAST, append=True)
-                                df_1h_emtia.ta.ema(length=config.IND_EMA_21, append=True)
-                                ltf_confirm, _, _ = sniper_detect_msb(df_1h_emtia, sniper_find_swing_points(df_1h_emtia, point_type="low", neighbors=2), point_type="low")
-
-                            if ltf_confirm:
-                                sl = sweep_high + (atr_val * config.EMTIA_SMC_SHORT_ATR_SL_MULT)
-                                sl_dist = max(sl - current_price, 1e-8)
-                                tp = current_price - (sl_dist * config.BEAR_HUNTER_TP_RR)
-                                fvg_label = " + FVG ✅" if has_fvg else ""
-                                _rr_e2s = abs(current_price - tp) / max(abs(sl - current_price), 1e-8)
-                                
-                                # 1H verisi varsa onun EMA'larını kullan
-                                ema_fast_val = None
-                                ema_mid_val = None
-                                if config.SMC_LTF_MSB_CONFIRM and df_1h_emtia is not None and not df_1h_emtia.empty:
-                                    ema_fast_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_FAST}')
-                                    ema_mid_val = df_1h_emtia.iloc[-1].get(f'EMA_{config.IND_EMA_21}')
-                                else:
-                                    ema_fast_val = last_4h.get('EMA_8')
-                                    ema_mid_val = last_4h.get('EMA_21')
-
-                                _scores_e2s = build_breakout_scores(
-                                    bb_width=None, price=current_price, ema_fast=ema_fast_val, ema_mid=ema_mid_val, ema_slow=None,
-                                    volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'),
-                                    dollar_vol=last_4h.get('volume', 0) * current_price,
-                                    rr=_rr_e2s, regime="BEAR",
-                                    macro_aligned=True, consecutive_sl=_get_consecutive_sl(symbol), market="EMTIA"
-                                )
-                                if has_fvg:
-                                    _scores_e2s["engulfing"] = min(100.0, _scores_e2s["engulfing"] + config.SMC_FVG_BONUS)
-
-                                _conv_e2s = calculate_conviction(_scores_e2s)
-                                if _conv_e2s.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
-                                    signals.append({ "raw_indicators": _extract_raw_indicators(locals()),
-                                        "ticker": symbol, "market": "EMTİA",
-                                        "strategy": "EMTİA 2: KESKİN NİŞANCI (SMC/OTE)", "signal": "SAT",
-                                        "entry_price": current_price, "sl": sl, "tp": tp,
-                                        "conviction_score": _conv_e2s.total_score, "conviction_grade": _conv_e2s.grade, "conviction_details": _conv_e2s.component_scores,
-                                        "position_size_pct": _conv_e2s.position_size_pct,
-                                        "reason": (
-                                            f"🎯 {emtia_name} SHORT SMC Kurulum{fvg_label}\n"
-                                            f"🧹 Likidite: Eski tepe ({sweep_high:.2f}) temizlendi.\n"
-                                            f"📐 MSB: Aşağı yapı kırılımı ({msb_low:.2f}).\n"
-                                            f"🎣 OTE Bölgesi: {ote_bottom:.2f} - {ote_top:.2f}\n"
-                                            f"🛡️ ATR Stop: {atr_mult}× ({sl_pct:.1f}%)"
-                                        ) + _conv_e2s.to_reason_suffix()
-                                    })
-
-    # EMTİA 3: VOLATİLİTE SIKIŞMASI (Squeeze)
+def _check_emtia_3_squeeze(symbol, df_1d, current_price, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_1d):
+    signals = []
     squeeze_fired, sq_dir, sq_candle = detect_squeeze(df_1d)
     if squeeze_fired:
         if sq_dir == "up" and not dxy_block_long:
@@ -401,6 +328,103 @@ def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_co
                         f"SL: {atr_mult}× ATR ({sl_pct:.1f}%)"
                     ) + _conv_e3s.to_reason_suffix()
                 })
+    return signals
+
+
+def _prepare_emtia_indicators(df_1d, df_4h):
+    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_FAST, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_21, append=True)
+    df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
+    df_1d.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    df_1d.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
+    if len(df_1d) >= 200:
+        df_1d.ta.sma(length=200, append=True)
+
+    if df_4h is not None and len(df_4h) >= 20:
+        df_4h.ta.ema(length=config.IND_EMA_FAST, append=True)
+        df_4h.ta.ema(length=config.IND_EMA_21, append=True)
+        df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
+        df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+        df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+        df_4h['vol_sma_20'] = df_4h['volume'].rolling(config.IND_VOL_SMA_LENGTH).mean()
+
+
+def _collect_emtia_metrics(symbol, current_price, last_1d, df_4h, metrics_collector):
+    if metrics_collector is not None:
+        def _get_metric(s, k): return round(s.get(k, 0), 2) if pd.notna(s.get(k)) else None
+        metrics_collector[symbol] = {
+            "Symbol": symbol, "Market": "EMTIA", "Price": current_price,
+            "1D RSI": _get_metric(last_1d, "RSI_14"),
+            "4H ADX": _get_metric(df_4h.iloc[-1], "ADX_14") if df_4h is not None else None,
+            "1H RSI": None,
+            "1D SMA 50": _get_metric(last_1d, "EMA_50"),
+            "1D Trend SMA": _get_metric(last_1d, "SMA_200") if 'SMA_200' in last_1d else None,
+            "Trend": "Bullish" if last_1d.get("EMA_8", 0) > last_1d.get("EMA_21", float('inf')) else "Bearish",
+            "1H Volume": None
+        }
+
+
+def analyze_strategies_emtia(symbol, df_1d, df_4h, dxy_bullish=False, metrics_collector=None):
+    """Emtia strateji analizi. 3 strateji + DXY/ATR/Haber kalkanları."""
+    signals = []
+
+    if _is_macro_news_hour():
+        return signals
+
+    if is_weekend_fakeout_time():
+        return signals
+
+    if df_1d is None or len(df_1d) < config.EMTIA_LOOKBACK_LIMIT:
+        return signals
+
+    _prepare_emtia_indicators(df_1d, df_4h)
+
+    last_1d = df_1d.iloc[-1]
+    current_price = float(last_1d['close'])
+
+    _collect_emtia_metrics(symbol, current_price, last_1d, df_4h, metrics_collector)
+
+    atr_mult = EMTIA_ATR_MULT.get(symbol, 2.5)
+    atr_val = last_1d.get('ATRr_14', last_1d.get('ATR_14'))
+    if atr_val is None or pd.isna(atr_val):
+        atr_val = current_price * config.BEAR_HUNTER_DEFAULT_ATR_MULT
+    raw_sl_dist = atr_mult * atr_val
+    dynamic_sl_dist = max(
+        min(raw_sl_dist, current_price * ATR_CAP_EMTIA),
+        current_price * config.MIN_SL_PCT
+    )
+    sl_pct = (dynamic_sl_dist / current_price) * 100
+
+    is_dxy_sensitive = symbol in DXY_SENSITIVE
+    dxy_block_long = is_dxy_sensitive and dxy_bullish
+    emtia_name = EMTIA_NAMES.get(symbol, symbol)
+
+    if is_dxy_sensitive and not _is_in_liquidity_window():
+        logging.debug(f"[AM-06] {symbol}: DXY-hassas emtia, likidite penceresi dışında → sinyal yok.")
+        return signals
+
+    # TREND_BB_SQUEEZE_BLOCKED logic
+    in_squeeze = False
+    if df_4h is not None and len(df_4h) >= 20:
+        if config.TREND_BB_SQUEEZE_BLOCKED:
+            bb_upper_col = [c for c in df_1d.columns if 'BBU' in c]
+            bb_lower_col = [c for c in df_1d.columns if 'BBL' in c]
+            bb_mid_col = [c for c in df_1d.columns if 'BBM' in c]
+            if bb_upper_col and bb_lower_col and bb_mid_col:
+                bbu = last_1d[bb_upper_col[0]]
+                bbl = last_1d[bb_lower_col[0]]
+                bbm = last_1d[bb_mid_col[0]]
+                bb_width = (bbu - bbl) / bbm if not math.isclose(float(bbm), 0.0, abs_tol=1e-8) else 1
+                if bb_width < config.EMTIA_SQUEEZE_WIDTH_LIMIT:
+                    in_squeeze = True
+
+    # Call sub-strategies
+    last_4h = df_4h.iloc[-1] if df_4h is not None and not df_4h.empty else None
+    signals.extend(_check_emtia_1_trend_surf(symbol, df_4h, current_price, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, in_squeeze))
+    signals.extend(_check_emtia_2_sniper(symbol, df_1d, df_4h, current_price, atr_val, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_4h))
+    signals.extend(_check_emtia_3_squeeze(symbol, df_1d, current_price, dynamic_sl_dist, atr_mult, sl_pct, dxy_block_long, emtia_name, is_dxy_sensitive, last_1d))
 
     return signals
 

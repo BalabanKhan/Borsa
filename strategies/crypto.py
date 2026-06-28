@@ -1703,18 +1703,8 @@ def _check_crypto_long_smc(ctx):
     
     return signals
 
-# KRİPTO STRATEJİ MOTORU
-def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bias=0, metrics_collector=None, df_1h_sniper=None):
-    signals = []
-
-    if len(df_1d) < 50 or len(df_4h) < 20:
-        return signals
-
-    # Pandas Mutability koruması
-    df_1d = df_1d.copy()
-    df_4h = df_4h.copy()
-
-    # Calculate indicators if they are not already present (e.g. during backtests where they are precomputed)
+# Ensure indicators and filter signals are helper functions
+def _ensure_crypto_1d_indicators(df_1d):
     if 'RSI_14' not in df_1d.columns:
         df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
     if 'EMA_20' not in df_1d.columns:
@@ -1728,6 +1718,8 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     if 'SMA_200' not in df_1d.columns and len(df_1d) >= 200:
         df_1d.ta.sma(length=200, append=True)
 
+
+def _ensure_crypto_4h_indicators(df_4h):
     if 'RSI_14' not in df_4h.columns:
         df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
     if 'EMA_20' not in df_4h.columns:
@@ -1759,119 +1751,46 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
             df_4h['chop'] = 50.0
         df_4h['chop'] = df_4h['chop'].fillna(50.0)
 
-    last_1d = df_1d.iloc[-1]
-    last_4h = df_4h.iloc[-1]
-    current_price = last_4h['close']
 
-    adx_1d = last_1d.get('ADX_14', 0)
-    is_choppy = adx_1d < 25 if not pd.isna(adx_1d) else False
+def _ensure_crypto_indicators(df_1d, df_4h):
+    _ensure_crypto_1d_indicators(df_1d)
+    _ensure_crypto_4h_indicators(df_4h)
 
-    # --- DYNAMIC FILTERS (Variant F: Pure Math) ---
-    body = abs(last_4h['close'] - last_4h['open'])
-    upper_wick = last_4h['high'] - max(last_4h['close'], last_4h['open'])
-    lower_wick = min(last_4h['close'], last_4h['open']) - last_4h['low']
-    is_whipsaw = (upper_wick > body * 2.0) or (lower_wick > body * 2.0)
-    
-    adx_val = last_4h.get('ADX_14', 0)
-    if pd.isna(adx_val): adx_val = 0
-    rsi_val = last_4h.get('RSI_14', 50)
-    if pd.isna(rsi_val): rsi_val = 50
-        
-    ema_20_val = last_4h.get('EMA_20', 0)
-    ema_50_val = last_4h.get('EMA_50', 0)
-    ema_diff_pct = abs(ema_20_val - ema_50_val) / current_price if current_price > 0 else 0
-    candle_body_pct = body / current_price if current_price > 0 else 0
-        
-    # Önceki Varyans D Kuralları
-    # HARD FILTERS REMOVED: Whipsaw, ADX, EMA diff logic delegated to conviction_scorer (Fuzzy)
-    # if is_whipsaw or adx_val > 45 or ema_diff_pct > 0.015:
-    #     return signals 
-        
-    # Yeni Varyans F (Pure Math) Kuralları
-    # HARD FILTERS REMOVED: ADX, RSI, Candle Body pure math block limits delegated to fuzzy logic
-    # if adx_val < 14.2 or rsi_val > 57.82 or candle_body_pct > 0.0257:
-    #     return signals
-        
-    dynamic_atr_mult = 2.0 if adx_val > 25 else 1.2
-    # -----------------------------------------
 
-    if metrics_collector is not None:
-        metrics_collector[symbol] = {
-            "Symbol": symbol, "Market": "KRIPTO", "Price": current_price,
-            "1D RSI": round(last_1d.get("RSI_14", 0), 2) if pd.notna(last_1d.get("RSI_14")) else None,
-            "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
-            "1H RSI": None,
-            "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
-            "1D Trend SMA": round(get_trend_sma(last_1d), 2) if pd.notna(get_trend_sma(last_1d)) else None,
-            "Trend": "Bullish" if last_1d.get("EMA_20", 0) > last_1d.get("EMA_50", float('inf')) else "Bearish",
-            "1H Volume": last_4h.get("volume")
-        }
+def _is_crypto_signal_valid(sig, rel_vol_4h, ema_diff_pct, cmf_4h):
+    score = sig.get('conviction_score', 0)
+    direction = "LONG" if sig.get('signal') == "AL" else "SHORT"
+    if score < 50:
+        return False
+    if rel_vol_4h < 0.7:
+        return False
+    if ema_diff_pct > 8.0:
+        return False
+    if direction == 'LONG' and cmf_4h < -0.10:
+        return False
+    if direction == 'SHORT' and cmf_4h > 0.10:
+        return False
+    return True
 
-    ctx = {
-        "symbol": symbol, "last_1d": last_1d, "last_4h": last_4h,
-        "current_price": current_price, "df_1d": df_1d, "df_4h": df_4h,
-        "btc_ok": btc_ok, "btc_sniper_bias": btc_sniper_bias,
-        "dynamic_atr_mult": dynamic_atr_mult,
-        "is_choppy": is_choppy, "adx_1d": adx_1d,
-        "market": "KRIPTO",
-        "df_1h_sniper": df_1h_sniper,
-    }
 
-    signals.extend(_check_crypto_1_liquidation(ctx))
-    signals.extend(_check_crypto_2_mega_trend(ctx))
-    signals.extend(_check_crypto_3_breakout(ctx))
-    signals.extend(_check_crypto_shorts(ctx))
-    signals.extend(_check_crypto_4_sniper_ote(ctx))
-    signals.extend(_check_crypto_5_vol_squeeze(ctx))
-    signals.extend(_check_crypto_6_vwap(ctx))
-    signals.extend(_check_crypto_7_obv(ctx))
-    signals.extend(_check_crypto_sniper_1h(ctx))
-    
-    # Yeni eklenen 5'li SMC Long Strateji Paketi
-    signals.extend(_check_crypto_long_smc(ctx))
-
-    # Süper Sinyal (Confluence) Modülü ve Matematiksel Filtreler (Getiri ve Verimlilik Modeli)
-    # 1. Göreceli Hacim (Relative Volume) Hesaplama
+def _filter_crypto_signals(signals, symbol, current_price, last_4h, ctx):
     vol_sma = last_4h.get('vol_sma_20', 0)
     vol = last_4h.get('volume', 0)
     rel_vol_4h = vol / vol_sma if (pd.notna(vol_sma) and vol_sma > 0) else 1.0
     
-    # 2. EMA Farkı % (EMA Extension) Hesaplama
     ema_20_val = last_4h.get('EMA_20', 0)
     ema_50_val = last_4h.get('EMA_50', 0)
     ema_diff_pct = 0.0
     if pd.notna(ema_20_val) and pd.notna(ema_50_val) and pd.notna(current_price) and current_price > 0:
         ema_diff_pct = (abs(ema_20_val - ema_50_val) / current_price) * 100
         
-    # 3. CMF Değeri
     cmf_4h = last_4h.get('CMF_20', 0)
     if pd.isna(cmf_4h):
         cmf_4h = 0.0
 
-    filtered_signals = []
-    for sig in signals:
-        score = sig.get('conviction_score', 0)
-        direction = "LONG" if sig.get('signal') == "AL" else "SHORT"
-        
-        # Filtre 1: Score >= 50 (WATCH, MEDIUM ve STRONG sinyallerine izin ver)
-        if score < 50:
-            continue
-            
-        # Filtre 2: Rel_Vol >= 0.7 (Hacim filtresi biraz esnetildi)
-        if rel_vol_4h < 0.7:
-            continue
-            
-        # Filtre 3: EMA_Diff <= 8.0% (Kripto volatilitesine uygun olarak esnetildi)
-        if ema_diff_pct > 8.0:
-            continue
-            
-        # Filtre 4: CMF Yön Uyumlaması (Bir miktar gecikme payı bırakıldı)
-        if direction == 'LONG' and cmf_4h < -0.10:
-            continue
-        if direction == 'SHORT' and cmf_4h > 0.10:
-            continue
-            
-        filtered_signals.append(sig)
+    filtered_signals = [
+        sig for sig in signals if _is_crypto_signal_valid(sig, rel_vol_4h, ema_diff_pct, cmf_4h)
+    ]
 
     al_signals = [s for s in filtered_signals if s.get("signal") == "AL"]
     sat_signals = [s for s in filtered_signals if s.get("signal") == "SAT"]
@@ -1909,3 +1828,66 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         })
 
     return filtered_signals
+
+
+# KRİPTO STRATEJİ MOTORU
+def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bias=0, metrics_collector=None, df_1h_sniper=None):
+    signals = []
+
+    if len(df_1d) < 50 or len(df_4h) < 20:
+        return signals
+
+    df_1d = df_1d.copy()
+    df_4h = df_4h.copy()
+
+    # Calculate indicators
+    _ensure_crypto_indicators(df_1d, df_4h)
+
+    last_1d = df_1d.iloc[-1]
+    last_4h = df_4h.iloc[-1]
+    current_price = last_4h['close']
+
+    adx_1d = last_1d.get('ADX_14', 0)
+    is_choppy = adx_1d < 25 if not pd.isna(adx_1d) else False
+
+    body = abs(last_4h['close'] - last_4h['open'])
+    adx_val = last_4h.get('ADX_14', 0)
+    if pd.isna(adx_val): adx_val = 0
+        
+    dynamic_atr_mult = 2.0 if adx_val > 25 else 1.2
+
+    if metrics_collector is not None:
+        metrics_collector[symbol] = {
+            "Symbol": symbol, "Market": "KRIPTO", "Price": current_price,
+            "1D RSI": round(last_1d.get("RSI_14", 0), 2) if pd.notna(last_1d.get("RSI_14")) else None,
+            "4H ADX": round(last_4h.get("ADX_14", 0), 2) if pd.notna(last_4h.get("ADX_14")) else None,
+            "1H RSI": None,
+            "1D SMA 50": round(last_1d.get("EMA_50", 0), 2) if pd.notna(last_1d.get("EMA_50")) else None,
+            "1D Trend SMA": round(get_trend_sma(last_1d), 2) if pd.notna(get_trend_sma(last_1d)) else None,
+            "Trend": "Bullish" if last_1d.get("EMA_20", 0) > last_1d.get("EMA_50", float('inf')) else "Bearish",
+            "1H Volume": last_4h.get("volume")
+        }
+
+    ctx = {
+        "symbol": symbol, "last_1d": last_1d, "last_4h": last_4h,
+        "current_price": current_price, "df_1d": df_1d, "df_4h": df_4h,
+        "btc_ok": btc_ok, "btc_sniper_bias": btc_sniper_bias,
+        "dynamic_atr_mult": dynamic_atr_mult,
+        "is_choppy": is_choppy, "adx_1d": adx_1d,
+        "market": "KRIPTO",
+        "df_1h_sniper": df_1h_sniper,
+    }
+
+    signals.extend(_check_crypto_1_liquidation(ctx))
+    signals.extend(_check_crypto_2_mega_trend(ctx))
+    signals.extend(_check_crypto_3_breakout(ctx))
+    signals.extend(_check_crypto_shorts(ctx))
+    signals.extend(_check_crypto_4_sniper_ote(ctx))
+    signals.extend(_check_crypto_5_vol_squeeze(ctx))
+    signals.extend(_check_crypto_6_vwap(ctx))
+    signals.extend(_check_crypto_7_obv(ctx))
+    signals.extend(_check_crypto_sniper_1h(ctx))
+    signals.extend(_check_crypto_long_smc(ctx))
+
+    # Filter signals
+    return _filter_crypto_signals(signals, symbol, current_price, last_4h, ctx)

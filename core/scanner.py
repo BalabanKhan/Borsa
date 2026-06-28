@@ -99,6 +99,8 @@ class ScannerService:
         signals = sorted(signals, key=lambda x: x.get("conviction_score", 0) if x.get("conviction_score") is not None else 0, reverse=True)
         main_signal_count = 0
         
+        broadcasted_crypto_signals = []
+        
         for decision in signals:
             ticker = decision.get("ticker", "Bilinmiyor")
             strategy = decision.get("strategy", "")
@@ -198,6 +200,16 @@ class ScannerService:
             else:
                 await self.notifier.send_message(msg)
                 await self._set_cooldown(ticker, strategy)
+                
+                if trade.get("market", "") == "KRİPTO":
+                    broadcasted_crypto_signals.append(trade)
+
+        if broadcasted_crypto_signals:
+            from ai_commentary import get_ai_commentary
+            ai_comment = await get_ai_commentary(broadcasted_crypto_signals)
+            if ai_comment:
+                formatted_ai_msg = f"🤖 <b>Yapay Zeka Piyasa Analizi</b>\n━━━━━━━━━━━━━━━━━━\n{ai_comment}"
+                await self.notifier.send_message(formatted_ai_msg)
 
     def _is_on_cooldown(self, ticker, strategy):
         key = (ticker, strategy)
