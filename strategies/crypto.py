@@ -1225,7 +1225,7 @@ def _check_crypto_sniper_1h_long(ctx_1h):
         rr_ratio=_rr_sn_long,
         consecutive_sl=_get_consecutive_sl(symbol),
         is_core_indicators_nan=is_nan_ind,
-        min_volume_usd=50_000,
+        min_volume_usd=config.VOL_ABSOLUTE_MIN_CRYPTO,
         willy_ema=last_1h_s.get('WILLR_21_EMA_13'),
         is_long=True
     )
@@ -1315,7 +1315,7 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         rr_ratio=_rr_sn_short,
         consecutive_sl=_get_consecutive_sl(symbol),
         is_core_indicators_nan=is_nan_ind,
-        min_volume_usd=50_000,
+        min_volume_usd=config.VOL_ABSOLUTE_MIN_CRYPTO,
         willy_ema=last_1h_s.get('WILLR_21_EMA_13'),
         is_long=False
     )
