@@ -620,20 +620,16 @@ def _check_crypto_short_4_sr_flip(ctx):
     recent_lows = df_4h['low'].rolling(window=20).min().shift(5)
     support_level = recent_lows.iloc[-1]
     
-    if current_price > support_level: return signals
-    
     retest_zone = support_level * (1 - config.CRYPTO_SHORT4_RETEST_TOLERANCE)
-    if current_price < retest_zone: return signals
-    
     ema_20 = last_4h.get('EMA_20')
     ema_50 = last_4h.get('EMA_50')
-    if pd.notna(ema_20) and pd.notna(ema_50) and ema_20 > ema_50:
-        return signals
-
     vol_sma = last_4h.get('vol_sma_20', 0)
-    if vol_sma > 0 and last_4h.get('volume', 0) > vol_sma: return signals
     
-    if last_4h['close'] >= last_4h['open']: return signals
+    is_above_support = current_price > support_level
+    is_below_retest = current_price < retest_zone
+    is_ema_bullish = pd.notna(ema_20) and pd.notna(ema_50) and ema_20 > ema_50
+    is_high_vol = vol_sma > 0 and last_4h.get('volume', 0) > vol_sma
+    is_green_candle = last_4h['close'] >= last_4h['open']
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if pd.isna(atr_val): atr_val = current_price * 0.02
@@ -659,6 +655,11 @@ def _check_crypto_short_4_sr_flip(ctx):
     )
     if not in_supply:
         _scores["conflict_penalty"] -= 15.0
+    if is_above_support: _scores["conflict_penalty"] -= 10.0
+    if is_below_retest: _scores["conflict_penalty"] -= 5.0
+    if is_ema_bullish: _scores["conflict_penalty"] -= 10.0
+    if is_high_vol: _scores["conflict_penalty"] -= 10.0
+    if is_green_candle: _scores["conflict_penalty"] -= 5.0
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
