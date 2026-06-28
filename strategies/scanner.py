@@ -33,7 +33,7 @@ from data_sources import (
     get_emtia_data, get_bist_data_batch, get_bist_15m_batch, get_crypto_data_cached, get_crypto_data_async_cached,
     clear_cycle_cache, purge_expired_cache,
     is_bist_open, check_xu100_wind, get_btc_status, _get_btc_htf_bias, _check_dxy_shield,
-    _is_macro_news_hour, _is_btc_bullish_for_shorts, _get_xu100_daily_data,
+    _is_macro_news_hour, _is_btc_bullish_for_shorts, _get_xu100_daily_data, async_get_crypto_1h_data,
 )
 from indicators import (
     sniper_get_htf_bias, sniper_find_swing_points, sniper_detect_sweep,
@@ -157,11 +157,18 @@ async def scan_all_markets():
             result = []
             try:
                 async with semaphore:
-                    df_1d, df_4h = await get_crypto_data_async_cached(sym)
+                    (df_1d, df_4h), df_1h_sniper = await asyncio.gather(
+                        get_crypto_data_async_cached(sym),
+                        async_get_crypto_1h_data(sym)
+                    )
                     if df_1d is not None:
                         # DG-05: MTF hizalama kontrolü
                         if guard_mtf_bundle(sym, df_1d, df_4h):
-                            result = analyze_strategies_crypto(sym, df_1d, df_4h, btc_ok, btc_sniper_bias, metrics_collector=scan_metrics)
+                            result = analyze_strategies_crypto(
+                                sym, df_1d, df_4h, btc_ok, btc_sniper_bias, 
+                                metrics_collector=scan_metrics, 
+                                df_1h_sniper=df_1h_sniper
+                            )
             except Exception as e:
                 import traceback
                 logging.warning(f"[scan_all_markets] KRİPTO {sym}: {e}")

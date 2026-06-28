@@ -44,7 +44,7 @@ from data_sources import (  # noqa: F401
     is_bist_open, is_weekend_fakeout_time, check_xu100_wind,
     get_btc_status, check_btc_not_pumping,
     get_funding_rate, fetch_crypto_oi_crash, get_btc_dominance_trend,
-    check_token_unlocks, get_current_prices,
+    check_token_unlocks, get_current_prices, async_get_crypto_1h_data,
 )
 
 # ═══ Indicators (Teknik Göstergeler) ═══

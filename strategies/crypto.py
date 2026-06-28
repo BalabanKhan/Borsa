@@ -1370,7 +1370,9 @@ def _check_crypto_sniper_1h(ctx):
     current_price = ctx["current_price"]
     btc_ok = ctx["btc_ok"]
 
-    df_1h_sniper = get_crypto_1h_data(symbol)
+    df_1h_sniper = ctx.get("df_1h_sniper")
+    if df_1h_sniper is None:
+        df_1h_sniper = get_crypto_1h_data(symbol)
     if df_1h_sniper is None or df_1h_sniper.empty:
         return signals
 
@@ -1701,7 +1703,7 @@ def _check_crypto_long_smc(ctx):
     return signals
 
 # KRİPTO STRATEJİ MOTORU
-def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bias=0, metrics_collector=None):
+def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bias=0, metrics_collector=None, df_1h_sniper=None):
     signals = []
 
     if len(df_1d) < 50 or len(df_4h) < 20:
@@ -1811,6 +1813,7 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         "dynamic_atr_mult": dynamic_atr_mult,
         "is_choppy": is_choppy, "adx_1d": adx_1d,
         "market": "KRIPTO",
+        "df_1h_sniper": df_1h_sniper,
     }
 
     signals.extend(_check_crypto_1_liquidation(ctx))
