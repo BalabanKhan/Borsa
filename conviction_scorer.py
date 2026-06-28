@@ -181,12 +181,13 @@ def gaussian_score(value: float, center: float, width: float) -> float:
       ADX=23.5 → ~60
       ADX=28.5 → ~13
     """
-    if _is_nan(value):
+    if _is_nan(value) or width == 0:
         return 0.0
     try:
         return 100.0 * math.exp(-0.5 * ((value - center) / width) ** 2)
     except OverflowError:
         return 0.0
+
 
 
 def sigmoid_score(value: float, center: float, k: float = 0.3) -> float:
@@ -1573,7 +1574,7 @@ def build_short_scores(
             long_risk_penalty -= min(25.0, excess * 1.2)
 
     # 2. SMA 200 Desteği (Fiyat 1D SMA200'e çok yakın ve üstünde ise destek olarak çalışabilir)
-    if sma200_1d is not None and price is not None:
+    if sma200_1d is not None and sma200_1d > 0 and price is not None:
         dist_to_sma200 = (price - sma200_1d) / sma200_1d
         if 0 <= dist_to_sma200 < 0.05:  # SMA200'ün %5 kadar üstünde
             proximity = 0.05 - dist_to_sma200
@@ -1591,11 +1592,12 @@ def build_short_scores(
             long_risk_penalty -= min(25.0, momentum_gap * 200.0 + 5.0)
 
     # 5. Aşırı Satım Uzaklık Cezası (Fiyat 4H EMA50'nin çok altındaysa short tehlikeli)
-    if ema_mid is not None and price is not None and not is_long:
+    if ema_mid is not None and price is not None and price > 0 and not is_long:
         dist_below_ema50 = (ema_mid - price) / price
         if dist_below_ema50 > 0.04:  # EMA50'den %4'ten fazla uzakta
             oversold_stretch = dist_below_ema50 - 0.04
             long_risk_penalty -= min(35.0, oversold_stretch * 200.0 + 10.0)
+
 
     return {
         "adx":           score_adx(adx, adx_prev, adx_mode=adx_mode, adx_center=adx_center, adx_width=adx_width),

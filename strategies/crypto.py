@@ -1337,11 +1337,12 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         last_4h = df_4h.iloc[-1]
         ema_50 = last_4h.get("EMA_50")
         import pandas as pd
-        if ema_50 is not None and pd.notna(ema_50):
+        if ema_50 is not None and pd.notna(ema_50) and current_price > 0:
             dist_below_ema50 = (ema_50 - current_price) / current_price
             if dist_below_ema50 > 0.04:
                 oversold_stretch = dist_below_ema50 - 0.04
                 _scores_sn_short["conflict_penalty"] -= min(35.0, oversold_stretch * 200.0 + 10.0)
+
 
     _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx_1h)
     if _conv_sn_short.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
