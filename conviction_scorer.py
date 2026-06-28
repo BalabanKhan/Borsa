@@ -951,10 +951,14 @@ def score_conflict_resolver(
     apply_bear_penalty = False
     
     if not _is_nan(adx):
-        if strategy_type == "MEAN_REVERSION" and adx > CONFLICT_RESOLVER_ADX_TREND_LIMIT:
+        strat_upper = str(strategy_type).upper()
+        is_mr = "MEAN_REVERSION" in strat_upper or "DIP" in strat_upper or "REVERSAL" in strat_upper
+        is_tf = "TREND" in strat_upper or "BREAKOUT" in strat_upper or "FOLLOWING" in strat_upper
+        
+        if is_mr and adx > CONFLICT_RESOLVER_ADX_TREND_LIMIT:
             diff = adx - CONFLICT_RESOLVER_ADX_TREND_LIMIT
             penalty -= (diff * CONFLICT_RESOLVER_ADX_TREND_PENALTY_MULT)
-        elif strategy_type == "TREND_FOLLOWING" and adx < CONFLICT_RESOLVER_ADX_RANGING_LIMIT:
+        elif is_tf and adx < CONFLICT_RESOLVER_ADX_RANGING_LIMIT:
             diff = CONFLICT_RESOLVER_ADX_RANGING_LIMIT - adx
             penalty -= (diff * CONFLICT_RESOLVER_ADX_RANGING_PENALTY_MULT)
             
@@ -1039,7 +1043,16 @@ def calculate_conviction(
         logger.debug(f"[Conviction] Hard Block: {block_reason}")
         return result
 
-    w = weights or WEIGHTS
+    is_crypto = False
+    if ctx is not None:
+        market = str(ctx.get("market", "")).upper()
+        if market in ["KRIPTO", "KRİPTO", "CRYPTO"]:
+            is_crypto = True
+
+    if weights is None:
+        w = CRYPTO_WEIGHTS if is_crypto else WEIGHTS
+    else:
+        w = weights
     total = 0.0
 
     for factor, weight in w.items():
@@ -1066,6 +1079,68 @@ def calculate_conviction(
         usdt_strength = ctx.get("usdt_dominance_rsi", 60.0)
         excess_strength = max(0.0, usdt_strength - 50.0)
         usdt_penalty = -min(25.0, excess_strength * 0.5)
+        
+    # NEW FUZZY REGIME & SESSION FILTERS (No Boolean Prison)
+    fuzzy_filter_penalty = 0.0
+    if ctx is not None and "last_4h" in ctx:
+        last_4h = ctx["last_4h"]
+        
+        # Get ADX and CHOP
+        adx_val = last_4h.get("ADX_14", 0.0)
+        import pandas as pd
+        if pd.isna(adx_val): adx_val = 0.0
+        
+        chop_val = last_4h.get("chop", 50.0)
+        if pd.isna(chop_val): chop_val = 50.0
+        
+        # Inspect call stack to classify strategy type
+        import inspect
+        caller_func = ""
+        for frame in inspect.stack():
+            if frame.function.startswith("_check_crypto_") or frame.function.startswith("_check_bist_"):
+                caller_func = frame.function
+                break
+                
+        is_trend = True
+        # MR strategies contain specific keywords
+        mr_keywords = ['liquidation', 'vwap', 'liquidity_hunt', 'divergence', 'sfp', 'short_squeeze', 'fomo']
+        if any(kw in caller_func.lower() for kw in mr_keywords):
+            is_trend = False
+            
+        # 1. Regime-Aware soft penalties
+        if is_trend:
+            if adx_val < 25.0:
+                fuzzy_filter_penalty -= max(0.0, min(20.0, (25.0 - adx_val) * 2.0))
+            if chop_val > 50.0:
+                fuzzy_filter_penalty -= max(0.0, min(20.0, (chop_val - 50.0) * 1.33))
+        else:
+            if adx_val > 20.0:
+                fuzzy_filter_penalty -= max(0.0, min(25.0, (adx_val - 20.0) * 1.67))
+            if chop_val < 50.0:
+                fuzzy_filter_penalty -= max(0.0, min(20.0, (50.0 - chop_val) * 1.33))
+                
+        # 2. Time-Session soft penalty
+        timestamp = last_4h.name
+        if hasattr(timestamp, "hour"):
+            hour = timestamp.hour
+            if not is_crypto:
+                if hour < 8 or hour > 20:
+                    fuzzy_filter_penalty -= 15.0  # Off-hours BIST penalty
+            else:
+                if is_trend:
+                    # Crypto trend/breakout off-hours penalty (UTC 22:00 to 06:00)
+                    if hour < 6 or hour >= 22:
+                        fuzzy_filter_penalty -= 12.0
+                
+        # 3. Volatility-Relative Stop Loss soft penalty
+        atr_val = last_4h.get("ATRr_14", last_4h.get("ATR_14", 0.0))
+        close_val = last_4h.get("close", 1.0)
+        if pd.isna(atr_val): atr_val = 0.0
+        if pd.isna(close_val) or close_val <= 0: close_val = 1.0
+        
+        atr_pct = (atr_val / close_val) * 100.0
+        if atr_pct > 3.5:
+            fuzzy_filter_penalty -= max(0.0, min(15.0, (atr_pct - 3.5) * 6.0))
     
     total += data_guard_penalty
     total += conflict_penalty
@@ -1074,6 +1149,7 @@ def calculate_conviction(
     total += setup_weak_penalty
     total += long_risk_penalty
     total += usdt_penalty
+    total += fuzzy_filter_penalty
     
     # 10x leverage penalty for SL > 1%
     sl_distance_penalty = 0.0
@@ -1087,6 +1163,7 @@ def calculate_conviction(
     result.component_scores["long_risk_penalty"] = round(long_risk_penalty, 1)
     result.component_scores["usdt_penalty"] = round(usdt_penalty, 1)
     result.component_scores["sl_distance_penalty"] = round(sl_distance_penalty, 1)
+    result.component_scores["fuzzy_filter_penalty"] = round(fuzzy_filter_penalty, 1)
     
     if apply_bear_penalty:
         from config import CONFLICT_RESOLVER_BEAR_TREND_PENALTY
@@ -1109,13 +1186,6 @@ def calculate_conviction(
         t_strong = REGIME_THRESHOLDS_BEAR["STRONG"]
         t_medium = REGIME_THRESHOLDS_BEAR["MEDIUM"]
         t_watch = REGIME_THRESHOLDS_BEAR["WATCH"]
-
-    # --- CRYPTO SPECIAL THRESHOLDS ---
-    is_crypto = False
-    if ctx is not None:
-        market = str(ctx.get("market", "")).upper()
-        if market in ["KRIPTO", "KRİPTO", "CRYPTO"]:
-            is_crypto = True
 
     if is_crypto:
         t_strong = max(t_strong, 80.0)  # Strong için eşik yükseltildi

@@ -21,7 +21,7 @@ def reset_atr_cache():
 # ==========================================
 # _get_atr_cached Tests
 # ==========================================
-@patch("trade_tracker.trailing.get_bist_data")
+@patch("data_sources.get_bist_data")
 def test_get_atr_cached_bist(mock_bist):
     # Mock Series that has ta.atr method
     class MockSeries:
@@ -48,7 +48,7 @@ def test_get_atr_cached_bist(mock_bist):
     assert val_cached == 2.0
     mock_bist.assert_called_once() # Should only be called once due to cache
 
-@patch("trade_tracker.trailing.get_emtia_1h_data")
+@patch("data_sources.get_emtia_1h_data")
 def test_get_atr_cached_emtia(mock_emtia):
     class MockDF:
         def __init__(self):
@@ -60,13 +60,13 @@ def test_get_atr_cached_emtia(mock_emtia):
     val = _get_atr_cached("GOLD=F")
     assert val == 2.5
 
-@patch("trade_tracker.trailing.get_crypto_1h_data")
+@patch("data_sources.get_crypto_1h_data")
 def test_get_atr_cached_crypto_empty(mock_crypto):
     mock_crypto.return_value = pd.DataFrame()
     val = _get_atr_cached("BTC/USDT")
     assert val is None
 
-@patch("trade_tracker.trailing.get_crypto_1h_data")
+@patch("data_sources.get_crypto_1h_data")
 def test_get_atr_cached_error(mock_crypto):
     mock_crypto.side_effect = Exception("API error")
     val = _get_atr_cached("BTC/USDT")
@@ -75,7 +75,7 @@ def test_get_atr_cached_error(mock_crypto):
 # ==========================================
 # _get_structural_floor Tests
 # ==========================================
-@patch("trade_tracker.trailing.get_crypto_1h_data")
+@patch("data_sources.get_crypto_1h_data")
 def test_get_structural_floor_crypto(mock_crypto):
     df_mock = pd.DataFrame({"close": [100.0, 110.0]})
     # Mocking pandas-ta ema method dynamically since we can't easily mock ta pandas extension
@@ -98,7 +98,7 @@ def test_get_structural_floor_crypto(mock_crypto):
     val = _get_structural_floor("BTC/USDT", "AL")
     assert val == 105.0
 
-@patch("trade_tracker.trailing.get_crypto_1h_data")
+@patch("data_sources.get_crypto_1h_data")
 def test_get_structural_floor_error(mock_crypto):
     mock_crypto.side_effect = Exception("API Error")
     val = _get_structural_floor("BTC/USDT", "AL")

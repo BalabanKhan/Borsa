@@ -417,8 +417,7 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
     df_4h = ctx['df_4h']
     
     supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
-    if not is_price_in_supply_zone(current_price, supply_zones):
-        return signals
+    in_supply = is_price_in_supply_zone(current_price, supply_zones)
     swing_highs = sniper_find_swing_points(df_4h, point_type='high')
     sweep_ok, sweep_high = sniper_detect_sweep(df_4h, swing_highs, point_type='high')
     if not sweep_ok:
@@ -462,8 +461,10 @@ def _check_crypto_short_1_liquidity_hunt(ctx):
         volume=last_4h.get('volume', 0), vol_sma=vol_sma, dollar_vol=last_4h.get('volume', 0) * current_price,
         rr=_rr, has_engulfing=False, regime='BEAR', macro_aligned=True,
         consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO',
-        funding_rate=funding_rate
+        funding_rate=funding_rate, strategy_type='MEAN_REVERSION'
     )
+    if not in_supply:
+        _scores["conflict_penalty"] -= 15.0
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         funding_str = f" | Fonlama: %{funding_rate:.4f}" if funding_rate is not None else ""
@@ -523,7 +524,8 @@ def _check_crypto_short_2_oi_trap(ctx):
         rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
         volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'), dollar_vol=last_4h.get('volume', 0) * current_price,
         rr=_rr, has_engulfing=False, regime='BEAR', macro_aligned=True,
-        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO', funding_rate=funding_rate
+        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO', funding_rate=funding_rate,
+        strategy_type='MEAN_REVERSION'
     )
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -587,7 +589,8 @@ def _check_crypto_short_3_divergence(ctx):
         rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
         volume=last_4h.get('volume', 0), vol_sma=last_4h.get('vol_sma_20'), dollar_vol=last_4h.get('volume', 0) * current_price,
         rr=_rr, has_engulfing=is_bearish_engulfing, regime='BEAR', macro_aligned=True,
-        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO'
+        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO',
+        strategy_type='MEAN_REVERSION'
     )
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
@@ -609,8 +612,7 @@ def _check_crypto_short_4_sr_flip(ctx):
     df_4h = ctx['df_4h']
 
     supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
-    if not is_price_in_supply_zone(current_price, supply_zones):
-        return signals
+    in_supply = is_price_in_supply_zone(current_price, supply_zones)
     if len(df_4h) < 30: return signals
 
     recent_lows = df_4h['low'].rolling(window=20).min().shift(5)
@@ -650,8 +652,11 @@ def _check_crypto_short_4_sr_flip(ctx):
         rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
         volume=last_4h.get('volume', 0), vol_sma=vol_sma, dollar_vol=last_4h.get('volume', 0) * current_price,
         rr=_rr, has_engulfing=False, regime='BEAR', macro_aligned=True,
-        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO'
+        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO',
+        strategy_type='PULLBACK'
     )
+    if not in_supply:
+        _scores["conflict_penalty"] -= 15.0
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
@@ -683,8 +688,7 @@ def _check_crypto_short_5_bear_flag(ctx):
     df_4h = ctx['df_4h']
 
     supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
-    if not is_price_in_supply_zone(current_price, supply_zones):
-        return signals
+    in_supply = is_price_in_supply_zone(current_price, supply_zones)
     ema_20 = last_4h.get('EMA_20')
     ema_50 = last_4h.get('EMA_50')
     ema_200 = last_4h.get('EMA_200') or last_4h.get('SMA_200')
@@ -692,12 +696,13 @@ def _check_crypto_short_5_bear_flag(ctx):
     if pd.isna(ema_20) or pd.isna(ema_50) or pd.isna(ema_200): return signals
     if not (ema_20 < ema_50 < ema_200): return signals
     
-    if current_price > ema_20: return signals
+    if current_price > ema_50: return signals
     
-    if last_4h['high'] < ema_20 * 0.99: return signals
+    if last_4h['high'] < ema_20 * 0.98: return signals
     
+    above_ema20 = current_price > ema_20
     vol_sma = last_4h.get('vol_sma_20', 0)
-    if vol_sma > 0 and last_4h.get('volume', 0) > (vol_sma * config.CRYPTO_SHORT5_FLAG_VOL_MULT): return signals
+    high_volume = (vol_sma > 0 and last_4h.get('volume', 0) > (vol_sma * config.CRYPTO_SHORT5_FLAG_VOL_MULT))
 
     atr_val = last_4h.get('ATRr_14', last_4h.get('ATR_14'))
     if pd.isna(atr_val): atr_val = current_price * 0.02
@@ -718,8 +723,15 @@ def _check_crypto_short_5_bear_flag(ctx):
         rsi=last_4h.get('RSI_14'), rsi_prev=df_4h.iloc[-2].get('RSI_14') if len(df_4h) >= 2 else None,
         volume=last_4h.get('volume', 0), vol_sma=vol_sma, dollar_vol=last_4h.get('volume', 0) * current_price,
         rr=_rr, has_engulfing=False, regime='BEAR', macro_aligned=True,
-        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO'
+        consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO',
+        strategy_type='PULLBACK'
     )
+    if not in_supply:
+        _scores["conflict_penalty"] -= 15.0
+    if above_ema20:
+        _scores["conflict_penalty"] -= 10.0
+    if high_volume:
+        _scores["conflict_penalty"] -= 10.0
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
@@ -1686,21 +1698,50 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
     df_1d = df_1d.copy()
     df_4h = df_4h.copy()
 
-    df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
-    df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
-    df_1d.ta.adx(length=config.IND_ADX_LENGTH, append=True)
-    df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
-    if len(df_1d) >= 200:
+    # Calculate indicators if they are not already present (e.g. during backtests where they are precomputed)
+    if 'RSI_14' not in df_1d.columns:
+        df_1d.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    if 'EMA_20' not in df_1d.columns:
+        df_1d.ta.ema(length=config.IND_EMA_MID, append=True)
+    if 'EMA_50' not in df_1d.columns:
+        df_1d.ta.ema(length=config.IND_EMA_SLOW, append=True)
+    if 'ADX_14' not in df_1d.columns:
+        df_1d.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    if not any(c in df_1d.columns for c in ['BBP_20_2.0', 'BBU_20_2.0']):
+        df_1d.ta.bbands(length=config.IND_BBANDS_LENGTH, std=config.IND_BBANDS_STD, append=True)
+    if 'SMA_200' not in df_1d.columns and len(df_1d) >= 200:
         df_1d.ta.sma(length=200, append=True)
 
-    df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
-    df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
-    df_4h.ta.ema(length=config.IND_EMA_SLOW, append=True)
-    df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
-    df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
-    df_4h.ta.cmf(length=20, append=True)
-    df_4h['vol_sma_20'] = ta.sma(df_4h['volume'], length=config.IND_VOL_SMA_LENGTH)
+    if 'RSI_14' not in df_4h.columns:
+        df_4h.ta.rsi(length=config.IND_RSI_LENGTH, append=True)
+    if 'EMA_20' not in df_4h.columns:
+        df_4h.ta.ema(length=config.IND_EMA_MID, append=True)
+    if 'EMA_50' not in df_4h.columns:
+        df_4h.ta.ema(length=config.IND_EMA_SLOW, append=True)
+    if 'ADX_14' not in df_4h.columns:
+        df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
+    if 'ATRr_14' not in df_4h.columns and 'ATR_14' not in df_4h.columns:
+        df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
+    if 'CMF_20' not in df_4h.columns:
+        df_4h.ta.cmf(length=20, append=True)
+    if 'SMA_200' not in df_4h.columns:
+        df_4h.ta.sma(length=200, append=True)
+    if 'EMA_200' not in df_4h.columns:
+        df_4h.ta.ema(length=200, append=True)
+    if 'vol_sma_20' not in df_4h.columns:
+        df_4h['vol_sma_20'] = ta.sma(df_4h['volume'], length=config.IND_VOL_SMA_LENGTH)
+        
+    if 'chop' not in df_4h.columns:
+        import numpy as np
+        atr_col = 'ATRr_14' if 'ATRr_14' in df_4h.columns else 'ATR_14'
+        if atr_col in df_4h.columns:
+            atr_sum = df_4h[atr_col].rolling(14).sum()
+            high_max = df_4h['high'].rolling(14).max()
+            low_min = df_4h['low'].rolling(14).min()
+            df_4h['chop'] = 100 * np.log10(atr_sum / (high_max - low_min).replace(0, 1e-9)) / np.log10(14)
+        else:
+            df_4h['chop'] = 50.0
+        df_4h['chop'] = df_4h['chop'].fillna(50.0)
 
     last_1d = df_1d.iloc[-1]
     last_4h = df_4h.iloc[-1]
