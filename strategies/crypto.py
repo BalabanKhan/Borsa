@@ -1852,22 +1852,22 @@ def analyze_strategies_crypto(symbol, df_1d, df_4h, btc_ok=False, btc_sniper_bia
         score = sig.get('conviction_score', 0)
         direction = "LONG" if sig.get('signal') == "AL" else "SHORT"
         
-        # Filtre 1: Score >= 72
-        if score < 72:
+        # Filtre 1: Score >= 50 (WATCH, MEDIUM ve STRONG sinyallerine izin ver)
+        if score < 50:
             continue
             
-        # Filtre 2: Rel_Vol >= 0.8
-        if rel_vol_4h < 0.8:
+        # Filtre 2: Rel_Vol >= 0.7 (Hacim filtresi biraz esnetildi)
+        if rel_vol_4h < 0.7:
             continue
             
-        # Filtre 3: EMA_Diff <= 2.5%
-        if ema_diff_pct > 2.5:
+        # Filtre 3: EMA_Diff <= 8.0% (Kripto volatilitesine uygun olarak esnetildi)
+        if ema_diff_pct > 8.0:
             continue
             
-        # Filtre 4: CMF Yön Uyumlaması
-        if direction == 'LONG' and cmf_4h < 0.0:
+        # Filtre 4: CMF Yön Uyumlaması (Bir miktar gecikme payı bırakıldı)
+        if direction == 'LONG' and cmf_4h < -0.10:
             continue
-        if direction == 'SHORT' and cmf_4h > 0.05:
+        if direction == 'SHORT' and cmf_4h > 0.10:
             continue
             
         filtered_signals.append(sig)

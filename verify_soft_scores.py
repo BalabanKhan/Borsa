@@ -154,9 +154,9 @@ def test_autopsy_soft_penalty():
 
     # 1. Trend strategy (Long) below SMA 200, overbought RSI, low volume ratio
     # price = 90, sma200 = 100 (below by 10% -> 15.0 max penalty)
-    # rsi_1h = 65 (>55 by 10 -> 10.0 max penalty)
-    # volume_ratio = 2.0 (below 6.0 threshold -> (6.0 - 2.0)/6.0 * 10 = 6.67 penalty)
-    # Total trend penalty should be -15.0 - 10.0 - 6.67 = -31.67
+    # rsi_1h = 65 (>55 by 10 -> NO PENALTY ANYMORE)
+    # volume_ratio = 2.0 (below 3.5 threshold -> (3.5 - 2.0)/3.5 * 10 = 4.29 penalty)
+    # Total trend penalty should be -15.0 - 0 - 4.29 = -19.29
     pen_trend = calculate_autopsy_soft_penalty(
         price=90.0,
         sma200_1d=100.0,
@@ -166,7 +166,7 @@ def test_autopsy_soft_penalty():
         strategy_type="TREND_BREAKOUT"
     )
     print(f"Trend strategy penalty: {pen_trend}")
-    assert pen_trend == -31.67
+    assert pen_trend == -19.29
 
     # 2. Mean Reversion strategy (Long) with same params
     # below SMA 200 -> no penalty

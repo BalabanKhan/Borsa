@@ -306,23 +306,14 @@ def calculate_autopsy_soft_penalty(
                     # %0-%10 arası lineer ceza (maks -15 puan)
                     penalty -= min(15.0, dist_pct * 1.5)
                     
-        # 2. 1H RSI Soft Cezası - Sadece Trend/Breakout stratejilerinde
-        if not _is_nan(rsi_1h):
-            if is_long:
-                # Long işlem: RSI 55'in üzerindeyken (aşırı şişme) ceza uygula
-                if rsi_1h > 55.0:
-                    penalty -= min(10.0, (rsi_1h - 55.0) * 1.0)
-            else:
-                # Short işlem: RSI 45'in altındayken (aşırı düşüş/exhaustion) ceza uygula
-                if rsi_1h < 45.0:
-                    penalty -= min(10.0, (45.0 - rsi_1h) * 1.0)
+        # 2. 1H RSI Soft Cezası - KALDIRILDI (Trend kırılımlarında RSI'ın doğal olarak yüksek olması çelişki yaratıyordu)
 
     # 3. Kırılım Hacmi (Volume Ratio) Soft Cezası
     # Zayıf breakout volume (displacement eksikliği) cezalandırılır
-    # Eşik: Trend/Breakout için 6.0x, Mean Reversion/Dip için 3.0x
+    # Eşik: Trend/Breakout için 3.5x, Mean Reversion/Dip için 3.0x
     # Gelen hacim oranına göre ceza lineer ölçeklenir (sabit -10 yerine)
     if not _is_nan(volume_ratio):
-        threshold = 6.0 if is_trend else 3.0
+        threshold = 3.5 if is_trend else 3.0
         if volume_ratio < threshold:
             ratio_clamped = max(0.0, volume_ratio)
             penalty -= ((threshold - ratio_clamped) / threshold) * 10.0
@@ -1195,11 +1186,6 @@ def calculate_conviction(
         t_strong = REGIME_THRESHOLDS_BEAR["STRONG"]
         t_medium = REGIME_THRESHOLDS_BEAR["MEDIUM"]
         t_watch = REGIME_THRESHOLDS_BEAR["WATCH"]
-
-    if is_crypto:
-        t_strong = max(t_strong, 80.0)  # Strong için eşik yükseltildi
-        t_medium = 61.0                 # 61 ve üstü MEDIUM
-        t_watch = 60.0                  # 60 - 60.9 arası WATCH
 
     if total >= t_strong:
         result.grade = CONVICTION_STRONG
