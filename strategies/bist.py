@@ -183,9 +183,7 @@ def _check_bist_2_trend_following(ctx):
     return signals
 
 
-def _is_bist_3_retest_and_price_ok(current_price, month_high, xu100_down):
-    if xu100_down:
-        return False
+def _is_bist_3_retest_and_price_ok(current_price, month_high):
     if current_price <= month_high:
         return False
     if config.BREAKOUT_RETEST_REQUIRED:
@@ -234,7 +232,7 @@ def _check_bist_3_squeeze_breakout(ctx):
     if bb_width_prev is None or bb_width_prev >= config.BIST_SQUEEZE_PREV_WIDTH_LIMIT:
         return signals
 
-    if not _is_bist_3_retest_and_price_ok(current_price, month_high, xu100_down):
+    if not _is_bist_3_retest_and_price_ok(current_price, month_high):
         return signals
 
     if pd.isna(last_1h.get('vol_sma_20')):
@@ -406,7 +404,7 @@ def _check_bist_5_vol_squeeze_long(ctx, prev_bbu_1d, guarded_vol_sma):
         last_1d.get('EMA_21') is not None and not pd.isna(last_1d.get('EMA_21')) and
         current_price > last_1d.get('EMA_21')
     )
-    if not trend_aligned or xu100_down:
+    if not trend_aligned:
         return None
         
     sq_mid = (last_1h['high'] + last_1h['low']) / 2
@@ -610,7 +608,7 @@ def _check_bist_7_vwap(ctx):
     ema_21_daily = last_1d.get('EMA_21')
     mtf_trend_down = (not pd.isna(ema_21_daily) and last_1d['close'] < ema_21_daily)
 
-    if is_bear_regime or mtf_trend_down or xu100_down:
+    if is_bear_regime or mtf_trend_down:
         return signals
 
     # VWAP Golden Filters (RSI & Volatilite/ATR) (Relaxed)

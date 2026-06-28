@@ -486,8 +486,7 @@ def _check_crypto_short_2_oi_trap(ctx):
     df_4h = ctx['df_4h']
 
     supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
-    if not is_price_in_supply_zone(current_price, supply_zones):
-        return signals
+    in_supply = is_price_in_supply_zone(current_price, supply_zones)
     funding_rate = get_funding_rate(symbol)
     if funding_rate is None or funding_rate < config.CRYPTO_SHORT2_FUNDING_MIN:
         return signals
@@ -527,6 +526,8 @@ def _check_crypto_short_2_oi_trap(ctx):
         consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO', funding_rate=funding_rate,
         strategy_type='MEAN_REVERSION'
     )
+    if not in_supply:
+        _scores["conflict_penalty"] -= 15.0
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
@@ -547,8 +548,7 @@ def _check_crypto_short_3_divergence(ctx):
     df_4h = ctx['df_4h']
 
     supply_zones = detect_supply_zones(df_4h if 'df_4h' in locals() else ctx.get('df_4h'))
-    if not is_price_in_supply_zone(current_price, supply_zones):
-        return signals
+    in_supply = is_price_in_supply_zone(current_price, supply_zones)
     div_found, _, _, _, _ = detect_bearish_divergence(df_4h)
     if not div_found:
         return signals
@@ -592,6 +592,8 @@ def _check_crypto_short_3_divergence(ctx):
         consecutive_sl=_get_consecutive_sl(symbol), market='KRIPTO',
         strategy_type='MEAN_REVERSION'
     )
+    if not in_supply:
+        _scores["conflict_penalty"] -= 15.0
     _conv = calculate_conviction(_scores, ctx=ctx)
     if _conv.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM, CONVICTION_WATCH):
         signals.append({
