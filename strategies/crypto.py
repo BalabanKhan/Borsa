@@ -1326,12 +1326,23 @@ def _check_crypto_sniper_1h_short(ctx_1h):
         price=current_price, ema_fast=last_1h_s.get(f'EMA_{config.IND_EMA_FAST}'), ema_mid=last_1h_s.get(f'EMA_{config.IND_EMA_21}'), ema_slow=None,
         rsi=last_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'), rsi_prev=prev_1h_s.get(f'RSI_{config.IND_RSI_LENGTH}'),
         volume=last_1h_s.get('volume', 0), vol_sma=guarded_vol_sma, dollar_vol=last_1h_s.get('volume', 0) * current_price,
-        rr=_rr_sn_short, regime="BEAR" if not btc_ok else "BULL",
+        rr=_rr_sn_short, regime="BEAR",
         macro_aligned=not btc_ok, consecutive_sl=_get_consecutive_sl(symbol),
         bbw=bbw, kcw=kcw, pb=bb_pct, fvg_present=has_fvg_short, sfp_present=has_sfp_short,
         market="KRIPTO", is_long=False, funding_rate=funding_rate,
         cmf=cmf_1h if cmf_1h is not None and not math.isnan(cmf_1h) else 0.0
     )
+    df_4h = ctx_1h.get("df_4h")
+    if df_4h is not None and not df_4h.empty:
+        last_4h = df_4h.iloc[-1]
+        ema_50 = last_4h.get("EMA_50")
+        import pandas as pd
+        if ema_50 is not None and pd.notna(ema_50):
+            dist_below_ema50 = (ema_50 - current_price) / current_price
+            if dist_below_ema50 > 0.04:
+                oversold_stretch = dist_below_ema50 - 0.04
+                _scores_sn_short["conflict_penalty"] -= min(35.0, oversold_stretch * 200.0 + 10.0)
+
     _conv_sn_short = calculate_conviction(_scores_sn_short, weights=SNIPER_CRYPTO_WEIGHTS, ctx=ctx_1h)
     if _conv_sn_short.grade in (CONVICTION_STRONG, CONVICTION_MEDIUM):
         raw_vars = locals()
@@ -1410,6 +1421,7 @@ def _check_crypto_sniper_1h(ctx):
 
     ctx_1h = {
         "df_4h": ctx.get("df_4h"),
+        "last_4h": ctx.get("last_4h"),
         "symbol": symbol,
         "current_price": current_price,
         "btc_ok": btc_ok,

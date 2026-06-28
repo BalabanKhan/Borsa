@@ -1107,28 +1107,36 @@ def calculate_conviction(
         if any(kw in caller_func.lower() for kw in mr_keywords):
             is_trend = False
             
-        # 1. Regime-Aware soft penalties
-        if is_trend:
-            if adx_val < 25.0:
-                fuzzy_filter_penalty -= max(0.0, min(20.0, (25.0 - adx_val) * 2.0))
-            if chop_val > 50.0:
-                fuzzy_filter_penalty -= max(0.0, min(20.0, (chop_val - 50.0) * 1.33))
-        else:
-            if adx_val > 20.0:
-                fuzzy_filter_penalty -= max(0.0, min(25.0, (adx_val - 20.0) * 1.67))
-            if chop_val < 50.0:
-                fuzzy_filter_penalty -= max(0.0, min(20.0, (50.0 - chop_val) * 1.33))
+        is_sniper_1h = "sniper_1h" in caller_func.lower()
+            
+        # 1. Regime-Aware soft penalties (skip for 1H sniper strategies)
+        if not is_sniper_1h:
+            if is_trend:
+                if adx_val < 25.0:
+                    fuzzy_filter_penalty -= max(0.0, min(20.0, (25.0 - adx_val) * 2.0))
+                if chop_val > 50.0:
+                    fuzzy_filter_penalty -= max(0.0, min(20.0, (chop_val - 50.0) * 1.33))
+            else:
+                if adx_val > 20.0:
+                    fuzzy_filter_penalty -= max(0.0, min(25.0, (adx_val - 20.0) * 1.67))
+                if chop_val < 50.0:
+                    fuzzy_filter_penalty -= max(0.0, min(20.0, (50.0 - chop_val) * 1.33))
                 
         # 2. Time-Session soft penalty
-        timestamp = last_4h.name
-        if hasattr(timestamp, "hour"):
-            hour = timestamp.hour
+        import pandas as pd
+        eval_time = ctx.get("current_time")
+        if eval_time is None:
+            eval_time = last_4h.name + pd.Timedelta(hours=4)
+            
+        if hasattr(eval_time, "hour"):
+            hour = eval_time.hour
             if not is_crypto:
                 if hour < 8 or hour > 20:
                     fuzzy_filter_penalty -= 15.0  # Off-hours BIST penalty
             else:
-                if is_trend:
-                    # Crypto trend/breakout off-hours penalty (UTC 22:00 to 06:00)
+                is_long_strat = scores.get("is_long_strategy", True)
+                if is_trend and not is_long_strat:
+                    # Crypto trend/breakout off-hours penalty (UTC 22:00 to 06:00) for shorts only
                     if hour < 6 or hour >= 22:
                         fuzzy_filter_penalty -= 12.0
                 
@@ -1582,6 +1590,13 @@ def build_short_scores(
             momentum_gap = (ema_fast - ema_slow) / ema_slow
             long_risk_penalty -= min(25.0, momentum_gap * 200.0 + 5.0)
 
+    # 5. Aşırı Satım Uzaklık Cezası (Fiyat 4H EMA50'nin çok altındaysa short tehlikeli)
+    if ema_mid is not None and price is not None and not is_long:
+        dist_below_ema50 = (ema_mid - price) / price
+        if dist_below_ema50 > 0.04:  # EMA50'den %4'ten fazla uzakta
+            oversold_stretch = dist_below_ema50 - 0.04
+            long_risk_penalty -= min(35.0, oversold_stretch * 200.0 + 10.0)
+
     return {
         "adx":           score_adx(adx, adx_prev, adx_mode=adx_mode, adx_center=adx_center, adx_width=adx_width),
         "ema_alignment": score_ema_short(price, ema_fast, ema_mid, ema_slow),
@@ -1809,4 +1824,5 @@ def build_sniper_scores(
         "conflict_penalty": conflict_penalty,
         "apply_bear_penalty": apply_bear,
         "autopsy_penalty": autopsy_pen,
+        "is_long_strategy": is_long
     }

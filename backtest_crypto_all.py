@@ -246,6 +246,8 @@ def run_backtest():
         df_4h.ta.adx(length=config.IND_ADX_LENGTH, append=True)
         df_4h.ta.atr(length=config.IND_ATR_LENGTH, append=True)
         df_4h.ta.cmf(length=20, append=True)
+        df_4h.ta.sma(length=200, append=True)
+        df_4h.ta.ema(length=200, append=True)
         df_4h['vol_sma_20'] = df_4h['volume'].rolling(window=config.IND_VOL_SMA_LENGTH).mean()
         df_4h['vwap_weekly'] = _orig_vwap_series(df_4h, "weekly")
         
@@ -329,16 +331,18 @@ def run_backtest():
             
             # 2. Strategy evaluation (every 4 hours, aligned with 4h candle closes)
             if timestamp.hour % 4 == 0:
-                slice_1d = df_1d[df_1d.index <= timestamp].copy()
-                slice_4h = df_4h[df_4h.index <= timestamp].copy()
+                slice_1d = df_1d[df_1d.index < timestamp.normalize()].copy()
+                slice_4h = df_4h[df_4h.index < timestamp].copy()
                 
                 if len(slice_1d) >= 50 and len(slice_4h) >= 20:
                     # BTC condition: is BTC > SMA200 on daily?
                     btc_ok = True
-                    btc_slice_daily = active_df_btc[active_df_btc.index <= timestamp]
-                    if len(btc_slice_daily) >= 200:
-                        btc_daily_close = btc_slice_daily['close'].iloc[-1]
-                        btc_sma200 = btc_slice_daily['close'].rolling(200).mean().iloc[-1]
+                    btc_slice = active_df_btc[active_df_btc.index <= timestamp]
+                    # Resample hourly BTC data to daily to calculate daily SMA200
+                    btc_daily = btc_slice.resample('1d').agg({'close': 'last'}).dropna()
+                    if len(btc_daily) >= 200:
+                        btc_daily_close = btc_daily['close'].iloc[-1]
+                        btc_sma200 = btc_daily['close'].rolling(200).mean().iloc[-1]
                         if pd.notna(btc_sma200):
                             btc_ok = btc_daily_close > btc_sma200
                             
