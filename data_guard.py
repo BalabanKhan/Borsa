@@ -490,7 +490,10 @@ def guard_dataframe(
     # DG-01: OHLCV Bütünlük (Hard Block - Karantina)
     ok, reason = validate_ohlcv_integrity(df, symbol, timeframe)
     if not ok:
-        logging.warning(reason)
+        if "ghost candle" in reason.lower() or "yetersiz satır" in reason.lower():
+            logging.debug(reason)
+        else:
+            logging.warning(reason)
         return None
 
     # Flag'leri başlat

@@ -215,8 +215,11 @@ def get_funding_rate(symbol):
         funding = exchange_futures.fetch_funding_rate(symbol)
         if funding and 'fundingRate' in funding:
             return float(funding['fundingRate']) * 100
+    except ccxt.BadSymbol:
+        pass
     except Exception as e:
-        logging.warning(f"[get_funding_rate] {symbol}: {e}")
+        if "does not have market symbol" not in str(e):
+            logging.warning(f"[get_funding_rate] {symbol}: {e}")
     return 0.0
 
 def get_open_interest(symbol):
@@ -227,8 +230,11 @@ def get_open_interest(symbol):
         oi_data = exchange_futures.fetch_open_interest(symbol)
         if oi_data and 'openInterestValue' in oi_data and oi_data['openInterestValue'] is not None:
             return float(oi_data['openInterestValue'])
+    except ccxt.BadSymbol:
+        pass
     except Exception as e:
-        logging.warning(f"[get_open_interest] {symbol}: {e}")
+        if "does not have market symbol" not in str(e):
+            logging.warning(f"[get_open_interest] {symbol}: {e}")
     return 0.0
 
 def get_order_book_imbalance(symbol, depth=20):
@@ -253,8 +259,11 @@ def get_order_book_imbalance(symbol, depth=20):
             
         imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol)
         return imbalance
+    except ccxt.BadSymbol:
+        return 0.0
     except Exception as e:
-        logging.warning(f"[get_order_book_imbalance] {symbol}: {e}")
+        if "does not have market symbol" not in str(e):
+            logging.warning(f"[get_order_book_imbalance] {symbol}: {e}")
         return 0.0
 
 
@@ -273,8 +282,11 @@ def fetch_crypto_oi_crash(symbol):
                     drop_pct = ((max_oi - current_oi) / max_oi) * 100
                     if drop_pct >= OI_CRASH_PCT:
                         return True
+    except ccxt.BadSymbol:
+        pass
     except Exception as e:
-        logging.warning(f"[fetch_crypto_oi_crash] {symbol}: {e}")
+        if "does not have market symbol" not in str(e):
+            logging.warning(f"[fetch_crypto_oi_crash] {symbol}: {e}")
     return False
 
 def fetch_crypto_oi_surge(symbol, surge_pct=5.0):
@@ -292,8 +304,11 @@ def fetch_crypto_oi_surge(symbol, surge_pct=5.0):
                     surge = ((current_oi - min_oi) / min_oi) * 100
                     if surge >= surge_pct:
                         return True
+    except ccxt.BadSymbol:
+        pass
     except Exception as e:
-        logging.warning(f"[fetch_crypto_oi_surge] {symbol}: {e}")
+        if "does not have market symbol" not in str(e):
+            logging.warning(f"[fetch_crypto_oi_surge] {symbol}: {e}")
     return False
 
 def get_btc_dominance_trend():
