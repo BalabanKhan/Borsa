@@ -202,15 +202,19 @@ class TradeEngine:
         is_be = -0.05 <= pnl_pct <= 0.05
         is_loss = pnl_pct < -0.05
 
+        is_watch = ct.get("is_watch", False)
+        if isinstance(is_watch, str):
+            is_watch = (is_watch.upper() == "TRUE")
+
         if ("SL" in status and is_loss) or "BLACK_SWAN" in status:
-            if self.cb_observer:
+            if not is_watch and self.cb_observer:
                 self.cb_observer.on_trade_closed({
                     "ticker": ticker_ct,
                     "strategy": strategy_ct,
                     "pnl_percent": pnl_pct if pnl_pct != 0 else -0.01
                 })
             
-            if self.penalty_box:
+            if not is_watch and self.penalty_box:
                 penalty_msg = self.penalty_box.record_asset_sl(ticker_ct)
                 if penalty_msg:
                     cb_notifications.append(penalty_msg)
@@ -227,7 +231,7 @@ class TradeEngine:
                 })
                 
         elif "SL" in status and is_be:
-            if self.cb_observer:
+            if not is_watch and self.cb_observer:
                 self.cb_observer.on_trade_closed({
                     "ticker": ticker_ct,
                     "strategy": strategy_ct,
@@ -246,14 +250,14 @@ class TradeEngine:
                 })
             
         elif "TP" in status or ("SL" in status and is_win):
-            if self.cb_observer:
+            if not is_watch and self.cb_observer:
                 self.cb_observer.on_trade_closed({
                     "ticker": ticker_ct,
                     "strategy": strategy_ct,
                     "pnl_percent": pnl_pct if pnl_pct != 0 else 0.01
                 })
             
-            if self.penalty_box:
+            if not is_watch and self.penalty_box:
                 penalty_msg = self.penalty_box.record_asset_tp(ticker_ct)
                 if penalty_msg:
                     cb_notifications.append(penalty_msg)

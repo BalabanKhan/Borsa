@@ -281,3 +281,17 @@ def test_check_active_trades_closed_in_repo(engine):
     engine.check_active_trades({"BTC/USDT": 50000})
     # It should immediately close the trade
     assert len(engine.repository.load_active_trades()) == 0
+
+def test_cb_on_trade_closed_helper_watch_loss(engine, mock_deps):
+    cb_notifs = []
+    # Test that is_watch=True does not call cb_observer or penalty_box on loss
+    engine._cb_on_trade_closed_helper("CLOSED_SL", "BTC/USDT", "Strat1", -10.0, 5.0, "2024", {"exit_time": "2024", "is_watch": True}, -1.0, cb_notifs)
+    mock_deps["cb_observer"].on_trade_closed.assert_not_called()
+    mock_deps["penalty_box"].record_asset_sl.assert_not_called()
+
+def test_cb_on_trade_closed_helper_watch_win(engine, mock_deps):
+    cb_notifs = []
+    # Test that is_watch="TRUE" does not call cb_observer or penalty_box on win
+    engine._cb_on_trade_closed_helper("CLOSED_TP", "BTC/USDT", "Strat1", 10.0, 5.0, "2024", {"exit_time": "2024", "is_watch": "TRUE"}, 2.0, cb_notifs)
+    mock_deps["cb_observer"].on_trade_closed.assert_not_called()
+    mock_deps["penalty_box"].record_asset_tp.assert_not_called()
