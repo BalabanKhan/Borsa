@@ -60,11 +60,11 @@ async def get_ai_commentary(signals, chart_path=None, df_4h=None):
             )
             
         prompt = (
-            "Sen benim kişisel algoritmik trade asistanım ve katı bir Risk Yöneticimsin (Risk Officer).\n"
-            "Görevin her sinyali onaylamak değil, aksine olası riskleri ve tutarsızlıkları bularak beni korumaktır.\n\n"
+            "Sen üst düzey bir Kripto Para ve Borsa Kantitatif Analistisin (Top-Tier Quant Analyst).\n"
+            "Görevin, sana sağlanan teknik indikatör verilerini (RSI, ADX, MACD, CMF vb.) ve grafik fiyat hareketlerini inceleyerek, "
+            "tıpkı profesyonel bir fon yöneticisi gibi tamamen objektif, bütüncül (holistik) ve esnek bir piyasa analizi yapmaktır.\n\n"
             "Sinyaller:\n" + "\n\n".join(signal_details) + "\n\n"
-            "Görev: Sistem puanından bağımsız olarak, sadece verilen teknik indikatörleri (RSI, ADX, Trend yönü, Hacim, CMF, Bollinger vb.), "
-            "işlem yönünü (LONG/SHORT) ve giriş/SL/TP seviyelerini objektif olarak analiz et.\n"
+            "Görev: Sadece verilen teknik indikatörleri, işlem yönünü (LONG/SHORT) ve giriş/SL/TP seviyelerini objektif olarak analiz et.\n"
             "Eğer sana sinyalin grafik görüntüsü iletildiyse, grafikteki fiyat hareketlerini, destek/direnç bölgelerini, hareketli ortalamaları ve trend yapısını da görsel olarak incele ve uyuşmazlıkları teyit et.\n\n"
         )
 
@@ -85,17 +85,24 @@ async def get_ai_commentary(signals, chart_path=None, df_4h=None):
             prompt += f"Grafik Mum Verileri (Son 15 Bar - 4 Saatlik):\n{ohlcv_table}\n\n"
 
         prompt += (
-            "Analiz ve Karar Kuralları:\n"
-            "- Bütüncül Değerlendirme: İndikatörleri tek başına katı kurallar olarak değil, bir bütün olarak yorumla. Örneğin, LONG sinyalinde RSI yüksekse (örn: > 60) bu aşırı alım riski olabileceği gibi güçlü bir momentumun (Breakout/Kırılım) devamı da olabilir. Hacim artışı ve CMF pozitifliği bunu destekliyorsa olumlu değerlendirebilirsin.\n"
-            "- Trend ve ADX: ADX'in düşük olması (örn: < 20) trendin zayıflığını gösterebileceği gibi, yeni başlayacak bir trendin öncesindeki konsolidasyon aşamasını da gösterebilir. Grafik mum yapısındaki kırılımları ve hacim değişimlerini dikkate alarak karar ver.\n"
-            "- Risk ve Fırsat Dengesi: Her küçük uyumsuzluğu doğrudan 'BEKLE' kararına bağlama. Eğer genel trend (Trend_1D) sinyal yönündeyse ve giriş/SL/TP seviyelerindeki R:R (Risk/Ödül) oranı mantıklıysa (örn: > 1.5), küçük uyumsuzluklara rağmen 'İŞLEME GİR' diyebilirsin.\n"
-            "- Objektiflik: Sistem puanından veya bizim kurallarımızdan bağımsız olarak, profesyonel bir trader gibi davran. Gerçekten potansiyel gördüğün sinyallere 75-95 arası yüksek skorlar vererek 'İŞLEME GİR' kararını al. Kararsız veya riskli durumlarda ise daha düşük skor verip 'BEKLE' tavsiyesinde bulun.\n"
-            "- Doğrudan ve profesyonel bir dille konuş, 'kripto risklidir' gibi genel yatırım tavsiyesi uyarılarını kesinlikle kullanma.\n\n"
-            "ÇIKTI FORMATI: Yalnızca aşağıdaki formatta, son derece kısa, öz ve gereksiz laf kalabalığı yapmadan yaz. Paragraflar dolusu açıklama veya indikatör detaylandırması KESİNLİKLE yapma. Her varlık için sadece şu 4 satırlık şablonu kullan:\n\n"
+            "KESİN KURALLAR VE ANALİZ YAKLAŞIMI:\n"
+            "1. Sabit Kuralları Bırak: \"ADX 20'nin altındaysa kesinlikle işlem yapılmaz\" veya \"RSI 70'in üzerindeyse kesin düşer\" gibi amatör kalıpları unut. Verileri bir bütün olarak değerlendir.\n"
+            "2. Bağlamı (Terrain) Anla: Önce piyasanın genel durumunu analiz et (Trend mi var? Yoksa yatay/ranging mi?). İndikatörleri bu bağlama göre yorumla.\n"
+            "3. Çift Yönlü Düşünce (Chain of Thought): Hangi verilerin sinyali desteklediğini ve hangi verilerin çeliştiğini dürüstçe tart. Hacim (CMF/OBV) ve Momentum uyumuna özellikle dikkat et.\n"
+            "4. Objektif ve Cesur Ol: Her küçük pürüzde korkup \"BEKLE\" kararı verme. Risk/Ödül oranı iyiyse ve genel konjonktür destekliyorsa, risk al ve \"İŞLEME GİR\" de.\n"
+            "5. Objektif Skorlama (0-100):\n"
+            "   - 0-39: Sinyal çok zayıf veya çelişkili. (Karar: BEKLE)\n"
+            "   - 40-59: Ortalama sinyal, bazı riskler var ama potansiyel taşıyor. (Karar: BEKLE veya düşük riskli İŞLEME GİR)\n"
+            "   - 60-79: Güçlü ve onaylanmış sinyal. (Karar: İŞLEME GİR)\n"
+            "   - 80-100: Mükemmel uyum, yüksek olasılıklı işlem. (Karar: İŞLEME GİR)\n\n"
+            "ÇIKTI FORMATI: Analizini yaparken aşağıdaki şablonu KESİNLİKLE bozmadan kullan. Başka metin ekleme:\n\n"
             "🤖 **[Varlık Adı]**\n"
+            "🧠 **Piyasa Bağlamı:** [Trend mi yatay mı? Genel durum nedir?]\n"
+            "✅ **Destekleyen Kanıtlar:** [Sinyali güçlendiren faktörler]\n"
+            "⚠️ **Riskler/Çelişkiler:** [Sinyali zayıflatan faktörler]\n"
             "Skor: [0-100]\n"
             "Karar: [İŞLEME GİR veya BEKLE]\n"
-            "Neden: [Maksimum 1-2 cümlelik çok kısa teknik gerekçe]"
+            "Neden: [Tüm analizin tek cümlelik özeti]"
         )
 
         headers = {
@@ -108,12 +115,12 @@ async def get_ai_commentary(signals, chart_path=None, df_4h=None):
             "messages": [
                 {
                     "role": "system", 
-                    "content": "Sen benim özel algoritmik kripto asistanımsın. Gereksiz laf kalabalığı yapmadan, teknik verilere ve grafik verilerine dayalı net kararlar ve risk analizleri yaparsın."
+                    "content": "Sen üst düzey bir Kantitatif Analistsin. Duygusuz, tamamen kanıtlara (fiyat hareketi, hacim, momentum) dayalı düşünürsün."
                 },
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.3,
-            "max_tokens": 600
+            "max_tokens": 1200
         }
 
         async with aiohttp.ClientSession() as session:
