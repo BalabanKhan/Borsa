@@ -260,10 +260,11 @@ SOFT_MACRO_ALIGNED = 90.0            # Endeks/BTC yönü stratejiyle aynı yönd
 SOFT_MACRO_NOT_ALIGNED = 30.0        # Makro uyum yoksa
 
 # --- Stop Loss (SL) Ceza Seviyeleri ---
+# ponytail: 25% penalty discount applied
 SOFT_PENALTY_0 = 100.0               # Ardışık SL yok (Tertemiz, tam puan)
-SOFT_PENALTY_1 = 75.0                # 1 ardışık SL yemiş (%25 kesinti)
-SOFT_PENALTY_2 = 45.0                # 2 ardışık SL yemiş (Riskli, skor düşürülür)
-SOFT_PENALTY_3_PLUS = 0.0            # 3 veya daha fazla ardışık SL (Skor sıfırlanır)
+SOFT_PENALTY_1 = 81.25               # 1 ardışık SL yemiş (eski: 75.0 - %25 indirimli ceza: -18.75)
+SOFT_PENALTY_2 = 58.75               # 2 ardışık SL yemiş (eski: 45.0 - %25 indirimli ceza: -41.25)
+SOFT_PENALTY_3_PLUS = 25.0           # 3 veya daha fazla ardışık SL (eski: 0.0 - %25 indirimli ceza: -75.0)
 
 # --- Logaritmik Hacim Ölçeklemesi (Min-Max Aralıkları) ---
 # Mutlak hacimlerin logaritmik olarak puanlanmasında kullanılan sınırlar
@@ -489,14 +490,14 @@ DAILY_MAX_SL = 99            # Günlük toplam SL limiti (ardışık olmasa bile
 CONFLICT_RESOLVER_ENABLED = True
 CONFLICT_RESOLVER_ADX_TREND_LIMIT = 40.0   # Bu ADX üstünde Mean Reversion ceza alır
 CONFLICT_RESOLVER_ADX_RANGING_LIMIT = 20.0 # Bu ADX altında Trend Takip/Breakout ceza alır
-CONFLICT_RESOLVER_ADX_TREND_PENALTY_MULT = 5.0    # Mean Reversion için ADX > 40 aşımı çarpanı
-CONFLICT_RESOLVER_ADX_RANGING_PENALTY_MULT = 7.0  # Trend Takip için ADX < 20 sapması çarpanı
-CONFLICT_RESOLVER_BEAR_TREND_PENALTY = 0.6 # 1D Bearish rejimde Long sinyallere uygulanacak ceza katsayısı
+CONFLICT_RESOLVER_ADX_TREND_PENALTY_MULT = 3.75    # Mean Reversion için ADX > 40 aşımı çarpanı (eski: 5.0)
+CONFLICT_RESOLVER_ADX_RANGING_PENALTY_MULT = 5.25  # Trend Takip için ADX < 20 sapması çarpanı (eski: 7.0)
+CONFLICT_RESOLVER_BEAR_TREND_PENALTY = 0.7         # 1D Bearish rejimde Long sinyallere uygulanacak ceza katsayısı (eski: 0.6 - %40 kesinti yerine %30 kesinti)
 
-DATA_GUARD_PENALTY_DARTH_MAUL = -25.0       # Flash crash mumu soft cezası
-DATA_GUARD_PENALTY_GAP = -20.0              # Gap mumu soft cezası
-DATA_GUARD_PENALTY_CMF_WASH_TRADE = -15.0   # CMF sıfır altı wash trade cezası
-DATA_GUARD_PENALTY_LIQUIDITY_WINDOW = -30.0 # Ters saatlerde (bölge dışı) açılan işlem cezası
+DATA_GUARD_PENALTY_DARTH_MAUL = -18.75       # Flash crash mumu soft cezası (eski: -25.0)
+DATA_GUARD_PENALTY_GAP = -15.0              # Gap mumu soft cezası (eski: -20.0)
+DATA_GUARD_PENALTY_CMF_WASH_TRADE = -11.25   # CMF sıfır altı wash trade cezası (eski: -15.0)
+DATA_GUARD_PENALTY_LIQUIDITY_WINDOW = -22.5 # Ters saatlerde (bölge dışı) açılan işlem cezası (eski: -30.0)
 
 # ⚖️ Dinamik Strateji Filtreleri & Teyit Ayarları (V3.4)
 # ────────────────────────────────────────────────────────────────

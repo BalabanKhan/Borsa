@@ -26,17 +26,16 @@ async def get_ai_commentary(signals):
             signal_details.append(f"- Varlık: {ticker} | Yön: {direction} | Skor: {score} | Strateji: {strategy} | Sistem Gerekçesi: {reason}")
             
         prompt = (
-            "Sen uzman bir kripto para analisti ve tecrübeli bir trader'sın. Aşağıda algoritmik sistemimizin ürettiği "
-            "ve Telegram'a gönderilecek olan en yüksek skorlu sinyaller (işlemler) var.\n\n"
+            "Sen benim kişisel algoritmik trade asistanımsın. Aşağıda sistemimin ürettiği "
+            "işlem sinyali (veya sinyalleri) bulunuyor.\n\n"
             "Sinyaller:\n" + "\n".join(signal_details) + "\n\n"
-            "Görev: Bu sinyalleri ve piyasa bağlamını kısaca yorumla. İşlemlerin birbirleriyle veya genel piyasa (Bitcoin vb.) ile "
-            "olan ilişkisini, potansiyel riskleri ve dikkat edilmesi gerekenleri belirt.\n"
+            "Görev: Bu işleme girip girmemem gerektiği konusunda bana doğrudan ve net bir tavsiye ver.\n"
             "Kurallar:\n"
-            "- Sadece kripto piyasasını değerlendir.\n"
-            "- Telegram mesajına uygun, okunması kolay, akıcı ve kısa (maksimum 2-3 paragraf) bir Türkçe yorum yaz.\n"
-            "- Emojilerle destekle.\n"
-            "- Asla kesin yatırım tavsiyesi verme, bunun bir algoritma verisi olduğunu hissettir.\n"
-            "- Sinyalleri tek tek tekrarlama, genel bir içgörü (insight) sun."
+            "- Sadece bana özel, doğrudan ve net bir dille konuş.\n"
+            "- İşlem yönünü (LONG veya SHORT) ve sistem gerekçelerini analiz ederek bana 0 ile 100 arasında kendi 'Yapay Zeka Güven Skorunu' ver.\n"
+            "- Değerlendirmende net ol ve mesajın en sonunda büyük harflerle 'KARAR: İŞLEME GİR' veya 'KARAR: BEKLE' şeklinde tavsiyeni belirt.\n"
+            "- Genel piyasa hikayeleri yerine spesifik olarak bu sinyale ve başarı ihtimaline odaklan.\n"
+            "- 'Kripto piyasası risklidir, kendi araştırmanızı yapın' gibi genel geçer uyarıları KESİNLİKLE KULLANMA. Sadece veriye dayalı, eyleme dönüştürülebilir net bir yorum yap."
         )
 
         headers = {
@@ -47,7 +46,7 @@ async def get_ai_commentary(signals):
         payload = {
             "model": MODEL,
             "messages": [
-                {"role": "system", "content": "Sen profesyonel ve objektif bir algoritmik kripto analistisin."},
+                {"role": "system", "content": "Sen benim özel algoritmik kripto asistanımsın. Gereksiz laf kalabalığı yapmadan, net kararlar ve tavsiyeler verirsin."},
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.6,

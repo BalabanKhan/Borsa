@@ -71,7 +71,7 @@ class TestNaNPrevention(unittest.TestCase):
         self.assertIn("HB-8", reason)
 
     def test_calculate_conviction_nan_penalty(self):
-        """[calculate_conviction](file:///c:/Users/YSR_MONSTER/.antigravity/Borsa/conviction_scorer.py) girdilerde NaN varsa -9.0 soft penalty uygulamalıdır."""
+        """[calculate_conviction](file:///c:/Users/YSR_MONSTER/.antigravity/Borsa/conviction_scorer.py) girdilerde NaN varsa -6.8 soft penalty uygulamalıdır."""
         scores = {
             "adx": np.nan,
             "rsi": 50.0,
@@ -79,7 +79,7 @@ class TestNaNPrevention(unittest.TestCase):
         }
         result = conviction_scorer.calculate_conviction(scores)
         self.assertFalse(result.hard_blocked)
-        self.assertEqual(result.component_scores.get("nan_penalty"), -9.0)
+        self.assertEqual(result.component_scores.get("nan_penalty"), -6.8)
 
     def test_score_ema_short_nan_fallback(self):
         """[score_ema_short](file:///c:/Users/YSR_MONSTER/.antigravity/Borsa/conviction_scorer.py) NaN parametrede SOFT_UNCERTAINTY_PENALTY dönmelidir."""
