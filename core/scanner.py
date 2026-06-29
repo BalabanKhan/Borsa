@@ -201,11 +201,11 @@ class ScannerService:
                 await self.notifier.send_message(msg)
                 await self._set_cooldown(ticker, strategy)
                 
-                if trade.get("market", "") == "KRİPTO":
+                if trade.get("market", "") in ["KRİPTO", "KRIPTO"]:
                     broadcasted_crypto_signals.append(trade)
 
         if broadcasted_crypto_signals:
-            from ai_commentary import get_ai_commentary
+            from core.ai_commentary import get_ai_commentary
             ai_comment = await get_ai_commentary(broadcasted_crypto_signals)
             if ai_comment:
                 formatted_ai_msg = f"🤖 <b>Yapay Zeka Piyasa Analizi</b>\n━━━━━━━━━━━━━━━━━━\n{ai_comment}"
