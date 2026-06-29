@@ -54,18 +54,20 @@ async def get_ai_commentary(signals):
             )
             
         prompt = (
-            "Sen benim kişisel algoritmik trade asistanımsın. Aşağıda sistemimin ürettiği "
-            "işlem sinyalleri ve bunlara ait teknik indikatör verileri bulunuyor.\n\n"
+            "Sen benim kişisel algoritmik trade asistanım ve katı bir Risk Yöneticimsin (Risk Officer).\n"
+            "Görevin her sinyali onaylamak değil, aksine olası riskleri ve tutarsızlıkları bularak beni korumaktır.\n\n"
             "Sinyaller:\n" + "\n\n".join(signal_details) + "\n\n"
-            "Görev: Sistem puanından bağımsız olarak, sadece verilen teknik indikatörleri (RSI, ADX, Trend yönü, Hacim vb.), "
-            "işlem yönünü (LONG/SHORT) ve giriş/SL/TP seviyelerini objektif olarak analiz et. "
-            "Bu işleme girip girmemem gerektiği konusunda bana doğrudan, veri odaklı ve net bir tavsiye ver.\n\n"
-            "Kurallar:\n"
-            "- Sistem gerekçelerini ve indikatör değerlerini karşılaştırarak uyuşmazlık olup olmadığını denetle (örneğin aşırı alım bölgesinde LONG girmek riskli mi, trend yönüyle sinyal yönü uyumlu mu vb.).\n"
-            "- Sadece bana özel, doğrudan, profesyonel ve net bir dille konuş.\n"
+            "Görev: Sistem puanından bağımsız olarak, sadece verilen teknik indikatörleri (RSI, ADX, Trend yönü, Hacim, CMF, Bollinger vb.), "
+            "işlem yönünü (LONG/SHORT) ve giriş/SL/TP seviyelerini objektif olarak analiz et.\n\n"
+            "Analiz ve Karar Kuralları:\n"
+            "- Şüpheci Ol: Her şeye 'İŞLEME GİR' deme. Yalnızca teknik veriler kusursuz ve trend yönünde güçlü bir uyum gösteriyorsa 'İŞLEME GİR' de.\n"
+            "- Trend Uyumsuzluğu: Sinyal yönü ile genel trend yönü (Trend_1D, EMA/SMA trendleri) uyumsuzsa (örn: Bearish trendde LONG sinyali) veya ADX zayıfsa (ADX < 20), doğrudan 'KARAR: BEKLE' tavsiyesi ver.\n"
+            "- Aşırı Alım/Satım Kontrolü: LONG sinyalinde RSI aşırı yüksekse (RSI_4H > 60 veya RSI_1D > 65) ya da SHORT sinyalinde RSI aşırı düşükse (RSI_4H < 40 veya RSI_1D < 35), sahte kırılım/dönüş riski nedeniyle 'KARAR: BEKLE' de.\n"
+            "- CMF ve Hacim: Hacim ortalamanın altındaysa veya CMF (para akışı) negatifse işlem risklidir, bunu belirt ve 'KARAR: BEKLE' tavsiyesini düşün.\n"
+            "- Kar/Zarar Oranı: SL mesafesi TP mesafesine kıyasla çok genişse (kötü R:R oranı), risk/ödül dengesizliği nedeniyle 'KARAR: BEKLE' de.\n"
+            "- Doğrudan ve profesyonel bir dille konuş, 'kripto risklidir' gibi genel yatırım tavsiyesi uyarılarını kesinlikle kullanma.\n"
             "- Kendi bağımsız değerlendirmene göre 0 ile 100 arasında bir 'Yapay Zeka Güven Skoru' ver.\n"
-            "- Değerlendirmende net ol ve mesajın en sonunda büyük harflerle 'KARAR: İŞLEME GİR' veya 'KARAR: BEKLE' şeklinde tavsiyeni belirt.\n"
-            "- 'Kripto piyasası risklidir, kendi araştırmanızı yapın' gibi genel geçer uyarıları KESİNLİKLE KULLANMA. Sadece veriye dayalı, eyleme dönüştürülebilir net bir yorum yap."
+            "- Değerlendirmende net ol ve mesajın en sonunda büyük harflerle 'KARAR: İŞLEME GİR' veya 'KARAR: BEKLE' şeklinde tavsiyeni belirt."
         )
 
         headers = {

@@ -116,6 +116,66 @@ class NotificationService:
                 if not sent:
                     await asyncio.to_thread(self._save_failed_message, chat_id, chunk, bot_type)
 
+    async def send_photo(self, photo_path, caption=None, is_watch=False, is_system=False, max_retries=3):
+        if is_watch:
+            target_bot = self.watch_bot
+            target_chat_ids = self.watch_chat_ids
+            bot_type = "watch"
+        elif is_system:
+            target_bot = self.system_bot
+            target_chat_ids = self.system_chat_ids
+            bot_type = "system"
+        else:
+            target_bot = self.bot
+            target_chat_ids = self.chat_ids
+            bot_type = "main"
+
+        if not target_bot or not target_chat_ids:
+            logger.info(f"[Console Fallback Photo] {photo_path} - Caption: {caption}")
+            return False
+
+        for chat_id in target_chat_ids:
+            sent = False
+            for attempt in range(max_retries):
+                try:
+                    with open(photo_path, 'rb') as photo:
+                        truncated_caption = caption
+                        if truncated_caption and len(truncated_caption) > 1024:
+                            truncated_caption = truncated_caption[:1021] + "..."
+                        await asyncio.wait_for(
+                            target_bot.send_photo(chat_id=chat_id, photo=photo, caption=truncated_caption, parse_mode=ParseMode.HTML),
+                            timeout=25.0
+                        )
+                    logger.info(f"[Telegram] Fotoğraf başarıyla gönderildi: chat_id={chat_id}")
+                    sent = True
+                    break
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if "can't parse" in err_str or "parse" in err_str or "entity" in err_str or "tag" in err_str:
+                        try:
+                            logger.warning(f"[Telegram] Fotoğraf altyazısında HTML parse hatası, düz metin deneniyor: {e}")
+                            clean_caption = self.clean_html(caption) if caption else None
+                            if clean_caption and len(clean_caption) > 1024:
+                                clean_caption = clean_caption[:1021] + "..."
+                            with open(photo_path, 'rb') as photo:
+                                await asyncio.wait_for(
+                                    target_bot.send_photo(chat_id=chat_id, photo=photo, caption=clean_caption, parse_mode=None),
+                                    timeout=25.0
+                                )
+                            logger.info(f"[Telegram] Fotoğraf (düz metin altyazı) gönderildi: chat_id={chat_id}")
+                            sent = True
+                            break
+                        except Exception as e_inner:
+                            logger.error(f"[Telegram] Fotoğraf düz metin altyazı denemesi de başarısız: {e_inner}")
+
+                    logger.error(f"[Telegram] Fotoğraf gönderimi deneme {attempt+1}/{max_retries} başarısız (chat_id={chat_id}): {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(5 * (attempt + 1))
+            if not sent:
+                if caption:
+                    await self.send_message(caption, is_watch=is_watch, is_system=is_system, max_retries=max_retries)
+        return True
+
     def _save_failed_message(self, chat_id, message, bot_type="main"):
         failed = []
         if os.path.exists(FAILED_MSG_FILE):

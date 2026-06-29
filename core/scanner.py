@@ -16,6 +16,33 @@ from signal_decay import should_block_entry
 
 logger = logging.getLogger("quant_bot.scanner")
 
+async def get_chart_for_signal(trade):
+    market = trade.get("market", "KRİPTO")
+    ticker = trade.get("ticker", "Bilinmiyor")
+    entry_price = float(trade.get("entry_price", 0))
+    sl = float(trade.get("sl", 0))
+    tp = float(trade.get("tp", 0))
+    signal_dir = trade.get("signal", "AL")
+    
+    df_4h = None
+    try:
+        if market in ["KRİPTO", "KRIPTO"]:
+            from data_sources import async_get_crypto_data
+            _, df_4h = await async_get_crypto_data(ticker)
+        elif market == "BIST":
+            from data_sources import get_bist_data
+            _, df_4h, _ = await asyncio.to_thread(get_bist_data, ticker)
+        elif market == "EMTİA":
+            from data_sources import get_emtia_data
+            _, df_4h = await asyncio.to_thread(get_emtia_data, ticker)
+            
+        if df_4h is not None and not df_4h.empty:
+            from core.chart_generator import generate_signal_chart
+            return generate_signal_chart(ticker, df_4h, entry_price, sl, tp, signal_dir)
+    except Exception as e:
+        logger.error(f"Grafik verisi alınamadı: {e}")
+    return ""
+
 class ScannerService:
     COOLDOWN_FILE = "signal_cooldown.json"
     COOLDOWN_SECONDS = 3600
@@ -194,11 +221,36 @@ class ScannerService:
 
             msg = self.notifier.format_signal_message(trade)
             
+            # Grafik üretimi ve gönderimi
+            chart_path = ""
+            entry_price = float(trade.get("entry_price", 0))
+            if entry_price > 0:
+                chart_path = await get_chart_for_signal(trade)
+            
             if is_watch:
                 watch_header = '👁️ <b>WATCH LIST</b> — Sadece İzle\n━━━━━━━━━━━━━━━━━━\n'
-                await self.notifier.send_message(watch_header + msg, is_watch=True)
+                if chart_path and os.path.exists(chart_path):
+                    try:
+                        await self.notifier.send_photo(chart_path, caption=watch_header + msg, is_watch=True)
+                    finally:
+                        try:
+                            os.remove(chart_path)
+                        except Exception as e:
+                            logger.warning(f"Geçici grafik dosyası silinemedi: {e}")
+                else:
+                    await self.notifier.send_message(watch_header + msg, is_watch=True)
             else:
-                await self.notifier.send_message(msg)
+                if chart_path and os.path.exists(chart_path):
+                    try:
+                        await self.notifier.send_photo(chart_path, caption=msg)
+                    finally:
+                        try:
+                            os.remove(chart_path)
+                        except Exception as e:
+                            logger.warning(f"Geçici grafik dosyası silinemedi: {e}")
+                else:
+                    await self.notifier.send_message(msg)
+                    
                 await self._set_cooldown(ticker, strategy)
                 
                 if trade.get("market", "") in ["KRİPTO", "KRIPTO"]:

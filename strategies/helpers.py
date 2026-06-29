@@ -38,9 +38,7 @@ from indicators import (
 def _extract_raw_indicators(l_vars):
     """
     Sinyal üretildiği andaki (locals() üzerinden) mevcut zaman dilimlerine ait 
-    ham indikatör verilerini (RSI, ADX, Hacim) dinamik olarak toplar.
-    Bu sayede 31 farklı strateji bloğunda kod tekrarı yapılmadan ham veriler 
-    Telegram loglarına ve CSV raporlarına aktarılır.
+    ham indikatör verilerini dinamik olarak toplar.
     """
     import pandas as pd
     res = {}
@@ -48,9 +46,49 @@ def _extract_raw_indicators(l_vars):
         if prefix in l_vars and isinstance(l_vars[prefix], pd.Series):
             tf = prefix.split('_')[1].upper()
             s = l_vars[prefix]
-            if not pd.isna(s.get('RSI_14')): res[f'RSI_{tf}'] = round(s[f'RSI_{config.IND_RSI_LENGTH}'], 2)
-            if not pd.isna(s.get('ADX_14')): res[f'ADX_{tf}'] = round(s['ADX_14'], 2)
-            if not pd.isna(s.get('volume')): res[f'Vol_{tf}'] = round(s.get('volume', 0), 2)
+            
+            # Basic Price & Vol
+            if 'close' in s: res[f'Close_{tf}'] = round(s['close'], 4)
+            if 'volume' in s: res[f'Vol_{tf}'] = round(s['volume'], 2)
+            
+            # RSI
+            rsi_val = s.get('RSI_14')
+            if rsi_val is not None and not pd.isna(rsi_val):
+                res[f'RSI_{tf}'] = round(rsi_val, 2)
+                
+            # ADX
+            adx_val = s.get('ADX_14')
+            if adx_val is not None and not pd.isna(adx_val):
+                res[f'ADX_{tf}'] = round(adx_val, 2)
+                
+            # CMF
+            cmf_val = s.get('CMF_20')
+            if cmf_val is not None and not pd.isna(cmf_val):
+                res[f'CMF_{tf}'] = round(cmf_val, 2)
+                
+            # Chop
+            chop_val = s.get('chop')
+            if chop_val is not None and not pd.isna(chop_val):
+                res[f'Chop_{tf}'] = round(chop_val, 2)
+                
+            # ATR
+            atr_val = s.get('ATRr_14') or s.get('ATR_14')
+            if atr_val is not None and not pd.isna(atr_val):
+                res[f'ATR_{tf}'] = round(atr_val, 4)
+                
+            # EMAs / SMAs
+            for ema_name in ['EMA_20', 'EMA_50', 'EMA_200', 'SMA_200']:
+                ema_val = s.get(ema_name)
+                if ema_val is not None and not pd.isna(ema_val):
+                    res[f'{ema_name}_{tf}'] = round(ema_val, 4)
+                    
+            # Bollinger Bands
+            bbl = s.get('BBL_20_2.0')
+            bbu = s.get('BBU_20_2.0')
+            if bbl is not None and not pd.isna(bbl):
+                res[f'BBL_20_{tf}'] = round(bbl, 4)
+            if bbu is not None and not pd.isna(bbu):
+                res[f'BBU_20_{tf}'] = round(bbu, 4)
             
     # 1D Trend durumunu l_vars üzerinden dinamik olarak çıkar (ConflictResolver için)
     if 'df_1d' in l_vars and l_vars['df_1d'] is not None and not l_vars['df_1d'].empty:
