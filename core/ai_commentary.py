@@ -86,14 +86,17 @@ async def get_ai_commentary(signals, chart_path=None, df_4h=None):
 
         prompt += (
             "Analiz ve Karar Kuralları:\n"
-            "- Şüpheci Ol: Her şeye 'İŞLEME GİR' deme. Yalnızca teknik veriler ve grafik görseli/verisi kusursuz ve trend yönünde güçlü bir uyum gösteriyorsa 'İŞLEME GİR' de.\n"
+            "- Şüpheci Ol: Her şeye 'İŞLEME GİR' deme. Yalnızca teknik veriler ve grafik verisi kusursuz ve trend yönünde güçlü bir uyum gösteriyorsa 'İŞLEME GİR' de.\n"
             "- Trend Uyumsuzluğu: Sinyal yönü ile genel trend yönü (Trend_1D, EMA/SMA trendleri) uyumsuzsa (örn: Bearish trendde LONG sinyali) veya ADX zayıfsa (ADX < 20), doğrudan 'KARAR: BEKLE' tavsiyesi ver.\n"
             "- Aşırı Alım/Satım Kontrolü: LONG sinyalinde RSI aşırı yüksekse (RSI_4H > 60 veya RSI_1D > 65) ya da SHORT sinyalinde RSI aşırı düşükse (RSI_4H < 40 veya RSI_1D < 35), sahte kırılım/dönüş riski nedeniyle 'KARAR: BEKLE' de.\n"
             "- CMF ve Hacim: Hacim ortalamanın altındaysa veya CMF (para akışı) negatifse işlem risklidir, bunu belirt ve 'KARAR: BEKLE' tavsiyesini düşün.\n"
             "- Kar/Zarar Oranı: SL mesafesi TP mesafesine kıyasla çok genişse (kötü R:R oranı), risk/ödül dengesizliği nedeniyle 'KARAR: BEKLE' de.\n"
-            "- Doğrudan ve profesyonel bir dille konuş, 'kripto risklidir' gibi genel yatırım tavsiyesi uyarılarını kesinlikle kullanma.\n"
-            "- Kendi bağımsız değerlendirmene göre 0 ile 100 arasında bir 'Yapay Zeka Güven Skoru' ver.\n"
-            "- Değerlendirmende net ol ve mesajın en sonunda büyük harflerle 'KARAR: İŞLEME GİR' veya 'KARAR: BEKLE' şeklinde tavsiyeni belirt."
+            "- Doğrudan ve profesyonel bir dille konuş, 'kripto risklidir' gibi genel yatırım tavsiyesi uyarılarını kesinlikle kullanma.\n\n"
+            "ÇIKTI FORMATI: Yalnızca aşağıdaki formatta, son derece kısa, öz ve gereksiz laf kalabalığı yapmadan yaz. Paragraflar dolusu açıklama veya indikatör detaylandırması KESİNLİKLE yapma. Her varlık için sadece şu 4 satırlık şablonu kullan:\n\n"
+            "🤖 **[Varlık Adı]**\n"
+            "Skor: [0-100]\n"
+            "Karar: [İŞLEME GİR veya BEKLE]\n"
+            "Neden: [Maksimum 1-2 cümlelik çok kısa teknik gerekçe]"
         )
 
         headers = {
