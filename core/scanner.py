@@ -126,8 +126,6 @@ class ScannerService:
         signals = sorted(signals, key=lambda x: x.get("conviction_score", 0) if x.get("conviction_score") is not None else 0, reverse=True)
         main_signal_count = 0
         
-        broadcasted_crypto_signals = []
-        
         for decision in signals:
             ticker = decision.get("ticker", "Bilinmiyor")
             strategy = decision.get("strategy", "")
@@ -243,6 +241,15 @@ class ScannerService:
                 if chart_path and os.path.exists(chart_path):
                     try:
                         await self.notifier.send_photo(chart_path, caption=msg)
+                        
+                        if trade.get("market", "") in ["KRİPTO", "KRIPTO"]:
+                            from core.ai_commentary import get_ai_commentary
+                            ai_comment = await get_ai_commentary(trade, chart_path=chart_path)
+                            if ai_comment:
+                                import html
+                                escaped_ai_comment = html.escape(ai_comment)
+                                formatted_ai_msg = f"🤖 <b>Yapay Zeka Piyasa Analizi</b>\n━━━━━━━━━━━━━━━━━━\n{escaped_ai_comment}"
+                                await self.notifier.send_message(formatted_ai_msg)
                     finally:
                         try:
                             os.remove(chart_path)
@@ -250,20 +257,16 @@ class ScannerService:
                             logger.warning(f"Geçici grafik dosyası silinemedi: {e}")
                 else:
                     await self.notifier.send_message(msg)
+                    if trade.get("market", "") in ["KRİPTO", "KRIPTO"]:
+                        from core.ai_commentary import get_ai_commentary
+                        ai_comment = await get_ai_commentary(trade, chart_path=None)
+                        if ai_comment:
+                            import html
+                            escaped_ai_comment = html.escape(ai_comment)
+                            formatted_ai_msg = f"🤖 <b>Yapay Zeka Piyasa Analizi</b>\n━━━━━━━━━━━━━━━━━━\n{escaped_ai_comment}"
+                            await self.notifier.send_message(formatted_ai_msg)
                     
                 await self._set_cooldown(ticker, strategy)
-                
-                if trade.get("market", "") in ["KRİPTO", "KRIPTO"]:
-                    broadcasted_crypto_signals.append(trade)
-
-        if broadcasted_crypto_signals:
-            from core.ai_commentary import get_ai_commentary
-            ai_comment = await get_ai_commentary(broadcasted_crypto_signals)
-            if ai_comment:
-                import html
-                escaped_ai_comment = html.escape(ai_comment)
-                formatted_ai_msg = f"🤖 <b>Yapay Zeka Piyasa Analizi</b>\n━━━━━━━━━━━━━━━━━━\n{escaped_ai_comment}"
-                await self.notifier.send_message(formatted_ai_msg)
 
     def _is_on_cooldown(self, ticker, strategy):
         key = (ticker, strategy)
