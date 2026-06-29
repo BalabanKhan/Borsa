@@ -19,7 +19,7 @@ def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
-async def get_ai_commentary(signals, chart_path=None):
+async def get_ai_commentary(signals, chart_path=None, df_4h=None):
     if not signals:
         return None
         
@@ -74,8 +74,27 @@ async def get_ai_commentary(signals, chart_path=None):
             "Görev: Sistem puanından bağımsız olarak, sadece verilen teknik indikatörleri (RSI, ADX, Trend yönü, Hacim, CMF, Bollinger vb.), "
             "işlem yönünü (LONG/SHORT) ve giriş/SL/TP seviyelerini objektif olarak analiz et.\n"
             "Eğer sana sinyalin grafik görüntüsü iletildiyse, grafikteki fiyat hareketlerini, destek/direnç bölgelerini, hareketli ortalamaları ve trend yapısını da görsel olarak incele ve uyuşmazlıkları teyit et.\n\n"
+        )
+
+        if df_4h is not None and not df_4h.empty:
+            import pandas as pd
+            df_slice = df_4h.tail(15)
+            ohlcv_lines = []
+            for dt, row in df_slice.iterrows():
+                dt_str = dt.strftime("%Y-%m-%d %H:%M")
+                ohlcv_lines.append(
+                    f"| {dt_str} | {row['open']:.4f} | {row['high']:.4f} | {row['low']:.4f} | {row['close']:.4f} | {int(row['volume'])} |"
+                )
+            ohlcv_table = (
+                "| Tarih (UTC) | Açılış | Yüksek | Düşük | Kapanış | Hacim |\n"
+                "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+                + "\n".join(ohlcv_lines)
+            )
+            prompt += f"Grafik Mum Verileri (Son 15 Bar - 4 Saatlik):\n{ohlcv_table}\n\n"
+
+        prompt += (
             "Analiz ve Karar Kuralları:\n"
-            "- Şüpheci Ol: Her şeye 'İŞLEME GİR' deme. Yalnızca teknik veriler ve grafik görseli kusursuz ve trend yönünde güçlü bir uyum gösteriyorsa 'İŞLEME GİR' de.\n"
+            "- Şüpheci Ol: Her şeye 'İŞLEME GİR' deme. Yalnızca teknik veriler ve grafik görseli/verisi kusursuz ve trend yönünde güçlü bir uyum gösteriyorsa 'İŞLEME GİR' de.\n"
             "- Trend Uyumsuzluğu: Sinyal yönü ile genel trend yönü (Trend_1D, EMA/SMA trendleri) uyumsuzsa (örn: Bearish trendde LONG sinyali) veya ADX zayıfsa (ADX < 20), doğrudan 'KARAR: BEKLE' tavsiyesi ver.\n"
             "- Aşırı Alım/Satım Kontrolü: LONG sinyalinde RSI aşırı yüksekse (RSI_4H > 60 veya RSI_1D > 65) ya da SHORT sinyalinde RSI aşırı düşükse (RSI_4H < 40 veya RSI_1D < 35), sahte kırılım/dönüş riski nedeniyle 'KARAR: BEKLE' de.\n"
             "- CMF ve Hacim: Hacim ortalamanın altındaysa veya CMF (para akışı) negatifse işlem risklidir, bunu belirt ve 'KARAR: BEKLE' tavsiyesini düşün.\n"

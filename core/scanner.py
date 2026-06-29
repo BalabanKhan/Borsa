@@ -38,10 +38,11 @@ async def get_chart_for_signal(trade):
             
         if df_4h is not None and not df_4h.empty:
             from core.chart_generator import generate_signal_chart
-            return generate_signal_chart(ticker, df_4h, entry_price, sl, tp, signal_dir)
+            path = generate_signal_chart(ticker, df_4h, entry_price, sl, tp, signal_dir)
+            return path, df_4h
     except Exception as e:
         logger.error(f"Grafik verisi alınamadı: {e}")
-    return ""
+    return "", None
 
 class ScannerService:
     COOLDOWN_FILE = "signal_cooldown.json"
@@ -221,9 +222,10 @@ class ScannerService:
             
             # Grafik üretimi ve gönderimi
             chart_path = ""
+            df_4h = None
             entry_price = float(trade.get("entry_price", 0))
             if entry_price > 0:
-                chart_path = await get_chart_for_signal(trade)
+                chart_path, df_4h = await get_chart_for_signal(trade)
             
             if is_watch:
                 watch_header = '👁️ <b>WATCH LIST</b> — Sadece İzle\n━━━━━━━━━━━━━━━━━━\n'
@@ -244,7 +246,7 @@ class ScannerService:
                         
                         if trade.get("market", "") in ["KRİPTO", "KRIPTO"]:
                             from core.ai_commentary import get_ai_commentary
-                            ai_comment = await get_ai_commentary(trade, chart_path=chart_path)
+                            ai_comment = await get_ai_commentary(trade, chart_path=chart_path, df_4h=df_4h)
                             if ai_comment:
                                 import html
                                 escaped_ai_comment = html.escape(ai_comment)
@@ -259,7 +261,7 @@ class ScannerService:
                     await self.notifier.send_message(msg)
                     if trade.get("market", "") in ["KRİPTO", "KRIPTO"]:
                         from core.ai_commentary import get_ai_commentary
-                        ai_comment = await get_ai_commentary(trade, chart_path=None)
+                        ai_comment = await get_ai_commentary(trade, chart_path=None, df_4h=df_4h)
                         if ai_comment:
                             import html
                             escaped_ai_comment = html.escape(ai_comment)
