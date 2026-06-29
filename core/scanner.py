@@ -208,7 +208,9 @@ class ScannerService:
             from core.ai_commentary import get_ai_commentary
             ai_comment = await get_ai_commentary(broadcasted_crypto_signals)
             if ai_comment:
-                formatted_ai_msg = f"🤖 <b>Yapay Zeka Piyasa Analizi</b>\n━━━━━━━━━━━━━━━━━━\n{ai_comment}"
+                import html
+                escaped_ai_comment = html.escape(ai_comment)
+                formatted_ai_msg = f"🤖 <b>Yapay Zeka Piyasa Analizi</b>\n━━━━━━━━━━━━━━━━━━\n{escaped_ai_comment}"
                 await self.notifier.send_message(formatted_ai_msg)
 
     def _is_on_cooldown(self, ticker, strategy):

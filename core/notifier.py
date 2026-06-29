@@ -297,18 +297,23 @@ class NotificationService:
                        f"❗ Fiyat <code>{cls.format_price(ttl_floor)}</code> altına düşmüşse → SİNYAL ÖLDÜ, İŞLEME GİRME!\n"
                        f"❗ Fiyat <code>{cls.format_price(ttl_ceiling)}</code> üstüne çıkmışsa → SL YAKINLAŞMIŞ, DİKKATLİ OL!")
 
+        import html
+        escaped_strategy = html.escape(strategy)
+        escaped_ticker = html.escape(trade_data.get('ticker', 'Bilinmiyor'))
+        escaped_reason = html.escape(trade_data.get('reason', 'Sebep belirtilmemiş.'))
+
         signal_emoji = "🟢 AL (LONG)" if signal_dir == "AL" else "🔴 SAT (SHORT)"
 
         return (
             f"<b>{header}</b>\n"
-            f"<b>{strategy}</b>\n"
+            f"<b>{escaped_strategy}</b>\n"
             f"-------------------------------------\n"
-            f"<b>Varlık:</b> <code>{trade_data.get('ticker', 'Bilinmiyor')}</code>\n"
+            f"<b>Varlık:</b> <code>{escaped_ticker}</code>\n"
             f"<b>İşlem Yönü:</b> <code>{signal_emoji}</code>\n"
             f"<b>Giriş Fiyatı:</b> <code>{cls.format_price(entry_price)}</code>\n"
             f"<b>Zarar Kes (SL):</b> <code>{cls.format_price(sl_price)}</code>\n"
             f"<b>Kar Al (TP):</b> <code>Dinamik Takip (Teorik: {cls.format_price(tp_price)})</code>\n"
             f"{rr_line}{conv_line}{details_str}"
             f"-------------------------------------\n"
-            f"<b>Sistem Gerekçesi:</b>\n<i>{trade_data.get('reason', 'Sebep belirtilmemiş.')}</i>\n{ttl_line}"
+            f"<b>Sistem Gerekçesi:</b>\n<i>{escaped_reason}</i>\n{ttl_line}"
         )
