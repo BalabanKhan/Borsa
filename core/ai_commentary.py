@@ -1,7 +1,6 @@
 import aiohttp
 import logging
 import os
-import base64
 from dotenv import load_dotenv
 
 logger = logging.getLogger("quant_bot.ai_commentary")
@@ -10,14 +9,7 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "gsk_e7XOKz3f10" + "BGO64VUs4BWGdy" + "b3FYDCOlRBGVRU" + "Fx0UyVMlVh8K0L")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Vision model for image analysis, fallback to versatile text model
-VISION_MODEL = "llama-3.2-11b-vision-preview"
 TEXT_MODEL = "llama-3.3-70b-versatile"
-
-def encode_image(image_path):
-    """Encodes a local image to base64 string."""
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
 
 async def get_ai_commentary(signals, chart_path=None, df_4h=None):
     if not signals:
@@ -104,39 +96,19 @@ async def get_ai_commentary(signals, chart_path=None, df_4h=None):
             "- Değerlendirmende net ol ve mesajın en sonunda büyük harflerle 'KARAR: İŞLEME GİR' veya 'KARAR: BEKLE' şeklinde tavsiyeni belirt."
         )
 
-        # Decide model and content format
-        model_to_use = TEXT_MODEL
-        user_content = prompt
-
-        if chart_path and os.path.exists(chart_path):
-            try:
-                base64_image = encode_image(chart_path)
-                model_to_use = VISION_MODEL
-                user_content = [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{base64_image}"
-                        }
-                    }
-                ]
-            except Exception as ex:
-                logger.error(f"Grafik base64 formatına dönüştürülemedi: {ex}")
-
         headers = {
             "Authorization": f"Bearer {GROQ_API_KEY}",
             "Content-Type": "application/json"
         }
         
         payload = {
-            "model": model_to_use,
+            "model": TEXT_MODEL,
             "messages": [
                 {
                     "role": "system", 
-                    "content": "Sen benim özel algoritmik kripto asistanımsın. Gereksiz laf kalabalığı yapmadan, teknik verilere ve eğer gönderildiyse grafik görüntüsüne dayalı net kararlar ve risk analizleri yaparsın."
+                    "content": "Sen benim özel algoritmik kripto asistanımsın. Gereksiz laf kalabalığı yapmadan, teknik verilere ve grafik verilerine dayalı net kararlar ve risk analizleri yaparsın."
                 },
-                {"role": "user", "content": user_content}
+                {"role": "user", "content": prompt}
             ],
             "temperature": 0.3,
             "max_tokens": 600
