@@ -219,7 +219,13 @@ def test_handle_closed_trade_accounting_hold_hours_exception(engine, mock_deps):
     engine._handle_closed_trade_accounting([ct], [])
     # Should swallow the exception during hold_hours parsing
 
-def test_check_active_trades_missing_price(engine):
+@patch("trade_tracker._get_structural_floor")
+@patch("trade_tracker.trailing._get_atr_cached")
+@patch("trade_tracker.engine._get_last_completed_candle_close")
+def test_check_active_trades_missing_price(mock_candle_close, mock_atr, mock_floor, engine):
+    mock_candle_close.return_value = None
+    mock_atr.return_value = None
+    mock_floor.return_value = None
     engine.add_trade("BTC/USDT", "AL", 50000, 49000, 60000, "Test", "Test")
     engine.add_trade("ETH/USDT", "AL", 3000, 2900, 4000, "Test", "Test")
     
@@ -256,7 +262,13 @@ def test_check_active_trades_hybrid_stop(mock_candle_close, engine):
     assert len(engine.repository._history) == 1
     assert any("ZARAR KESİLDİ" in n for n in notifications)
 
-def test_check_active_trades_entry_price_zero(engine):
+@patch("trade_tracker._get_structural_floor")
+@patch("trade_tracker.trailing._get_atr_cached")
+@patch("trade_tracker.engine._get_last_completed_candle_close")
+def test_check_active_trades_entry_price_zero(mock_candle_close, mock_atr, mock_floor, engine):
+    mock_candle_close.return_value = None
+    mock_atr.return_value = None
+    mock_floor.return_value = None
     engine.add_trade("BTC/USDT", "AL", 50000, 49000, 60000, "Test", "Test")
     trades = engine.repository.load_active_trades()
     trades[0]["entry_price"] = 0 # Force a zero
@@ -266,7 +278,13 @@ def test_check_active_trades_entry_price_zero(engine):
     loaded = engine.repository.load_active_trades()[0]
     assert loaded["entry_price"] == 1e-8
 
-def test_check_active_trades_signal_short(engine):
+@patch("trade_tracker._get_structural_floor")
+@patch("trade_tracker.trailing._get_atr_cached")
+@patch("trade_tracker.engine._get_last_completed_candle_close")
+def test_check_active_trades_signal_short(mock_candle_close, mock_atr, mock_floor, engine):
+    mock_candle_close.return_value = None
+    mock_atr.return_value = None
+    mock_floor.return_value = None
     engine.add_trade("BTC/USDT", "SAT", 50000, 51000, 40000, "Test", "Test")
     # check with a price that hits TP
     engine.check_active_trades({"BTC/USDT": 39000})

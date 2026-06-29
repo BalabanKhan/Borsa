@@ -86,11 +86,10 @@ async def get_ai_commentary(signals, chart_path=None, df_4h=None):
 
         prompt += (
             "Analiz ve Karar Kuralları:\n"
-            "- Şüpheci Ol: Her şeye 'İŞLEME GİR' deme. Yalnızca teknik veriler ve grafik verisi kusursuz ve trend yönünde güçlü bir uyum gösteriyorsa 'İŞLEME GİR' de.\n"
-            "- Trend Uyumsuzluğu: Sinyal yönü ile genel trend yönü (Trend_1D, EMA/SMA trendleri) uyumsuzsa (örn: Bearish trendde LONG sinyali) veya ADX zayıfsa (ADX < 20), doğrudan 'KARAR: BEKLE' tavsiyesi ver.\n"
-            "- Aşırı Alım/Satım Kontrolü: LONG sinyalinde RSI aşırı yüksekse (RSI_4H > 60 veya RSI_1D > 65) ya da SHORT sinyalinde RSI aşırı düşükse (RSI_4H < 40 veya RSI_1D < 35), sahte kırılım/dönüş riski nedeniyle 'KARAR: BEKLE' de.\n"
-            "- CMF ve Hacim: Hacim ortalamanın altındaysa veya CMF (para akışı) negatifse işlem risklidir, bunu belirt ve 'KARAR: BEKLE' tavsiyesini düşün.\n"
-            "- Kar/Zarar Oranı: SL mesafesi TP mesafesine kıyasla çok genişse (kötü R:R oranı), risk/ödül dengesizliği nedeniyle 'KARAR: BEKLE' de.\n"
+            "- Bütüncül Değerlendirme: İndikatörleri tek başına katı kurallar olarak değil, bir bütün olarak yorumla. Örneğin, LONG sinyalinde RSI yüksekse (örn: > 60) bu aşırı alım riski olabileceği gibi güçlü bir momentumun (Breakout/Kırılım) devamı da olabilir. Hacim artışı ve CMF pozitifliği bunu destekliyorsa olumlu değerlendirebilirsin.\n"
+            "- Trend ve ADX: ADX'in düşük olması (örn: < 20) trendin zayıflığını gösterebileceği gibi, yeni başlayacak bir trendin öncesindeki konsolidasyon aşamasını da gösterebilir. Grafik mum yapısındaki kırılımları ve hacim değişimlerini dikkate alarak karar ver.\n"
+            "- Risk ve Fırsat Dengesi: Her küçük uyumsuzluğu doğrudan 'BEKLE' kararına bağlama. Eğer genel trend (Trend_1D) sinyal yönündeyse ve giriş/SL/TP seviyelerindeki R:R (Risk/Ödül) oranı mantıklıysa (örn: > 1.5), küçük uyumsuzluklara rağmen 'İŞLEME GİR' diyebilirsin.\n"
+            "- Objektiflik: Sistem puanından veya bizim kurallarımızdan bağımsız olarak, profesyonel bir trader gibi davran. Gerçekten potansiyel gördüğün sinyallere 75-95 arası yüksek skorlar vererek 'İŞLEME GİR' kararını al. Kararsız veya riskli durumlarda ise daha düşük skor verip 'BEKLE' tavsiyesinde bulun.\n"
             "- Doğrudan ve profesyonel bir dille konuş, 'kripto risklidir' gibi genel yatırım tavsiyesi uyarılarını kesinlikle kullanma.\n\n"
             "ÇIKTI FORMATI: Yalnızca aşağıdaki formatta, son derece kısa, öz ve gereksiz laf kalabalığı yapmadan yaz. Paragraflar dolusu açıklama veya indikatör detaylandırması KESİNLİKLE yapma. Her varlık için sadece şu 4 satırlık şablonu kullan:\n\n"
             "🤖 **[Varlık Adı]**\n"
